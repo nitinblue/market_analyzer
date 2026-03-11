@@ -29,6 +29,9 @@ def connect_tastytrade(
 ) -> tuple[TastyTradeMarketData, TastyTradeMetrics]:
     """Convenience: authenticate and return MarketDataProvider + MetricsProvider.
 
+    Loads credentials from YAML + env vars.  For standalone / local usage.
+    For SaaS (caller owns credentials), use ``connect_from_sessions()`` instead.
+
     Raises on auth failure.
     """
     from market_analyzer.broker.tastytrade.market_data import TastyTradeMarketData
@@ -40,3 +43,25 @@ def connect_tastytrade(
         raise ConnectionError("Failed to authenticate with TastyTrade")
 
     return TastyTradeMarketData(session), TastyTradeMetrics(session)
+
+
+def connect_from_sessions(
+    sdk_session,
+    data_session=None,
+) -> tuple[TastyTradeMarketData, TastyTradeMetrics]:
+    """Create providers from pre-authenticated tastytrade SDK sessions.
+
+    SaaS pattern: the caller (eTrading) owns authentication and passes
+    already-connected sessions.  market_analyzer never touches credentials.
+
+    Args:
+        sdk_session: An authenticated ``tastytrade.Session`` (for REST API calls).
+        data_session: An authenticated ``tastytrade.Session`` for DXLink streaming.
+                      Defaults to *sdk_session* if not provided.
+    """
+    from market_analyzer.broker.tastytrade.market_data import TastyTradeMarketData
+    from market_analyzer.broker.tastytrade.metrics import TastyTradeMetrics
+    from market_analyzer.broker.tastytrade.session import ExternalBrokerSession
+
+    wrapper = ExternalBrokerSession(sdk_session, data_session or sdk_session)
+    return TastyTradeMarketData(wrapper), TastyTradeMetrics(wrapper)

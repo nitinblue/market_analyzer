@@ -195,6 +195,40 @@ class TastyTradeBrokerSession(BrokerSession):
         return None
 
 
+class ExternalBrokerSession(BrokerSession):
+    """Wraps pre-authenticated SDK sessions provided by the caller.
+
+    Used in SaaS mode: eTrading authenticates with the broker and passes
+    the sessions here.  market_analyzer never touches credentials.
+    """
+
+    def __init__(self, sdk_session, data_session) -> None:
+        self._sdk_session = sdk_session
+        self._data_session = data_session
+
+    def connect(self) -> bool:
+        return True  # already connected
+
+    def disconnect(self) -> None:
+        pass  # caller owns the session lifecycle
+
+    @property
+    def is_connected(self) -> bool:
+        return self._sdk_session is not None
+
+    @property
+    def broker_name(self) -> str:
+        return "tastytrade"
+
+    @property
+    def sdk_session(self):
+        return self._sdk_session
+
+    @property
+    def data_session(self):
+        return self._data_session
+
+
 def _resolve_env(value: str) -> str:
     """Resolve ``${ENV_VAR}`` or ``$ENV_VAR`` patterns in a credential value."""
     if not value:

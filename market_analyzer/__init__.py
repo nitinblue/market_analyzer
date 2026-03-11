@@ -87,6 +87,7 @@ from market_analyzer.service.entry import EntryService
 from market_analyzer.service.strategy import StrategyService
 from market_analyzer.service.exit import ExitService
 from market_analyzer.service.adjustment import AdjustmentService
+from market_analyzer.service.intraday import IntradayService
 from market_analyzer.service.option_quotes import OptionQuoteService
 
 # Phase detection
@@ -140,6 +141,13 @@ from market_analyzer.models.levels import (
     StopLoss,
     Target,
     TradeDirection,
+)
+from market_analyzer.models.intraday import (
+    IntradayMonitorResult,
+    IntradaySignal,
+    IntradaySignalType,
+    IntradaySnapshot,
+    IntradayUrgency,
 )
 from market_analyzer.models.opportunity import (
     BreakoutOpportunity,
@@ -387,6 +395,13 @@ __all__ = [
     "ExpiryType",
     "TradingPlanService",
     "TradingPlanSettings",
+    # Intraday (0DTE management)
+    "IntradayService",
+    "IntradaySignal",
+    "IntradaySignalType",
+    "IntradaySnapshot",
+    "IntradayMonitorResult",
+    "IntradayUrgency",
     # Quotes (broker-agnostic)
     "OptionQuote",
     "QuoteSnapshot",

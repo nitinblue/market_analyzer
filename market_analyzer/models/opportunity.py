@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import re as _re
 from datetime import date
 from enum import StrEnum
-
 from pydantic import BaseModel
+
+from market_analyzer.models.exit_plan import ExitPlan
 
 
 class LegAction(StrEnum):
@@ -470,6 +472,7 @@ class TradeSpec(BaseModel):
     max_loss_desc: str | None = None  # "Wing width - credit" / "UNLIMITED"
     exit_notes: list[str] = []  # Structure-specific guidance
     max_entry_price: float | None = None  # Don't chase beyond this price
+    exit_plan: ExitPlan | None = None  # First-class exit plan (REQ-3)
 
     @property
     def leg_codes(self) -> list[str]:
@@ -508,6 +511,76 @@ class TradeSpec(BaseModel):
             }
             for leg in self.legs
         ]
+
+    @property
+    def dxlink_symbols(self) -> list[str]:
+        """DXLink streamer symbols: ['.SPY260327P580', ...].
+
+        Format used by TastyTrade DXLink streaming for quotes and Greeks.
+        Unlike ``streamer_symbols`` (OCC-padded), this returns the compact
+        dot-prefixed format that DXLink expects for subscriptions.
+        """
+        result = []
+        for leg in self.legs:
+            p_or_c = "C" if leg.option_type == "call" else "P"
+            date_str = leg.expiration.strftime("%y%m%d")
+            strike_int = int(leg.strike)
+            # Handle fractional strikes (e.g., 580.5)
+            if leg.strike != strike_int:
+                strike_str = f"{leg.strike:.1f}"
+            else:
+                strike_str = str(strike_int)
+            result.append(f".{self.ticker}{date_str}{p_or_c}{strike_str}")
+        return result
+
+    def position_size(
+        self,
+        capital: float,
+        risk_pct: float = 0.02,
+        max_contracts: int = 50,
+    ) -> int:
+        """Compute number of contracts based on capital and risk budget.
+
+        Args:
+            capital: Total desk/portfolio capital in dollars.
+            risk_pct: Max fraction of capital to risk per trade (default 2%).
+            max_contracts: Hard cap on contracts (default 50).
+
+        Returns:
+            Number of contracts (≥1 if trade is valid, 0 if risk can't be computed).
+
+        The risk per spread is derived from ``wing_width_points`` (defined-risk)
+        or ``max_risk_per_spread`` (parsed) or the entry price itself.
+        """
+        max_risk_budget = capital * risk_pct
+
+        # 1. Defined-risk: wing_width * 100 is the max loss per spread
+        if self.wing_width_points is not None and self.wing_width_points > 0:
+            risk_per_contract = self.wing_width_points * 100
+            contracts = int(max_risk_budget / risk_per_contract)
+            return max(1, min(contracts, max_contracts))
+
+        # 2. Parse max_risk_per_spread if it's a dollar value
+        if self.max_risk_per_spread:
+            try:
+                # Try to extract dollar value: "$500", "500", "wing_width * 100 - credit"
+                m = _re.search(r'\$?([\d,]+(?:\.\d+)?)', self.max_risk_per_spread)
+                if m:
+                    risk_per = float(m.group(1).replace(',', ''))
+                    if risk_per > 0:
+                        contracts = int(max_risk_budget / risk_per)
+                        return max(1, min(contracts, max_contracts))
+            except (ValueError, AttributeError):
+                pass
+
+        # 3. Fallback: use max_entry_price * 100 as risk
+        if self.max_entry_price and self.max_entry_price > 0:
+            risk_per = self.max_entry_price * 100
+            contracts = int(max_risk_budget / risk_per)
+            return max(1, min(contracts, max_contracts))
+
+        # Can't compute — return minimum
+        return 1
 
     @property
     def exit_summary(self) -> str:

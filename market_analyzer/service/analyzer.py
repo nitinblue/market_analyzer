@@ -22,6 +22,7 @@ from market_analyzer.service.strategy import StrategyService
 from market_analyzer.service.exit import ExitService
 from market_analyzer.service.vol_surface import VolSurfaceService
 from market_analyzer.service.adjustment import AdjustmentService
+from market_analyzer.service.intraday import IntradayService
 from market_analyzer.service.option_quotes import OptionQuoteService
 from market_analyzer.service.trading_plan import TradingPlanService
 
@@ -138,4 +139,9 @@ class MarketAnalyzer:
             data_service=data_service,
         )
         self.adjustment = AdjustmentService(quote_service=self.quotes)
+        self.intraday = IntradayService(
+            market_data=market_data,
+            market_metrics=market_metrics,
+            data_service=data_service,
+        )
         self.plan = TradingPlanService(analyzer=self)
