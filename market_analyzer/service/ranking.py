@@ -8,6 +8,8 @@ from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Union
 
+import pandas as pd
+
 from market_analyzer.config import get_settings
 from market_analyzer.features.ranking import (
     ConfigWeightProvider,
@@ -180,6 +182,7 @@ class TradeRankingService:
         tickers: list[str],
         strategies: list[StrategyType] | None = None,
         as_of: date | None = None,
+        skip_intraday: bool = False,
     ) -> TradeRankingResult:
         """Run all assessments, score, and rank.
 
@@ -187,6 +190,9 @@ class TradeRankingService:
             tickers: List of tickers to assess.
             strategies: Strategy types to evaluate. None = all 4.
             as_of: Override assessment date.
+            skip_intraday: If True, skip DXLink/yfinance intraday candle
+                fetches (ORB data). Useful for daily plan generation where
+                ORB is not needed and intraday fetches add 45s+ latency.
 
         Returns:
             TradeRankingResult with ranked entries.
@@ -258,7 +264,13 @@ class TradeRankingService:
                     continue
 
                 try:
-                    result: OpportunityResult = assess_fn(ticker, as_of=as_of)
+                    # Skip intraday (ORB/DXLink) for 0DTE during plan generation
+                    if skip_intraday and strategy == StrategyType.ZERO_DTE:
+                        result: OpportunityResult = assess_fn(
+                            ticker, intraday=pd.DataFrame(), as_of=as_of,
+                        )
+                    else:
+                        result: OpportunityResult = assess_fn(ticker, as_of=as_of)
 
                     regime_id = _extract_regime_id(result)
                     phase_id = _extract_phase_id(result)

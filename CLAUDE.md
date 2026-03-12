@@ -840,6 +840,36 @@ DataService().invalidate_cache('SPY', data_type=None)
 
 ---
 
+## Performance: Plan Generation & DXLink
+
+### Known Bottleneck: Intraday Candle Fetches
+
+`ranking.rank()` iterates tickers × strategies sequentially. For 0DTE assessments, `assess_zero_dte()` calls `technical_service.orb()` which triggers `get_intraday_candles()` via DXLink streaming. Each call has a 15s timeout, and on failure falls back to yfinance (another network call). With 3 0DTE tickers this adds 45-60s+ to plan generation.
+
+**Solution:** `ranking.rank(skip_intraday=True)` passes an empty DataFrame as intraday data, skipping DXLink and yfinance ORB fetches entirely. ORB is optional for daily plan generation (it's intraday monitoring data). The `plan.generate(skip_intraday=True)` parameter threads through to ranking.
+
+### `_run_async()` in `broker/tastytrade/market_data.py`
+
+Bridges async DXLink coroutines to sync callers. Two paths:
+- **Running event loop detected** (e.g. FastAPI): submits `asyncio.run(coro)` to a 2-worker thread pool
+- **No running loop** (standalone/CLI): uses persistent event loop with `run_until_complete`
+
+Both paths have timeouts. Callers must `coro.close()` in except blocks to prevent "coroutine was never awaited" warnings when `_run_async` fails before consuming the coroutine.
+
+### Performance Budget (13 tickers × 9 strategies = 83 assessments)
+
+| Component | Time | Notes |
+|-----------|------|-------|
+| Black swan check | <5s | Single call |
+| Technicals + regime per ticker | ~1s each | 13 tickers = ~13s |
+| Levels analysis per ticker | <1s each | 13 tickers = ~13s |
+| Opportunity assessments | ~1-2s each | 83 assessments = ~80-160s |
+| **DXLink intraday (if enabled)** | **15s each** | **3 tickers = 45s+ (skip for plan!)** |
+| Total with skip_intraday=True | ~60-120s | |
+| Total without skip | ~120-200s | Likely to timeout |
+
+---
+
 ## Change Log
 
 | Date | Decision | Rationale |
@@ -851,3 +881,4 @@ DataService().invalidate_cache('SPY', data_type=None)
 | 2026-02-21 | Expanded to canonical historical data service | market_analyzer owns all historical data for ecosystem; added DataService, parquet cache, three providers (yfinance, CBOE, TastyTrade); yfinance now required |
 | 2026-02-23 | Trading workflow restructure | Added 6 workflow services (context, instrument, screening, entry, strategy, exit), 5 new model files, multi-market config (US + India), interactive CLI (analyzer-cli), API.md. Additive — no existing files moved, all 580 tests pass. |
 | 2026-02-23 | Opportunity folder reorganized | Split opportunity/ into setups/ (breakout, momentum, mean_reversion) and option_plays/ (zero_dte, leap, earnings). Top-level __init__.py re-exports everything for backward compat. |
+| 2026-03-11 | skip_intraday for plan generation | DXLink intraday candle fetches (15s/ticker) caused plan timeouts. Added `skip_intraday` flag to `rank()` and `plan.generate()`. ORB data not needed for daily plan. Also added timeout to `_run_async()` and `coro.close()` cleanup. |

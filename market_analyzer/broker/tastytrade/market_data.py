@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import logging
+import threading
 from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING
 
@@ -168,17 +169,21 @@ class TastyTradeMarketData(MarketDataProvider):
         self, ticker: str, interval: str = "5m",
     ) -> pd.DataFrame:
         """Today's intraday OHLCV candles via DXLink Candle subscription."""
+        coro = self._fetch_intraday_candles(ticker, interval)
         try:
-            return self._run_async(self._fetch_intraday_candles(ticker, interval))
+            return self._run_async(coro, timeout=15)
         except Exception as e:
+            coro.close()  # prevent "coroutine was never awaited" warning
             logger.warning("Intraday candle fetch failed for %s: %s", ticker, e)
             return pd.DataFrame()
 
     def get_underlying_price(self, ticker: str) -> float | None:
         """Real-time underlying mid price via DXLink equity Quote."""
+        coro = self._fetch_underlying_price(ticker)
         try:
-            return self._run_async(self._fetch_underlying_price(ticker))
+            return self._run_async(coro)
         except Exception as e:
+            coro.close()
             logger.warning("Underlying price fetch failed for %s: %s", ticker, e)
             return None
 
@@ -339,11 +344,14 @@ class TastyTradeMarketData(MarketDataProvider):
 
         return greeks
 
-    def _run_async(self, coro):
+    _loop_lock = threading.Lock()
+
+    def _run_async(self, coro, timeout: float = 30):
         """Run async coroutine from sync context.
 
         Uses a persistent event loop so the tastytrade SDK's httpx AsyncClient
         doesn't accumulate stale connections across asyncio.run() calls.
+        A threading lock prevents concurrent run_until_complete on the same loop.
         """
         try:
             loop = asyncio.get_running_loop()
@@ -351,14 +359,26 @@ class TastyTradeMarketData(MarketDataProvider):
             loop = None
 
         if loop and loop.is_running():
-            # Already inside an async context (e.g. FastAPI) — use thread pool
+            # Already inside an async context (e.g. FastAPI / asyncio.to_thread)
+            # — must run in a separate thread with its own event loop
             future = _thread_pool.submit(asyncio.run, coro)
-            return future.result(timeout=30)
+            return future.result(timeout=timeout)
         else:
             # Standalone: reuse persistent loop to keep httpx connections alive
-            if self._loop is None or self._loop.is_closed():
-                self._loop = asyncio.new_event_loop()
-            return self._loop.run_until_complete(coro)
+            # Lock prevents concurrent run_until_complete on the same loop
+            with self._loop_lock:
+                if self._loop is None or self._loop.is_closed():
+                    self._loop = asyncio.new_event_loop()
+                wait_coro = asyncio.wait_for(coro, timeout=timeout)
+                try:
+                    return self._loop.run_until_complete(wait_coro)
+                except asyncio.TimeoutError:
+                    raise TimeoutError(
+                        f"Async operation timed out after {timeout}s"
+                    )
+                except Exception:
+                    wait_coro.close()
+                    raise
 
     def _leg_to_streamer_symbol(self, leg: LegSpec) -> str | None:
         """Convert LegSpec to DXLink streamer symbol.

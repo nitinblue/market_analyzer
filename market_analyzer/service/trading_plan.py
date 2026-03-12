@@ -76,6 +76,7 @@ class TradingPlanService:
         tickers: list[str] | None = None,
         plan_date: date | None = None,
         strategies: list[StrategyType] | None = None,
+        skip_intraday: bool = False,
     ) -> DailyTradingPlan:
         """Generate a complete daily trading plan."""
         cfg = get_settings().trading_plan
@@ -137,6 +138,7 @@ class TradingPlanService:
         # 7. Rank trades
         ranking_result = self.analyzer.ranking.rank(
             tickers, strategies=strategies, as_of=plan_for,
+            skip_intraday=skip_intraday,
         )
 
         # 8. Convert ranked entries to PlanTrades
