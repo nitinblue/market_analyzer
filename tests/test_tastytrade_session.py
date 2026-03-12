@@ -47,14 +47,70 @@ broker:
 """
 
 
+# Env vars to clear so tests fall through to YAML
+_TT_ENV_VARS = [
+    "TASTYTRADE_CLIENT_SECRET_LIVE", "TASTYTRADE_REFRESH_TOKEN_LIVE",
+    "TASTYTRADE_CLIENT_SECRET_PAPER", "TASTYTRADE_REFRESH_TOKEN_PAPER",
+    "TASTYTRADE_CLIENT_SECRET_DATA", "TASTYTRADE_REFRESH_TOKEN_DATA",
+]
+
+
+def _clear_tt_env():
+    """Context manager dict to clear TT env vars so YAML path is tested."""
+    return {k: "" for k in _TT_ENV_VARS}
+
+
+class TestSessionLoadCredentialsFromEnv:
+    """Env var loading (preferred path)."""
+
+    def test_loads_live_from_env(self):
+        env = {
+            "TASTYTRADE_CLIENT_SECRET_LIVE": "env_secret",
+            "TASTYTRADE_REFRESH_TOKEN_LIVE": "env_token",
+            "TASTYTRADE_CLIENT_SECRET_DATA": "env_data_secret",
+            "TASTYTRADE_REFRESH_TOKEN_DATA": "env_data_token",
+        }
+        with patch.dict(os.environ, env):
+            session = TastyTradeBrokerSession()
+            session._load_credentials()
+            assert session._client_secret == "env_secret"
+            assert session._refresh_token == "env_token"
+            assert session._data_client_secret == "env_data_secret"
+            assert session._data_refresh_token == "env_data_token"
+
+    def test_data_falls_back_to_trading_creds(self):
+        """When DATA env vars are absent, data fields are empty at load time.
+
+        The actual fallback (DATA→LIVE) happens in connect() at data_session
+        creation: ``data_secret = self._data_client_secret or self._client_secret``.
+        """
+        env = {
+            "TASTYTRADE_CLIENT_SECRET_LIVE": "env_secret",
+            "TASTYTRADE_REFRESH_TOKEN_LIVE": "env_token",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            # Remove DATA vars
+            os.environ.pop("TASTYTRADE_CLIENT_SECRET_DATA", None)
+            os.environ.pop("TASTYTRADE_REFRESH_TOKEN_DATA", None)
+            session = TastyTradeBrokerSession()
+            session._load_credentials()
+            # DATA fields are empty — fallback is in connect()
+            assert session._data_client_secret == ""
+            assert session._data_refresh_token == ""
+            # Primary creds loaded correctly
+            assert session._client_secret == "env_secret"
+            assert session._refresh_token == "env_token"
+
+
 class TestSessionLoadCredentials:
     def test_session_loads_credentials(self, tmp_path):
         """YAML parsing with plain values (no env vars)."""
         cred_file = tmp_path / "tastytrade_broker.yaml"
         cred_file.write_text(MOCK_YAML)
 
-        session = TastyTradeBrokerSession(config_path=str(cred_file))
-        session._load_credentials()
+        with patch.dict(os.environ, _clear_tt_env(), clear=False):
+            session = TastyTradeBrokerSession(config_path=str(cred_file))
+            session._load_credentials()
 
         assert session._client_secret == "live_secret"
         assert session._refresh_token == "live_token"
@@ -63,24 +119,27 @@ class TestSessionLoadCredentials:
         cred_file = tmp_path / "tastytrade_broker.yaml"
         cred_file.write_text(MOCK_YAML)
 
-        session = TastyTradeBrokerSession(config_path=str(cred_file), is_paper=True)
-        session._load_credentials()
+        with patch.dict(os.environ, _clear_tt_env(), clear=False):
+            session = TastyTradeBrokerSession(config_path=str(cred_file), is_paper=True)
+            session._load_credentials()
 
         assert session._client_secret == "paper_secret"
         assert session._refresh_token == "paper_token"
 
     def test_missing_credentials_file_raises(self):
-        session = TastyTradeBrokerSession(config_path="/nonexistent/path.yaml")
-        with pytest.raises(FileNotFoundError, match="not found"):
-            session._load_credentials()
+        with patch.dict(os.environ, _clear_tt_env(), clear=False):
+            session = TastyTradeBrokerSession(config_path="/nonexistent/path.yaml")
+            with pytest.raises(FileNotFoundError, match="not found"):
+                session._load_credentials()
 
     def test_data_section_falls_back_to_live(self, tmp_path):
         """If no 'data' section, DXLink uses live credentials."""
         cred_file = tmp_path / "tastytrade_broker.yaml"
         cred_file.write_text(MOCK_YAML)
 
-        session = TastyTradeBrokerSession(config_path=str(cred_file))
-        session._load_credentials()
+        with patch.dict(os.environ, _clear_tt_env(), clear=False):
+            session = TastyTradeBrokerSession(config_path=str(cred_file))
+            session._load_credentials()
 
         assert session._data_client_secret == "live_secret"
         assert session._data_refresh_token == "live_token"
@@ -88,27 +147,14 @@ class TestSessionLoadCredentials:
 
 class TestSessionConnect:
     def test_connect_creates_sdk_session(self, tmp_path):
-        """Mock SDK Session() called correctly on connect."""
+        """Verify credentials load correctly before connect."""
         cred_file = tmp_path / "tastytrade_broker.yaml"
         cred_file.write_text(MOCK_YAML)
 
-        session = TastyTradeBrokerSession(config_path=str(cred_file))
+        with patch.dict(os.environ, _clear_tt_env(), clear=False):
+            session = TastyTradeBrokerSession(config_path=str(cred_file))
+            session._load_credentials()
 
-        mock_sdk_session = MagicMock()
-        mock_account = MagicMock()
-        mock_account.account_number = "5YZ12345"
-
-        # Patch the tastytrade module that connect() imports from
-        with patch.dict("sys.modules", {"tastytrade": MagicMock(), "tastytrade.instruments": MagicMock()}):
-            with patch("builtins.__import__", side_effect=lambda name, *a, **kw: (
-                MagicMock(Session=MagicMock(return_value=mock_sdk_session),
-                          Account=MagicMock(get=MagicMock(return_value=[mock_account])))
-                if name == "tastytrade" else __import__(name, *a, **kw)
-            )):
-                # Simpler approach: just verify credentials load
-                pass
-
-        session._load_credentials()
         assert session._client_secret == "live_secret"
         assert session._refresh_token == "live_token"
         assert not session.is_connected  # Not yet connected

@@ -1,6 +1,9 @@
-"""TastyTrade session — auth from YAML + env vars.
+"""TastyTrade session — auth from env vars (preferred) or YAML.
 
-Adapted from eTrading tastytrade_adapter.py.
+Env var convention (same as eTrading .env):
+    TASTYTRADE_CLIENT_SECRET_LIVE / TASTYTRADE_REFRESH_TOKEN_LIVE
+    TASTYTRADE_CLIENT_SECRET_PAPER / TASTYTRADE_REFRESH_TOKEN_PAPER
+    TASTYTRADE_CLIENT_SECRET_DATA / TASTYTRADE_REFRESH_TOKEN_DATA  (DXLink)
 """
 
 from __future__ import annotations
@@ -17,20 +20,23 @@ logger = logging.getLogger(__name__)
 
 
 class TastyTradeBrokerSession(BrokerSession):
-    """TastyTrade session with YAML + env var credentials.
+    """TastyTrade session — env vars first, YAML fallback.
 
-    Credential file layout (``tastytrade_broker.yaml``)::
+    Env vars (preferred, same as eTrading .env)::
+
+        TASTYTRADE_CLIENT_SECRET_LIVE / TASTYTRADE_REFRESH_TOKEN_LIVE
+        TASTYTRADE_CLIENT_SECRET_PAPER / TASTYTRADE_REFRESH_TOKEN_PAPER
+        TASTYTRADE_CLIENT_SECRET_DATA / TASTYTRADE_REFRESH_TOKEN_DATA
+
+    YAML fallback (``tastytrade_broker.yaml``)::
 
         broker:
           live:
-            client_secret: ${TT_LIVE_SECRET}
-            refresh_token: ${TT_LIVE_TOKEN}
-          paper:
-            client_secret: ${TT_PAPER_SECRET}
-            refresh_token: ${TT_PAPER_TOKEN}
-          data:                          # optional — DXLink always live
-            client_secret: ${TT_LIVE_SECRET}
-            refresh_token: ${TT_LIVE_TOKEN}
+            client_secret: ${TASTYTRADE_CLIENT_SECRET_LIVE}
+            refresh_token: ${TASTYTRADE_REFRESH_TOKEN_LIVE}
+          data:
+            client_secret: ${TASTYTRADE_CLIENT_SECRET_DATA}
+            refresh_token: ${TASTYTRADE_REFRESH_TOKEN_DATA}
     """
 
     def __init__(
@@ -53,6 +59,8 @@ class TastyTradeBrokerSession(BrokerSession):
         # Credentials (loaded lazily)
         self._client_secret: str = ""
         self._refresh_token: str = ""
+        self._paper_client_secret: str = ""
+        self._paper_refresh_token: str = ""
         self._data_client_secret: str = ""
         self._data_refresh_token: str = ""
 
@@ -63,27 +71,47 @@ class TastyTradeBrokerSession(BrokerSession):
         try:
             from tastytrade import Account, Session
         except ImportError:
-            logger.error("tastytrade SDK not installed — pip install tastytrade-sdk")
+            logger.error("tastytrade SDK not installed — pip install tastytrade")
             return False
 
         try:
             self._load_credentials()
 
-            logger.info("Connecting to TastyTrade | %s", "PAPER" if self._is_paper else "LIVE")
+            mode = "PAPER" if self._is_paper else "LIVE"
+            logger.info("Connecting to TastyTrade | %s", mode)
 
-            self._session = Session(
-                self._client_secret,
-                self._refresh_token,
-                is_test=self._is_paper,
-            )
+            # Try trading creds (LIVE or PAPER), then DATA as fallback
+            cred_attempts = [
+                (self._client_secret, self._refresh_token, self._is_paper, mode),
+            ]
+            if self._data_client_secret and self._data_refresh_token:
+                cred_attempts.append(
+                    (self._data_client_secret, self._data_refresh_token, False, "DATA"),
+                )
+            if self._paper_client_secret and self._paper_refresh_token:
+                cred_attempts.append(
+                    (self._paper_client_secret, self._paper_refresh_token, True, "PAPER"),
+                )
 
-            # Account.get() is async in tastytrade SDK v12+
-            loop = asyncio.new_event_loop()
-            try:
-                accounts = loop.run_until_complete(Account.get(self._session))
-            finally:
-                loop.close()
-            self._accounts = {a.account_number: a for a in accounts}
+            for secret, token, is_test, label in cred_attempts:
+                try:
+                    self._session = Session(secret, token, is_test=is_test)
+                    result = Account.get(self._session)
+                    if asyncio.iscoroutine(result):
+                        accounts = asyncio.run(result)
+                    else:
+                        accounts = result
+                    if not isinstance(accounts, list):
+                        accounts = [accounts]
+                    self._accounts = {a.account_number: a for a in accounts}
+                    logger.info("Authenticated via %s credentials", label)
+                    break
+                except Exception as e:
+                    logger.warning("%s credentials failed: %s", label, e)
+                    self._session = None
+                    continue
+            else:
+                raise RuntimeError("All credential sets failed")
 
             if self._account_number:
                 if self._account_number not in self._accounts:
@@ -92,22 +120,10 @@ class TastyTradeBrokerSession(BrokerSession):
             else:
                 self._account = next(iter(self._accounts.values()))
 
-            # Create a FRESH Session for DXLink streaming.
-            # The auth session above may have stale httpx connections from
-            # the event loop used for Account.get(). A fresh Session avoids
-            # "Event loop is closed" errors in subsequent asyncio.run() calls.
-            if self._is_paper:
-                self._data_session = Session(
-                    self._data_client_secret,
-                    self._data_refresh_token,
-                    is_test=False,
-                )
-            else:
-                self._data_session = Session(
-                    self._data_client_secret,
-                    self._data_refresh_token,
-                    is_test=False,
-                )
+            # DXLink data session — use DATA creds if available, else same as trading
+            data_secret = self._data_client_secret or self._client_secret
+            data_token = self._data_refresh_token or self._refresh_token
+            self._data_session = Session(data_secret, data_token, is_test=False)
 
             self._connected = True
             logger.info("Authenticated with TastyTrade (account %s)", self._account.account_number)
@@ -156,14 +172,48 @@ class TastyTradeBrokerSession(BrokerSession):
     # -- Credential loading --
 
     def _load_credentials(self) -> None:
-        """Load credentials from YAML file with env var resolution."""
+        """Load all available credentials from env vars (preferred) or YAML.
+
+        Loads LIVE, PAPER, and DATA credential sets. connect() tries them
+        in order until one works.
+        """
+        # Load all three credential sets from env
+        live_s = os.getenv("TASTYTRADE_CLIENT_SECRET_LIVE", "")
+        live_t = os.getenv("TASTYTRADE_REFRESH_TOKEN_LIVE", "")
+        paper_s = os.getenv("TASTYTRADE_CLIENT_SECRET_PAPER", "")
+        paper_t = os.getenv("TASTYTRADE_REFRESH_TOKEN_PAPER", "")
+        data_s = os.getenv("TASTYTRADE_CLIENT_SECRET_DATA", "")
+        data_t = os.getenv("TASTYTRADE_REFRESH_TOKEN_DATA", "")
+
+        if live_s or paper_s or data_s:
+            # Primary = requested mode (LIVE or PAPER)
+            if self._is_paper:
+                self._client_secret = paper_s
+                self._refresh_token = paper_t
+            else:
+                self._client_secret = live_s
+                self._refresh_token = live_t
+            self._paper_client_secret = paper_s
+            self._paper_refresh_token = paper_t
+            self._data_client_secret = data_s
+            self._data_refresh_token = data_t
+            logger.info("Credentials loaded from env vars")
+            return
+
+        # Fallback: YAML file
+        self._load_credentials_from_yaml()
+
+    def _load_credentials_from_yaml(self) -> None:
+        """Fallback: load credentials from YAML file."""
         import yaml
 
         cred_path = self._find_config_file()
         if not cred_path:
             raise FileNotFoundError(
-                f"Credentials file '{self._config_path}' not found. "
-                "See tastytrade_broker.yaml.template for format."
+                "TastyTrade credentials not found. Set env vars "
+                "(TASTYTRADE_CLIENT_SECRET_LIVE, TASTYTRADE_REFRESH_TOKEN_LIVE, "
+                "TASTYTRADE_CLIENT_SECRET_DATA, TASTYTRADE_REFRESH_TOKEN_DATA) "
+                f"or create '{self._config_path}'."
             )
 
         with open(cred_path) as f:
@@ -175,7 +225,6 @@ class TastyTradeBrokerSession(BrokerSession):
         self._client_secret = _resolve_env(mode_creds["client_secret"])
         self._refresh_token = _resolve_env(mode_creds["refresh_token"])
 
-        # DXLink data credentials — falls back to live
         data_section = creds["broker"].get("data") or creds["broker"]["live"]
         self._data_client_secret = _resolve_env(data_section["client_secret"])
         self._data_refresh_token = _resolve_env(data_section["refresh_token"])

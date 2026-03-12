@@ -15,6 +15,7 @@ import matplotlib.dates as mdates
 import numpy as np
 import pandas as pd
 
+from market_analyzer.cli._broker import add_broker_args, connect_broker
 from market_analyzer.config import get_settings
 from market_analyzer.data.service import DataService
 from market_analyzer.features.technicals import (
@@ -266,9 +267,12 @@ def main() -> None:
         "--save", action="store_true",
         help="Save to PNG instead of showing interactive window",
     )
+    add_broker_args(parser)
     args = parser.parse_args()
 
     print("Initializing services...")
+    if args.broker:
+        connect_broker(is_paper=args.paper)
     data_svc = DataService()
     regime_svc = RegimeService(data_service=data_svc)
 

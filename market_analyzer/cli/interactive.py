@@ -16,21 +16,7 @@ from datetime import date
 from tabulate import tabulate
 
 
-def _styled(text: str, style: str = "") -> str:
-    """Basic ANSI styling. Falls back to plain text if terminal doesn't support it."""
-    codes = {
-        "bold": "\033[1m",
-        "green": "\033[32m",
-        "yellow": "\033[33m",
-        "red": "\033[31m",
-        "cyan": "\033[36m",
-        "dim": "\033[2m",
-        "reset": "\033[0m",
-    }
-    if not sys.stdout.isatty():
-        return text
-    prefix = codes.get(style, "")
-    return f"{prefix}{text}{codes['reset']}" if prefix else text
+from market_analyzer.cli._broker import _styled, connect_broker
 
 
 def _print_header(title: str) -> None:
@@ -81,22 +67,7 @@ class AnalyzerCLI(cmd.Cmd):
             market_metrics = None
 
             if self._broker:
-                try:
-                    from dotenv import load_dotenv
-                    load_dotenv()
-                    from market_analyzer.broker.tastytrade.session import TastyTradeBrokerSession
-                    from market_analyzer.broker.tastytrade.market_data import TastyTradeMarketData
-                    from market_analyzer.broker.tastytrade.metrics import TastyTradeMetrics
-
-                    session = TastyTradeBrokerSession(is_paper=False)
-                    if session.connect():
-                        market_data = TastyTradeMarketData(session)
-                        market_metrics = TastyTradeMetrics(session)
-                        print(_styled(f"Broker connected: {session.account.account_number}", "green"))
-                    else:
-                        print(_styled("Broker connection failed — running without broker", "yellow"))
-                except Exception as e:
-                    print(_styled(f"Broker unavailable: {e}", "yellow"))
+                market_data, market_metrics = connect_broker()
 
             self._ma = MarketAnalyzer(
                 data_service=DataService(),
@@ -388,8 +359,15 @@ class AnalyzerCLI(cmd.Cmd):
 
         try:
             ma = self._get_ma()
+            if not ma.quotes.has_broker:
+                print(_styled(
+                    "WARNING: No broker connected — options pricing unavailable. "
+                    "Ranking uses historical data only (no live quotes/Greeks).\n"
+                    "For full data: analyzer-cli --broker\n", "yellow",
+                ))
             result = ma.ranking.rank(tickers)
-            _print_header(f"Trade Ranking ({result.as_of_date})")
+            source = ma.quotes.source
+            _print_header(f"Trade Ranking ({result.as_of_date})  [data: {source}]")
 
             if result.black_swan_gate:
                 print(f"\n  {_styled('TRADING HALTED — Black Swan CRITICAL', 'red')}")
@@ -456,6 +434,12 @@ class AnalyzerCLI(cmd.Cmd):
 
         try:
             ma = self._get_ma()
+            if not ma.quotes.has_broker:
+                print(_styled(
+                    "WARNING: No broker connected — fill prices unavailable. "
+                    "Plan uses historical data only (no live quotes/Greeks).\n"
+                    "For full data: analyzer-cli --broker\n", "yellow",
+                ))
             plan = ma.plan.generate(
                 tickers=tickers or None,
                 plan_date=plan_date,
@@ -463,7 +447,8 @@ class AnalyzerCLI(cmd.Cmd):
 
             # Header
             day_str = plan.plan_for_date.strftime("%a %b %d, %Y")
-            _print_header(f"Daily Trading Plan — {day_str}")
+            source = ma.quotes.source
+            _print_header(f"Daily Trading Plan — {day_str}  [data: {source}]")
 
             # Day verdict
             verdict_color = {
@@ -857,6 +842,12 @@ class AnalyzerCLI(cmd.Cmd):
         ticker = parts[0].upper()
         play = parts[1].lower() if len(parts) > 1 else "all"
 
+        ma = self._get_ma()
+        if not ma.quotes.has_broker:
+            print(_styled(
+                "WARNING: No broker — option plays assessed without live pricing.\n", "yellow",
+            ))
+
         play_map = {
             "ic": ["iron_condor"],
             "iron_condor": ["iron_condor"],
@@ -1213,6 +1204,63 @@ class AnalyzerCLI(cmd.Cmd):
         except Exception as exc:
             print(f"{_styled('ERROR:', 'red')} {exc}")
             traceback.print_exc()
+
+    def do_broker(self, arg: str) -> None:
+        """Show broker connection status and capabilities.\nUsage: broker"""
+        ma = self._get_ma()
+
+        _print_header("Broker Status")
+
+        if ma.quotes.has_broker:
+            print(f"\n  Status:        {_styled('CONNECTED', 'green')}")
+            print(f"  Broker:        {ma.quotes.source}")
+
+            # Try to get account details from the underlying session
+            md = ma.quotes._market_data
+            if hasattr(md, '_session'):
+                session = md._session
+                try:
+                    acct = session.account
+                    print(f"  Account:       {acct.account_number}")
+                    mode = "PAPER" if session._is_paper else "LIVE"
+                    print(f"  Mode:          {mode}")
+                    # Show all accounts if multiple
+                    if len(session._accounts) > 1:
+                        others = [a for a in session._accounts if a != acct.account_number]
+                        print(f"  Other accts:   {', '.join(others)}")
+                except Exception:
+                    pass
+
+            print(f"\n  {_styled('Data Capabilities:', 'bold')}")
+            print(f"    Option chains    DXLink streamer (real-time bid/ask)")
+            print(f"    Greeks           DXLink DXGreeks (real-time delta/gamma/theta/vega)")
+            print(f"    Underlying       DXLink DXQuote (real-time mid price)")
+            print(f"    Intraday bars    DXLink Candle (5m bars)")
+            print(f"    IV metrics       TastyTrade API (IV rank/percentile/beta)")
+            print(f"    Historical       yfinance (OHLCV, cached)")
+
+            # Show adjustment data source
+            if hasattr(ma, 'adjustment') and hasattr(ma.adjustment, 'quote_source'):
+                print(f"\n  Adjustment pricing: {ma.adjustment.quote_source}")
+
+            # Quick connectivity test — try underlying price
+            print(f"\n  {_styled('Quick test:', 'dim')} ", end="", flush=True)
+            try:
+                price = md.get_underlying_price("SPY")
+                if price:
+                    print(_styled(f"SPY = ${price:.2f} (live)", "green"))
+                else:
+                    print(_styled("SPY price unavailable", "yellow"))
+            except Exception as e:
+                print(_styled(f"failed: {e}", "red"))
+
+        else:
+            print(f"\n  Status:        {_styled('NOT CONNECTED', 'yellow')}")
+            print(f"  Data source:   yfinance (historical OHLCV only)")
+            print(f"  Options data:  {_styled('UNAVAILABLE', 'yellow')} — no live quotes, Greeks, or IV")
+            print(f"  Pricing:       {_styled('UNAVAILABLE', 'yellow')} — cannot compute fill prices")
+            print(f"\n  {_styled('To connect:', 'bold')} analyzer-cli --broker")
+            print(f"  Requires:      TASTYTRADE_***_DATA env vars in eTrading/.env")
 
     def do_quit(self, arg: str) -> bool:
         """Exit the REPL."""

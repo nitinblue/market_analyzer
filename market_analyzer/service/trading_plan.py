@@ -26,7 +26,7 @@ from market_analyzer.models.trading_plan import (
     RiskBudget,
 )
 from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
-    compute_max_entry_price,
+    compute_max_entry_price_from_quotes,
 )
 
 if TYPE_CHECKING:
@@ -154,10 +154,10 @@ class TradingPlanService:
             dte = entry.trade_spec.target_dte if entry.trade_spec else None
             horizon = self._strategy_to_horizon(entry.strategy_type, dte)
 
-            # Compute max entry price
+            # Compute max entry price from broker quotes (no BS pricing)
             max_price = None
             if entry.trade_spec is not None:
-                max_price = compute_max_entry_price(entry.trade_spec, slippage)
+                max_price = self._max_entry_from_broker(entry, slippage)
 
             # Expiry note
             expiry_note = _expiry_note_for_trade(entry.trade_spec, all_near_expiries)
@@ -277,6 +277,47 @@ class TradingPlanService:
         # TRADE: normal conditions
         reasons.append("Normal conditions")
         return DayVerdict.TRADE, reasons
+
+    def _max_entry_from_broker(
+        self, entry: RankedEntry, slippage_pct: float,
+    ) -> float | None:
+        """Compute max entry price using broker mid prices.
+
+        Returns None if no broker connected or quotes unavailable.
+        Never uses theoretical/BS pricing.
+        """
+        ts = entry.trade_spec
+        if ts is None or not ts.legs:
+            return None
+
+        quote_svc = self.analyzer.quotes
+        if not quote_svc.has_broker:
+            return None
+
+        try:
+            leg_quotes = quote_svc.get_leg_quotes(ts.legs, ticker=entry.ticker)
+            if not leg_quotes or len(leg_quotes) != len(ts.legs):
+                return None
+
+            # Compute net mid price from broker quotes
+            from market_analyzer.models.opportunity import LegAction
+
+            net = 0.0
+            for leg, quote in zip(ts.legs, leg_quotes):
+                mid = quote.mid
+                if mid <= 0:
+                    return None  # No valid quote
+                if leg.action == LegAction.SELL_TO_OPEN:
+                    net += mid * leg.quantity
+                else:
+                    net -= mid * leg.quantity
+
+            return compute_max_entry_price_from_quotes(
+                net, ts.order_side, slippage_pct,
+            )
+        except Exception as e:
+            logger.warning("Broker quote fetch for max_entry failed: %s", e)
+            return None
 
     @staticmethod
     def _strategy_to_horizon(strategy_type: StrategyType, dte: int | None) -> PlanHorizon:

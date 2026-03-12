@@ -10,6 +10,7 @@ import argparse
 
 from tabulate import tabulate
 
+from market_analyzer.cli._broker import add_broker_args, connect_broker
 from market_analyzer.config import get_settings
 from market_analyzer.data.service import DataService
 from market_analyzer.models.ranking import StrategyType
@@ -38,6 +39,7 @@ def main() -> None:
         default=10,
         help="Number of top trades to show (default: 10)",
     )
+    add_broker_args(parser)
     args = parser.parse_args()
 
     strategies = (
@@ -45,7 +47,18 @@ def main() -> None:
     )
 
     print("Initializing services...")
-    ma = MarketAnalyzer(data_service=DataService())
+    market_data, market_metrics = (
+        connect_broker(is_paper=args.paper) if args.broker else (None, None)
+    )
+    ma = MarketAnalyzer(
+        data_service=DataService(),
+        market_data=market_data,
+        market_metrics=market_metrics,
+    )
+
+    if not ma.quotes.has_broker:
+        print("WARNING: No broker connected — options pricing unavailable.")
+        print("Ranking uses historical data only. For full data: analyzer-rank --broker\n")
 
     print(f"Ranking {len(args.tickers)} tickers: {', '.join(args.tickers)}")
     if strategies:

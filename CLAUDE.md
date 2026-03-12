@@ -486,13 +486,18 @@ This gives a 2x2 mapping that naturally produces R1–R4.
 
 ### Provider Configuration
 
-All credentials via environment variables:
+All credentials via environment variables (stored in eTrading `.env`):
 
-| Variable | Provider | Notes |
-|----------|----------|-------|
+| Variable Pattern | Provider | Notes |
+|------------------|----------|-------|
+| `TASTYTRADE_***_LIVE` | TastyTrade | Client secret + refresh token for live session |
+| `TASTYTRADE_***_PAPER` | TastyTrade | Client secret + refresh token for paper session |
+| `TASTYTRADE_***_DATA` | TastyTrade | Client secret + refresh token for DXLink streaming |
 | `CBOE_API_KEY` | CBOE | Required for options/IV data |
-| `TASTYTRADE_USERNAME` | TastyTrade | Required for broker history |
-| `TASTYTRADE_PASSWORD` | TastyTrade | Required for broker history |
+
+**Credential loading order:** env vars first (no YAML needed), YAML fallback.
+DXLink data session uses `_DATA` credentials (always live, even when trading session is paper).
+CLI helper (`cli/_broker.py`) auto-loads eTrading `.env` for credentials.
 
 ### Usage Patterns
 

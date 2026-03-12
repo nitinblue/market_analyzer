@@ -45,8 +45,7 @@ from market_analyzer.models.trading_plan import (
 from market_analyzer.models.ranking import StrategyType
 from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
     build_double_calendar_legs,
-    compute_max_entry_price,
-    estimate_trade_price,
+    compute_max_entry_price_from_quotes,
 )
 from market_analyzer.models.vol_surface import TermStructurePoint
 
@@ -275,95 +274,28 @@ def _make_trade_spec(
     )
 
 
-class TestEstimateTradePrice:
-    def test_empty_legs_returns_none(self):
-        ts = _make_trade_spec([])
-        assert estimate_trade_price(ts) is None
+class TestComputeMaxEntryPriceFromQuotes:
+    """Tests for broker-based max entry price (no BS pricing)."""
 
-    def test_iron_condor_returns_positive(self):
-        """IC is net credit — should return positive."""
-        legs = [
-            _make_leg("short_put", LegAction.SELL_TO_OPEN, "put", 590.0),
-            _make_leg("long_put", LegAction.BUY_TO_OPEN, "put", 585.0),
-            _make_leg("short_call", LegAction.SELL_TO_OPEN, "call", 610.0),
-            _make_leg("long_call", LegAction.BUY_TO_OPEN, "call", 615.0),
-        ]
-        ts = _make_trade_spec(legs)
-        price = estimate_trade_price(ts)
-        assert price is not None
-        assert price > 0  # Net credit
+    def test_credit_applies_slippage(self):
+        # Net credit of 2.00 with 20% slippage → min accept 1.60
+        result = compute_max_entry_price_from_quotes(2.00, "credit", 0.20)
+        assert result == 1.60
 
-    def test_long_call_returns_negative(self):
-        """Single long call is debit — should return negative."""
-        legs = [_make_leg("long_call", LegAction.BUY_TO_OPEN, "call", 600.0)]
-        ts = _make_trade_spec(legs, StructureType.LONG_OPTION, OrderSide.DEBIT)
-        price = estimate_trade_price(ts)
-        assert price is not None
-        assert price < 0  # Net debit
+    def test_debit_applies_slippage(self):
+        # Net debit of -3.00 with 20% slippage → max pay 3.60
+        result = compute_max_entry_price_from_quotes(-3.00, "debit", 0.20)
+        assert result == 3.60
 
-    def test_credit_spread(self):
-        legs = [
-            _make_leg("short_put", LegAction.SELL_TO_OPEN, "put", 590.0),
-            _make_leg("long_put", LegAction.BUY_TO_OPEN, "put", 585.0),
-        ]
-        ts = _make_trade_spec(legs, StructureType.CREDIT_SPREAD, OrderSide.CREDIT)
-        price = estimate_trade_price(ts)
-        assert price is not None
-        assert price > 0  # Net credit
+    def test_zero_net_returns_none(self):
+        assert compute_max_entry_price_from_quotes(0.0, "credit") is None
 
-    def test_zero_dte_near_intrinsic(self):
-        """With 0 DTE, should return near intrinsic value (tiny time value from min 1-day floor)."""
-        legs = [_make_leg("long_call", LegAction.BUY_TO_OPEN, "call", 590.0, dte=0)]
-        ts = _make_trade_spec(legs, StructureType.LONG_OPTION, OrderSide.DEBIT)
-        price = estimate_trade_price(ts)
-        assert price is not None
-        # Intrinsic = 600 - 590 = 10, cost is negative; tiny time value from 1-day floor
-        assert abs(price - (-10.0)) < 1.0
-
-
-class TestComputeMaxEntryPrice:
-    def test_credit_structure(self):
-        legs = [
-            _make_leg("short_put", LegAction.SELL_TO_OPEN, "put", 590.0),
-            _make_leg("long_put", LegAction.BUY_TO_OPEN, "put", 585.0),
-        ]
-        ts = _make_trade_spec(legs, StructureType.CREDIT_SPREAD, OrderSide.CREDIT)
-        max_price = compute_max_entry_price(ts)
-        estimated = estimate_trade_price(ts)
-        assert max_price is not None
-        assert estimated is not None
-        # For credit: max_entry = estimated * 0.80
-        assert abs(max_price - estimated * 0.80) < 0.02
-
-    def test_debit_structure(self):
-        legs = [
-            _make_leg("long_call", LegAction.BUY_TO_OPEN, "call", 600.0),
-            _make_leg("short_call", LegAction.SELL_TO_OPEN, "call", 610.0),
-        ]
-        ts = _make_trade_spec(legs, StructureType.DEBIT_SPREAD, OrderSide.DEBIT)
-        max_price = compute_max_entry_price(ts)
-        estimated = estimate_trade_price(ts)
-        assert max_price is not None
-        assert estimated is not None
-        # For debit: max_entry = |estimated| * 1.20
-        assert abs(max_price - abs(estimated) * 1.20) < 0.02
-
-    def test_long_option_tighter_tolerance(self):
-        legs = [_make_leg("long_call", LegAction.BUY_TO_OPEN, "call", 600.0)]
-        ts = _make_trade_spec(legs, StructureType.LONG_OPTION, OrderSide.DEBIT)
-        max_price = compute_max_entry_price(ts)
-        estimated = estimate_trade_price(ts)
-        assert max_price is not None
-        assert estimated is not None
-        # Tighter: |estimated| * 1.15
-        assert abs(max_price - abs(estimated) * 1.15) < 0.02
-
-    def test_empty_legs_returns_none(self):
-        ts = _make_trade_spec([])
-        assert compute_max_entry_price(ts) is None
+    def test_custom_slippage(self):
+        result = compute_max_entry_price_from_quotes(1.50, "credit", 0.10)
+        assert result == 1.35
 
     def test_max_entry_price_field_on_tradespec(self):
-        """TradeSpec now has max_entry_price field."""
+        """TradeSpec has max_entry_price field."""
         ts = _make_trade_spec([])
         assert ts.max_entry_price is None
         ts2 = ts.model_copy(update={"max_entry_price": 2.50})
@@ -650,39 +582,8 @@ class TestExports:
         assert ExpiryType.MONTHLY_OPEX == "monthly_opex"
 
 
-# ===== BS Price Sanity =====
 
-
-class TestBSPriceSanity:
-    """Sanity checks on the BS approximation — not exact, just directionally correct."""
-
-    def test_atm_call_positive(self):
-        from market_analyzer.opportunity.option_plays._trade_spec_helpers import _bs_price
-        price = _bs_price(100.0, 100.0, 30 / 365, 0.25, "call")
-        assert price > 0
-        assert price < 10  # Shouldn't be more than ~10% of underlying for 30d ATM
-
-    def test_deep_otm_put_near_zero(self):
-        from market_analyzer.opportunity.option_plays._trade_spec_helpers import _bs_price
-        price = _bs_price(100.0, 50.0, 30 / 365, 0.25, "put")
-        assert price < 0.01
-
-    def test_deep_itm_call_near_intrinsic(self):
-        from market_analyzer.opportunity.option_plays._trade_spec_helpers import _bs_price
-        price = _bs_price(100.0, 50.0, 30 / 365, 0.25, "call")
-        assert price > 49.0  # Near intrinsic (100-50=50)
-
-    def test_higher_iv_higher_price(self):
-        from market_analyzer.opportunity.option_plays._trade_spec_helpers import _bs_price
-        low_iv = _bs_price(100.0, 100.0, 30 / 365, 0.15, "call")
-        high_iv = _bs_price(100.0, 100.0, 30 / 365, 0.40, "call")
-        assert high_iv > low_iv
-
-    def test_longer_dte_higher_price(self):
-        from market_analyzer.opportunity.option_plays._trade_spec_helpers import _bs_price
-        short = _bs_price(100.0, 100.0, 7 / 365, 0.25, "call")
-        long_ = _bs_price(100.0, 100.0, 60 / 365, 0.25, "call")
-        assert long_ > short
+# BS pricing tests removed — all pricing comes from broker (DXLink streamer)
 
 
 # ===== Structure Profiles =====

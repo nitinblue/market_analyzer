@@ -9,6 +9,7 @@ import argparse
 
 from tabulate import tabulate
 
+from market_analyzer.cli._broker import add_broker_args, connect_broker
 from market_analyzer.config import get_settings
 from market_analyzer.data.service import DataService
 from market_analyzer.models.regime import (
@@ -193,6 +194,7 @@ def main() -> None:
         default=settings.display.default_tickers,
         help=f"Tickers to analyze (default: {' '.join(settings.display.default_tickers)})",
     )
+    add_broker_args(parser)
     args = parser.parse_args()
 
     print_section("Regime Definitions")
@@ -206,6 +208,8 @@ def main() -> None:
     print(tabulate(defs, headers="keys", tablefmt="simple", stralign="left"))
 
     print("\nInitializing services...")
+    if args.broker:
+        connect_broker(is_paper=args.paper)
     data_svc = DataService()
     regime_svc = RegimeService(data_service=data_svc)
 
