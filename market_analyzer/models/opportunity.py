@@ -583,6 +583,53 @@ class TradeSpec(BaseModel):
         return 1
 
     @property
+    def strategy_symbol(self) -> str:
+        """Short strategy symbol for display: IC, CS, DS, CAL, DIAG, IFly, RS, etc."""
+        _map = {
+            "iron_condor": "IC",
+            "iron_man": "IM",
+            "iron_butterfly": "IFly",
+            "credit_spread": "CS",
+            "debit_spread": "DS",
+            "calendar": "CAL",
+            "double_calendar": "DCAL",
+            "diagonal": "DIAG",
+            "ratio_spread": "RS",
+            "straddle": "STR",
+            "strangle": "STRG",
+            "long_option": "LO",
+            "pmcc": "PMCC",
+        }
+        return _map.get(self.structure_type or "", self.structure_type or "?")
+
+    @property
+    def strategy_badge(self) -> str:
+        """Compact badge: ``IC neutral · defined`` or ``DS bullish · defined``."""
+        sym = self.strategy_symbol
+        # Direction
+        _dir_map = {
+            "iron_condor": "neutral", "iron_man": "neutral",
+            "iron_butterfly": "neutral", "straddle": "neutral", "strangle": "neutral",
+            "calendar": "neutral", "double_calendar": "neutral",
+            "credit_spread": "directional", "debit_spread": "directional",
+            "diagonal": "directional", "ratio_spread": "directional",
+            "long_option": "directional", "pmcc": "bullish",
+        }
+        direction = _dir_map.get(self.structure_type or "", "neutral")
+        # Risk
+        _risk_map = {
+            "iron_condor": "defined", "iron_man": "defined",
+            "iron_butterfly": "defined", "credit_spread": "defined",
+            "debit_spread": "defined", "calendar": "defined",
+            "double_calendar": "defined", "diagonal": "defined",
+            "long_option": "defined", "pmcc": "defined",
+            "straddle": "undefined", "strangle": "undefined",
+            "ratio_spread": "undefined",
+        }
+        risk = _risk_map.get(self.structure_type or "", "defined")
+        return f"{sym} {direction} · {risk}"
+
+    @property
     def exit_summary(self) -> str:
         """One-line exit guidance for display."""
         parts = []

@@ -43,7 +43,7 @@ class MockMarketData(MarketDataProvider):
     def get_option_chain(self, ticker, expiration=None):
         return self._chain
 
-    def get_quotes(self, legs):
+    def get_quotes(self, legs, *, ticker="", include_greeks=True):
         return [_make_quote(strike=leg.strike, opt_type=leg.option_type) for leg in legs]
 
     def get_greeks(self, legs):
@@ -125,7 +125,7 @@ class TestOptionQuoteServiceFallback:
         class FailingMarketData(MarketDataProvider):
             def get_option_chain(self, ticker, expiration=None):
                 raise ConnectionError("broker down")
-            def get_quotes(self, legs):
+            def get_quotes(self, legs, *, ticker="", include_greeks=True):
                 raise ConnectionError("broker down")
             def get_greeks(self, legs):
                 return {}

@@ -10,7 +10,9 @@ import sys
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from market_analyzer.broker.base import MarketDataProvider, MarketMetricsProvider
+    from market_analyzer.broker.base import (
+        AccountProvider, MarketDataProvider, MarketMetricsProvider, WatchlistProvider,
+    )
 
 
 def _styled(text: str, style: str = "") -> str:
@@ -32,10 +34,15 @@ def _styled(text: str, style: str = "") -> str:
 
 def connect_broker(
     is_paper: bool = False,
-) -> tuple[MarketDataProvider | None, MarketMetricsProvider | None]:
-    """Connect to TastyTrade broker. Returns (market_data, market_metrics).
+) -> tuple[
+    MarketDataProvider | None,
+    MarketMetricsProvider | None,
+    AccountProvider | None,
+    WatchlistProvider | None,
+]:
+    """Connect to TastyTrade broker. Returns (market_data, market_metrics, account, watchlist).
 
-    Returns (None, None) on any failure — caller continues without broker.
+    Returns (None, None, None, None) on any failure — caller continues without broker.
     """
     try:
         from dotenv import load_dotenv
@@ -52,25 +59,29 @@ def connect_broker(
         from market_analyzer.broker.tastytrade.session import TastyTradeBrokerSession
         from market_analyzer.broker.tastytrade.market_data import TastyTradeMarketData
         from market_analyzer.broker.tastytrade.metrics import TastyTradeMetrics
+        from market_analyzer.broker.tastytrade.account import TastyTradeAccount
+        from market_analyzer.broker.tastytrade.watchlist import TastyTradeWatchlist
 
         session = TastyTradeBrokerSession(is_paper=is_paper)
         if session.connect():
             market_data = TastyTradeMarketData(session)
             market_metrics = TastyTradeMetrics(session)
+            account = TastyTradeAccount(session)
+            watchlist = TastyTradeWatchlist(session)
             print(_styled(
                 f"Broker connected: {session.account.account_number}", "green",
             ))
-            return market_data, market_metrics
+            return market_data, market_metrics, account, watchlist
         else:
             print(_styled("Broker connection failed — running without broker", "yellow"))
-            return None, None
+            return None, None, None, None
 
     except ImportError:
         print(_styled("tastytrade SDK not installed — running without broker", "yellow"))
-        return None, None
+        return None, None, None, None
     except Exception as e:
         print(_styled(f"Broker unavailable: {e}", "yellow"))
-        return None, None
+        return None, None, None, None
 
 
 def add_broker_args(parser) -> None:

@@ -102,13 +102,15 @@ from market_analyzer.models.macro import MacroCalendar, MacroEvent, MacroEventTy
 from market_analyzer.macro.calendar import get_macro_calendar
 
 # Quotes (broker-agnostic)
-from market_analyzer.models.quotes import MarketMetrics, OptionQuote, QuoteSnapshot
+from market_analyzer.models.quotes import AccountBalance, MarketMetrics, OptionQuote, QuoteSnapshot
 
 # Broker ABCs
 from market_analyzer.broker.base import (
+    AccountProvider,
     BrokerSession,
     MarketDataProvider,
     MarketMetricsProvider,
+    WatchlistProvider,
 )
 
 # Vol surface
@@ -119,6 +121,17 @@ from market_analyzer.models.vol_surface import (
 )
 from market_analyzer.service.vol_surface import VolSurfaceService
 from market_analyzer.features.vol_surface import compute_vol_surface
+
+# Universe filtering
+from market_analyzer.models.universe import (
+    AssetType,
+    SortField,
+    UniverseCandidate,
+    UniverseFilter,
+    UniverseScanResult,
+    PRESETS as UNIVERSE_PRESETS,
+)
+from market_analyzer.service.universe import UniverseService
 
 # Trading plan
 from market_analyzer.models.trading_plan import (
@@ -213,6 +226,42 @@ from market_analyzer.features.black_swan import compute_black_swan_alert
 # Features
 from market_analyzer.features.pipeline import compute_features
 from market_analyzer.features.technicals import compute_technicals
+
+# TradeSpec factory (public API for eTrading)
+from market_analyzer.trade_spec_factory import (
+    create_trade_spec,
+    build_iron_condor,
+    build_credit_spread,
+    build_debit_spread,
+    build_calendar,
+    from_dxlink_symbols,
+    to_dxlink_symbols,
+    parse_dxlink_symbol,
+)
+
+# Trade analytics (public API for eTrading)
+from market_analyzer.trade_lifecycle import (
+    AggregatedGreeks,
+    AlignedStrikes,
+    Breakevens,
+    ExitMonitorResult,
+    ExitSignal,
+    FilteredTrades,
+    IncomeEntryCheck,
+    IncomeYield,
+    POPEstimate,
+    TradeHealthCheck,
+    aggregate_greeks,
+    align_strikes_to_levels,
+    check_income_entry,
+    check_trade_health,
+    compute_breakevens,
+    compute_income_yield,
+    estimate_pop,
+    filter_trades_by_account,
+    get_adjustment_recommendation,
+    monitor_exit_conditions,
+)
 
 __all__ = [
     # Config
@@ -403,17 +452,58 @@ __all__ = [
     "IntradayMonitorResult",
     "IntradayUrgency",
     # Quotes (broker-agnostic)
+    "AccountBalance",
     "OptionQuote",
     "QuoteSnapshot",
     "MarketMetrics",
     "OptionQuoteService",
     # Broker ABCs
+    "AccountProvider",
     "BrokerSession",
     "MarketDataProvider",
     "MarketMetricsProvider",
+    "WatchlistProvider",
+    # Universe filtering
+    "AssetType",
+    "SortField",
+    "UniverseCandidate",
+    "UniverseFilter",
+    "UniverseScanResult",
+    "UNIVERSE_PRESETS",
+    "UniverseService",
     # Config
     "BrokerSettings",
     # Functions
     "compute_features",
     "compute_technicals",
+    # TradeSpec factory (public API for eTrading)
+    "create_trade_spec",
+    "build_iron_condor",
+    "build_credit_spread",
+    "build_debit_spread",
+    "build_calendar",
+    "from_dxlink_symbols",
+    "to_dxlink_symbols",
+    "parse_dxlink_symbol",
+    # Trade analytics (public API for eTrading)
+    "AggregatedGreeks",
+    "AlignedStrikes",
+    "Breakevens",
+    "ExitMonitorResult",
+    "ExitSignal",
+    "FilteredTrades",
+    "IncomeEntryCheck",
+    "IncomeYield",
+    "POPEstimate",
+    "aggregate_greeks",
+    "align_strikes_to_levels",
+    "check_income_entry",
+    "compute_breakevens",
+    "compute_income_yield",
+    "estimate_pop",
+    "filter_trades_by_account",
+    "monitor_exit_conditions",
+    "TradeHealthCheck",
+    "check_trade_health",
+    "get_adjustment_recommendation",
 ]

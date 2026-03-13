@@ -107,9 +107,25 @@ class RegimeService:
 
         return None
 
+    # Minimum OHLCV rows needed for reliable regime detection.
+    # Raw features need max_window (~20) warmup, z-score needs another ~20,
+    # 5d log returns eat 5 more, trend_strength.shift(window) eats another ~20.
+    # Total: ~65 rows minimum. We require 80 for safety.
+    MIN_OHLCV_ROWS = 80
+
+    def _check_data_sufficiency(self, ticker: str, df: pd.DataFrame) -> None:
+        """Raise ValueError early if insufficient data for regime detection."""
+        if len(df) < self.MIN_OHLCV_ROWS:
+            raise ValueError(
+                f"{ticker}: insufficient data for regime detection "
+                f"({len(df)} rows, need {self.MIN_OHLCV_ROWS}+). "
+                f"Ticker may be newly listed."
+            )
+
     def fit(self, ticker: str, ohlcv: pd.DataFrame | None = None) -> None:
         """Train/retrain HMM for a given instrument."""
         df = self._get_ohlcv(ticker, ohlcv)
+        self._check_data_sufficiency(ticker, df)
         features = compute_features(df, self.feature_config)
 
         trainer = HMMTrainer(self.config)
@@ -123,8 +139,10 @@ class RegimeService:
         """Detect current regime for a single instrument.
 
         Auto-fits if no model exists. Auto-fetches OHLCV if data_service available.
+        Raises ValueError if insufficient data (newly listed ticker).
         """
         df = self._get_ohlcv(ticker, ohlcv)
+        self._check_data_sufficiency(ticker, df)
 
         trainer = self._get_trainer(ticker)
         if trainer is None:
@@ -171,6 +189,7 @@ class RegimeService:
     ) -> RegimeExplanation:
         """Master inspection: features + model info + regime series + explanation."""
         df = self._get_ohlcv(ticker, ohlcv)
+        self._check_data_sufficiency(ticker, df)
 
         # Ensure model is fitted
         trainer = self._get_trainer(ticker)

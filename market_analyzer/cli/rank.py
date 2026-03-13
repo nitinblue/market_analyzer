@@ -47,13 +47,14 @@ def main() -> None:
     )
 
     print("Initializing services...")
-    market_data, market_metrics = (
-        connect_broker(is_paper=args.paper) if args.broker else (None, None)
+    market_data, market_metrics, account_provider, _watchlist = (
+        connect_broker(is_paper=args.paper) if args.broker else (None, None, None, None)
     )
     ma = MarketAnalyzer(
         data_service=DataService(),
         market_data=market_data,
         market_metrics=market_metrics,
+        account_provider=account_provider,
     )
 
     if not ma.quotes.has_broker:

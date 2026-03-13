@@ -21,7 +21,7 @@ class MinimalMarketData(MarketDataProvider):
     def get_option_chain(self, ticker, expiration=None):
         return []
 
-    def get_quotes(self, legs):
+    def get_quotes(self, legs, *, ticker="", include_greeks=True):
         return []
 
     def get_greeks(self, legs):
@@ -62,7 +62,7 @@ class MockBrokerWithIntraday(MarketDataProvider):
     def get_option_chain(self, ticker, expiration=None):
         return []
 
-    def get_quotes(self, legs):
+    def get_quotes(self, legs, *, ticker="", include_greeks=True):
         return []
 
     def get_greeks(self, legs):
@@ -85,7 +85,7 @@ class FailingBroker(MarketDataProvider):
     def get_option_chain(self, ticker, expiration=None):
         raise ConnectionError("down")
 
-    def get_quotes(self, legs):
+    def get_quotes(self, legs, *, ticker="", include_greeks=True):
         raise ConnectionError("down")
 
     def get_greeks(self, legs):

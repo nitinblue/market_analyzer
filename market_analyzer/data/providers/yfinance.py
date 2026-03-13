@@ -33,8 +33,12 @@ class YFinanceProvider(DataProvider):
 
     @staticmethod
     def _resolve_ticker(ticker: str) -> str:
-        """Translate user-facing ticker to yfinance symbol."""
-        return _YFINANCE_ALIASES.get(ticker.upper(), ticker)
+        """Translate user-facing ticker to yfinance symbol.
+
+        Handles DXLink-style ``$SPX`` prefixes and standard aliases.
+        """
+        clean = ticker.lstrip("$").upper()
+        return _YFINANCE_ALIASES.get(clean, clean)
 
     @property
     def provider_type(self) -> ProviderType:

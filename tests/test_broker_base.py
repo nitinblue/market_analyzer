@@ -56,7 +56,7 @@ class MockMarketData(MarketDataProvider):
             option_type="call", bid=2.50, ask=2.60, mid=2.55,
         )]
 
-    def get_quotes(self, legs):
+    def get_quotes(self, legs, *, ticker="", include_greeks=True):
         return []
 
     def get_greeks(self, legs):

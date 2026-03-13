@@ -875,6 +875,382 @@ Both paths have timeouts. Callers must `coro.close()` in except blocks to preven
 
 ---
 
+## SaaS Deployment Contract (Owner: Nitin)
+
+### Principle: market_analyzer is Stateless
+
+market_analyzer is a **pure library** — it computes and returns results. It holds **no tenant state, no sessions, no persistent caches** between calls. The SaaS application (eTrading) owns all state: authentication, sessions, tenant isolation, caching policy, and credential management.
+
+**Invariant:** A fresh `MarketAnalyzer()` instance per request must produce identical results to a reused one. No call should depend on prior calls having been made on the same instance.
+
+### Two Broker Connection Modes
+
+#### Mode 1: Standalone / CLI (market_analyzer authenticates)
+
+Used when running market_analyzer directly from terminal. The library loads credentials and manages the broker session lifecycle.
+
+```python
+# CLI usage: analyzer-cli --broker --paper
+# Internally uses cli/_broker.py → connect_broker()
+
+from market_analyzer.broker.tastytrade import connect_tastytrade
+
+market_data, metrics = connect_tastytrade(is_paper=True)
+ma = MarketAnalyzer(
+    data_service=DataService(),
+    market_data=market_data,
+    market_metrics=metrics,
+)
+```
+
+**Credential chain:** env vars (`TASTYTRADE_***_LIVE`, `_PAPER`, `_DATA`) → YAML fallback (`tastytrade_broker.yaml`) → fail with clear error.
+
+**Session class:** `TastyTradeBrokerSession` — loads credentials itself, manages connect/disconnect.
+
+#### Mode 2: SaaS / Embedded (caller passes pre-authenticated sessions)
+
+Used when eTrading (or any SaaS app) calls market_analyzer. The caller owns authentication — market_analyzer **never sees credentials**.
+
+```python
+# eTrading already has authenticated tastytrade SDK sessions
+from market_analyzer.broker.tastytrade import connect_from_sessions
+from market_analyzer import MarketAnalyzer, DataService
+
+market_data, metrics = connect_from_sessions(
+    sdk_session=tenant_sdk_session,      # Pre-authenticated Session
+    data_session=tenant_data_session,    # DXLink session (optional, defaults to sdk_session)
+)
+ma = MarketAnalyzer(
+    data_service=DataService(cache=tenant_scoped_cache),
+    market_data=market_data,
+    market_metrics=metrics,
+)
+```
+
+**Session class:** `ExternalBrokerSession` — wraps pre-authenticated SDK sessions. `connect()` returns True immediately. `disconnect()` is a no-op (caller owns lifecycle).
+
+**Key files:**
+- `broker/tastytrade/__init__.py` — `connect_tastytrade()` (Mode 1), `connect_from_sessions()` (Mode 2)
+- `broker/tastytrade/session.py` — `TastyTradeBrokerSession` (Mode 1), `ExternalBrokerSession` (Mode 2)
+- `broker/base.py` — `BrokerSession`, `MarketDataProvider`, `MarketMetricsProvider` ABCs
+- `cli/_broker.py` — CLI-only helper, loads eTrading `.env`, not used in SaaS mode
+
+### Statelessness Violations (Must Fix)
+
+The following module-level mutable state must be eliminated for clean SaaS deployment:
+
+| Location | Variable | What it holds | Fix |
+|----------|----------|---------------|-----|
+| `config/__init__.py:549` | `_cached_settings` | Singleton Settings object | Accept `Settings` via constructor; no global cache |
+| `fundamentals/fetch.py:28` | `_cache` | Per-ticker fundamentals with TTL | Move to caller-owned cache or accept cache dict as param |
+| `macro/calendar.py:100` | `_ALL_EVENTS` | Lazy-built macro event list | Build fresh per call or accept as param |
+| `broker/tastytrade/market_data.py:28` | `_thread_pool` | 2-worker ThreadPoolExecutor | Accept executor as dependency or create per-instance |
+| `broker/tastytrade/market_data.py:349` | `_loop_lock` | Class-level threading.Lock | Make instance-level, not class-level |
+| `service/regime_service.py` | `self._trainers` | In-memory HMM model cache | Caller provides model store or flush between requests |
+| `service/ranking.py:363` | feedback parquet path | Writes to `~/.market_analyzer/feedback/` | Accept feedback store as dependency |
+
+**Rule for Claude:** When adding new code, never introduce module-level mutable state. All caches, connections, and config must be injectable via constructor parameters.
+
+### Multi-Broker Architecture
+
+Three ABCs in `broker/base.py` — any broker can implement:
+
+| ABC | Responsibility | TastyTrade impl |
+|-----|---------------|-----------------|
+| `BrokerSession` | Auth, connect/disconnect lifecycle | `TastyTradeBrokerSession`, `ExternalBrokerSession` |
+| `MarketDataProvider` | Option chains, quotes, Greeks, intraday candles | `TastyTradeMarketData` (DXLink streamer) |
+| `MarketMetricsProvider` | IV rank, IV percentile, beta, liquidity | `TastyTradeMetrics` (REST API) |
+
+**Adding a new broker (e.g., Schwab, IBKR):**
+1. Create `broker/<name>/session.py` implementing `BrokerSession`
+2. Create `broker/<name>/market_data.py` implementing `MarketDataProvider`
+3. Create `broker/<name>/metrics.py` implementing `MarketMetricsProvider` (optional)
+4. Add `connect_<name>()` and `connect_from_sessions()` in `broker/<name>/__init__.py`
+5. All existing services work unchanged — they only see the ABCs
+
+**Design constraint:** Services never import broker implementations directly. They accept `MarketDataProvider` / `MarketMetricsProvider` via constructor. The caller (CLI or eTrading) decides which broker to wire in.
+
+### Multi-Market Architecture
+
+**Current state: ~40% wired.**
+
+Configuration exists (`MarketDef` with timezone, hours, suffix, reference tickers for US + India). CLI accepts `--market india`. But the market parameter only flows through `MarketContextService` — most services ignore it.
+
+**What works today:**
+- `config/__init__.py` — `MarketDef` and `MarketSettings` with US + India definitions
+- `service/context.py` — Uses market-specific reference tickers and VIX equivalent
+- `cli/interactive.py` — `--market` flag wired to `MarketAnalyzer(market=...)`
+- `macro/_rbi_dates.py` — RBI MPC dates defined (dormant, not wired into macro calendar)
+
+**What's missing for true multi-market:**
+
+| Gap | Impact | Where to fix |
+|-----|--------|-------------|
+| Ticker suffix not applied (`.NS` for India) | Data fetches fail for Indian tickers | `DataService` or `YFinanceProvider._resolve_ticker()` |
+| Macro calendar US-only (FOMC/NFP/CPI) | India shows no macro events | `macro/calendar.py` — conditional event loading |
+| `market` param not threaded through services | No market-specific thresholds | `RegimeService`, `TechnicalService`, `OpportunityService` constructors |
+| BlackSwanService hardcodes `^VIX` | India alerts use wrong volatility | Use `market_def.stress_vix_ticker` |
+| No holiday calendars per market | Cache staleness wrong on NSE holidays | `ParquetCache` needs market-aware holiday logic |
+| ORB hardcodes market_close=16:00 | Wrong for India (15:30) | Read from `market_def.market_close` |
+| Option expiry structure US-only | India has different weekly expiry rules | Opportunity assessors need market-aware expiry logic |
+
+**Adding a new market:**
+1. Add `MarketDef` entry in `config/defaults.yaml` under `markets`
+2. Add macro dates file in `macro/` (like `_rbi_dates.py`)
+3. Wire macro dates into `macro/calendar.py` conditional on market
+4. Add ticker alias mapping if needed (like `_YFINANCE_ALIASES`)
+5. Add holiday calendar for cache staleness logic
+
+### SaaS Caller Contract (eTrading)
+
+eTrading is responsible for:
+
+| Responsibility | How |
+|----------------|-----|
+| **Tenant authentication** | eTrading authenticates with broker per-tenant, passes SDK sessions via `connect_from_sessions()` |
+| **Tenant-scoped cache** | eTrading creates `ParquetCache(cache_dir=tenant_path)` and passes to `DataService(cache=...)` |
+| **Tenant-scoped config** | eTrading creates `Settings(...)` directly (not via `get_settings()` singleton) and passes to services |
+| **Broker lifecycle** | eTrading owns connect/disconnect. `ExternalBrokerSession` is a thin wrapper, not a lifecycle manager |
+| **Request isolation** | eTrading creates `MarketAnalyzer()` per request (or per tenant session). Never shares across tenants |
+| **Credential storage** | eTrading stores broker credentials securely. market_analyzer never persists credentials |
+| **Rate limiting** | eTrading manages API rate limits for yfinance/broker per tenant |
+
+market_analyzer is responsible for:
+
+| Responsibility | How |
+|----------------|-----|
+| **Computation** | Pure analysis: regime detection, technicals, opportunity assessment, ranking |
+| **Data fetching** | Fetch via providers when asked, but caller controls cache layer |
+| **No side effects** | No writes to shared state, no credential reads in SaaS mode |
+| **Graceful degradation** | Works without broker (returns None for live data). Works without cache (fetches fresh) |
+
+---
+
+## SaaS Readiness Gap Analysis (2026-03-12)
+
+Comprehensive audit of market_analyzer fitness for deployment inside eTrading SaaS. Organized by category with priority for remediation.
+
+### GAP-1: Statelessness Violations (Module-Level Mutable State)
+
+market_analyzer must be stateless — no global caches, no singletons, no mutable module state. The SaaS app (eTrading) owns all state.
+
+| ID | Location | Variable | What it holds | Priority | Fix |
+|----|----------|----------|---------------|----------|-----|
+| S1 | `config/__init__.py:549` | `_cached_settings` | Singleton Settings | HIGH | Accept `Settings` via constructor; remove global |
+| S2 | `fundamentals/fetch.py:28` | `_cache` | Per-ticker fundamentals dict | HIGH | Move to caller-owned cache or param |
+| S3 | `macro/calendar.py:100` | `_ALL_EVENTS` | Lazy-built macro list | LOW | Build fresh per call (cheap) or accept as param |
+| S4 | `broker/tastytrade/market_data.py:28` | `_thread_pool` | 2-worker ThreadPoolExecutor | HIGH | Per-instance or injected executor |
+| S5 | `broker/tastytrade/market_data.py:349` | `_loop_lock` | Class-level Lock | HIGH | Make instance-level |
+| S6 | `service/regime_service.py` | `self._trainers` | In-memory HMM model cache | MEDIUM | Flush per request or inject model store |
+| S7 | `service/ranking.py:363` | feedback parquet | Writes to `~/.market_analyzer/feedback/` | LOW | Accept feedback dir as param |
+
+### GAP-2: Hardcoded Paths (No Tenant Isolation)
+
+All paths default to `~/.market_analyzer/`. In SaaS, multiple tenants share the same process — these paths collide.
+
+| ID | Location | Path | Configurable? | Priority | Fix |
+|----|----------|------|---------------|----------|-----|
+| P1 | `data/cache/parquet_cache.py:32` | `~/.market_analyzer/cache/` | Partial (`cache_dir` param exists) | MEDIUM | Always require explicit `cache_dir` in SaaS |
+| P2 | `service/regime_service.py:57` | `~/.market_analyzer/models/` | Partial (`model_dir` config) | MEDIUM | Same — explicit path |
+| P3 | `config/__init__.py:546` | `~/.market_analyzer/config.yaml` | Partial (`user_config_path` param) | MEDIUM | In SaaS, pass `Settings` directly, skip YAML |
+| P4 | `service/ranking.py:363` | `~/.market_analyzer/feedback/` | **No** | LOW | Add `feedback_dir` to config |
+| P5 | `broker/tastytrade/session.py:236` | `~/.market_analyzer/*.yaml` | Partial (`config_path` param) | LOW | Not used in SaaS (Mode 2 skips this) |
+| P6 | `cli/_broker.py:44` | `~/PythonProjects/eTrading/.env` | **No** | LOW | CLI-only, not used in SaaS |
+
+### GAP-3: Thread Safety & Async (SaaS/FastAPI Incompatible)
+
+The broker layer mixes sync/async patterns that are unsafe in concurrent server environments.
+
+| ID | Location | Pattern | Severity | Impact |
+|----|----------|---------|----------|--------|
+| A1 | `market_data.py:28` | Global `ThreadPoolExecutor(max_workers=2)` | CRITICAL | 2 workers for all tenants — bottleneck, timeout cascades |
+| A2 | `market_data.py:349` | Class-level `_loop_lock = threading.Lock()` | CRITICAL | All instances serialize on one lock — deadlocks under load |
+| A3 | `market_data.py:65`, `metrics.py:33`, `session.py:101` | Direct `asyncio.run()` calls | CRITICAL | Crashes in FastAPI (can't nest `asyncio.run()` in running loop) |
+| A4 | `market_data.py:206,277,316` | `asyncio.get_event_loop().time()` in async code | HIGH | Should use `asyncio.get_running_loop()` |
+| A5 | `market_data.py:373` | `asyncio.new_event_loop()` stored on instance | HIGH | Thread-affinity violations in worker pools |
+| A6 | `market_data.py:206-347` | Spin-loops (10/5/15s) waiting for DXLink snapshots | MEDIUM | Blocks event loop, slows concurrent requests |
+
+**Current state:** Broker integration works for **standalone CLI**. For SaaS, the async layer needs redesign — either fully async public API or properly isolated sync wrappers.
+
+### GAP-4: Multi-Market Execution (Config Exists, Wiring Incomplete)
+
+`MarketDef` and `MarketSettings` are fully defined in config. The `market` param only flows through `MarketContextService` — 15+ other services ignore it.
+
+| ID | Gap | Where | Impact | Priority |
+|----|-----|-------|--------|----------|
+| M1 | Ticker suffix (`.NS`) never applied | `DataService`, `YFinanceProvider._resolve_ticker()` | India data fetches return wrong ticker | HIGH |
+| M2 | BlackSwanService hardcodes `^VIX` | `service/black_swan.py:54` | India alerts use wrong volatility index | HIGH |
+| M3 | Macro calendar returns all events | `macro/calendar.py` | India user sees FOMC, US user sees RBI | MEDIUM |
+| M4 | RBI MPC dates defined but dormant | `macro/_rbi_dates.py` | India market has no monetary policy events | MEDIUM |
+| M5 | ORB hardcodes `market_close=16:00` | `features/patterns/orb.py:52-59` | Wrong for India (15:30) | MEDIUM |
+| M6 | `market` not threaded through services | 15+ services in `service/` | Can't apply market-specific thresholds | MEDIUM |
+| M7 | No holiday calendars per market | `ParquetCache` staleness logic | Cache marked stale on NSE holidays | LOW |
+| M8 | Option expiry structure US-only | Opportunity assessors | India weeklies have different patterns | LOW |
+
+### GAP-5: Multi-Broker (Architecture Ready, CLI Needs Selection)
+
+Broker ABCs are clean and broker-agnostic. All services use ABCs, never concrete types. Only one implementation exists (TastyTrade).
+
+| ID | Gap | Where | Priority |
+|----|-----|-------|----------|
+| B1 | CLI hardcoded to TastyTrade | `cli/_broker.py:52-59` | LOW (until second broker added) |
+| B2 | `BrokerSettings.credentials_path` defaults to tastytrade | `config/__init__.py:498` | LOW |
+| B3 | No Schwab/IBKR implementations | `broker/` | FUTURE (implement when needed) |
+
+**Not a gap:** Service layer, models, opportunity assessors, adjustment service — all broker-agnostic already.
+
+### GAP-6: Data Transparency (Partially Fixed 2026-03-12)
+
+| ID | Gap | Status | Notes |
+|----|-----|--------|-------|
+| D1 | Plan generates full results when DXLink is down | **FIXED** | Added `data_warnings` to `DailyTradingPlan`, surfaced in CLI |
+| D2 | DXLink errors logged at WARNING, never bubbled | OPEN | Services silently degrade — caller doesn't know data quality |
+| D3 | `max_entry_price=None` without explanation | **FIXED** | Warning now explains "DXLink streaming may be down" |
+| D4 | No data freshness indicator on plan output | OPEN | Should show cache age for each ticker's OHLCV |
+
+### GAP-7: Cache Concurrency (Single-User Assumptions)
+
+| ID | Gap | Where | Priority |
+|----|-----|-------|----------|
+| C1 | `_meta.json` read-modify-write race | `parquet_cache.py:47-76` | MEDIUM (concurrent writes corrupt meta) |
+| C2 | No file locking on cache writes | `parquet_cache.py:93-112` | MEDIUM (parquet writes are atomic, meta is not) |
+
+### Remediation Priority Order
+
+**Phase 1 — Must fix before SaaS launch:**
+1. A3: Replace `asyncio.run()` with `iscoroutine` guards (partially done — session.py:101 done, market_data.py:65 and metrics.py:33 done)
+2. S1: Make `get_settings()` non-singleton (accept Settings via constructor)
+3. S2: Remove global `_cache` in fundamentals
+4. D1: Data warnings on plan (**done**)
+
+**Phase 2 — Fix for production quality:**
+5. A1+A2: Redesign `_run_async()` — per-instance lock, configurable thread pool
+6. M1: Apply market ticker suffix in DataService/yfinance
+7. M2: Use `market_def.stress_vix_ticker` in BlackSwanService
+8. P1-P3: Require explicit paths in SaaS mode (constructor enforcement)
+9. S4+S5: Per-instance thread pool and lock
+
+**Phase 3 — Complete multi-market:**
+10. M3+M4: Market-aware macro calendar
+11. M5: Market-aware ORB hours
+12. M6: Thread `market` through all services
+13. M7+M8: Holiday calendars and expiry patterns
+
+**Phase 4 — Future:**
+14. B1-B3: Multi-broker CLI selection (when second broker needed)
+15. C1-C2: Cache concurrency (when serving concurrent users)
+16. A4-A6: Full async redesign of broker layer
+
+---
+
+## Option Chain & Real-Time Market Data Architecture
+
+### Overview
+
+All real-time option and market data flows through the `broker/tastytrade/` sub-package. This is the **only** path for live data — no Black-Scholes, no theoretical pricing, no hardcoded values.
+
+```
+broker/tastytrade/
+├── __init__.py       # connect_tastytrade(), connect_from_sessions()
+├── _async.py         # run_sync() — async-to-sync bridge (persistent event loop)
+├── session.py        # TastyTradeBrokerSession, ExternalBrokerSession
+├── market_data.py    # TastyTradeMarketData (MarketDataProvider ABC)
+├── metrics.py        # TastyTradeMetrics (MarketMetricsProvider ABC)
+├── account.py        # TastyTradeAccount (AccountProvider ABC)
+├── dxlink.py         # Low-level DXLink fetch utilities (quotes, Greeks, candles)
+└── symbols.py        # Streamer symbol conversion (build, parse, OCC↔DXLink)
+```
+
+### Two Connection Modes
+
+| Mode | Who authenticates | Entry point | Used by |
+|------|-------------------|-------------|---------|
+| **Standalone** | market_analyzer CLI | `connect_tastytrade()` | analyzer-cli, analyzer-explore |
+| **SaaS (embedded)** | eTrading | `connect_from_sessions(sdk_session, data_session)` | cotrader, API endpoints |
+
+Both return a 3-tuple: `(TastyTradeMarketData, TastyTradeMetrics, TastyTradeAccount)`.
+
+### DXLink Data Flow
+
+```
+Caller → MarketDataProvider ABC
+  → TastyTradeMarketData (market_data.py)
+    → dxlink.fetch_quotes()      # bid/ask via DXQuote events
+    → dxlink.fetch_greeks()      # delta/gamma/theta/vega via DXGreeks events
+    → dxlink.fetch_candles()     # intraday OHLCV via Candle events
+    → dxlink.fetch_underlying_price()  # equity mid via DXQuote
+    → dxlink.fetch_option_chain_symbols()  # NestedOptionChain → streamer symbols
+    All via _async.run_sync() → persistent event loop
+```
+
+### DXLink Timeouts (aligned with eTrading)
+
+| Data type | Total timeout | Per-event timeout | Notes |
+|-----------|--------------|-------------------|-------|
+| Quotes (bid/ask) | 3s | 0.5s | Fast — just price levels |
+| Greeks | 15s | 2s | Slower — computed server-side |
+| Underlying price | 5s | 5s | Single event |
+| Intraday candles | 10s | 2s | Snapshot collection |
+
+### Streamer Symbol Format
+
+DXLink uses `.{TICKER}{YYMMDD}{C|P}{STRIKE}` (e.g., `.SPY260320P580`).
+
+Utilities in `symbols.py`:
+- `build_streamer_symbol(ticker, exp, type, strike)` → `.SPY260320P580`
+- `parse_streamer_symbol(".SPY260320P580")` → `ParsedSymbol(ticker, exp, type, strike)`
+- `leg_to_streamer_symbol(ticker, leg)` → streamer symbol from LegSpec
+- `occ_to_streamer()` / `streamer_to_occ()` — OCC ↔ DXLink conversion
+
+### Error Classification
+
+`dxlink.classify_error(exc)` returns `DXLinkError`:
+- `GRANT_REVOKED` — token expired, need re-auth
+- `TIMEOUT` — no data within deadline
+- `CONNECTION_FAILED` — WebSocket/network issue
+- `NO_DATA` — connected but no events
+- `UNKNOWN` — unrecognized error
+
+### Quote Caching (OptionQuoteService)
+
+`service/option_quotes.py` caches quotes at the leg level:
+- Key: `strike|type|expiration` (e.g., `580.00|put|2026-03-20`)
+- `prefetch_leg_quotes(all_legs)` — batch fetch + dedup before plan iteration
+- `clear_cache()` — reset between plan runs
+- Eliminates duplicate DXLink connections for same ticker across strategies
+
+### Option Chain via NestedOptionChain (SDK v12)
+
+SDK v12 removed `Option.get_option_chain()`. We use `NestedOptionChain.get()`:
+```python
+chains = NestedOptionChain.get(session, ticker)
+for chain in chains:
+    for exp in chain.expirations:
+        for strike in exp.strikes:
+            # strike.call_streamer_symbol → ".SPY260320C580"
+            # strike.put_streamer_symbol → ".SPY260320P580"
+```
+Then DXLink fetches live bid/ask and Greeks for those symbols.
+
+### run_sync() — Async Bridge
+
+`_async.py` provides `run_sync(coro, timeout)` for calling async DXLink code from sync contexts:
+- **CLI/standalone**: Uses persistent event loop with `loop.run_until_complete()`
+- **FastAPI/SaaS**: Detects running loop, submits to thread pool with `asyncio.run()`
+- **Thread-safe**: Shared lock protects event loop creation
+- **Prevents "Event loop is closed"**: Reuses loop instead of `asyncio.run()` which closes it
+
+### Data Session Fallback Chain
+
+DXLink requires a valid session. The fallback order:
+1. **DATA credentials** (`TASTYTRADE_***_DATA`) — dedicated live-only session
+2. **Reuse trading session** (if live, not paper)
+3. **LIVE credentials** (new session from `TASTYTRADE_***_LIVE`)
+
+Validation: opens a DXLinkStreamer, subscribes to SPY, confirms one quote arrives.
+
+---
+
 ## Change Log
 
 | Date | Decision | Rationale |
@@ -887,3 +1263,6 @@ Both paths have timeouts. Callers must `coro.close()` in except blocks to preven
 | 2026-02-23 | Trading workflow restructure | Added 6 workflow services (context, instrument, screening, entry, strategy, exit), 5 new model files, multi-market config (US + India), interactive CLI (analyzer-cli), API.md. Additive — no existing files moved, all 580 tests pass. |
 | 2026-02-23 | Opportunity folder reorganized | Split opportunity/ into setups/ (breakout, momentum, mean_reversion) and option_plays/ (zero_dte, leap, earnings). Top-level __init__.py re-exports everything for backward compat. |
 | 2026-03-11 | skip_intraday for plan generation | DXLink intraday candle fetches (15s/ticker) caused plan timeouts. Added `skip_intraday` flag to `rank()` and `plan.generate()`. ORB data not needed for daily plan. Also added timeout to `_run_async()` and `coro.close()` cleanup. |
+| 2026-03-12 | SaaS deployment contract documented | Two broker modes (standalone vs embedded), statelessness violations cataloged, multi-broker/multi-market gaps identified. eTrading is the SaaS app; market_analyzer is stateless library. |
+| 2026-03-12 | SaaS readiness gap analysis | 7 gap categories, 30+ individual items cataloged. Phased remediation plan. Fixed: DXLink data session fallback, data_warnings on DailyTradingPlan, $-prefix ticker resolution. |
+| 2026-03-12 | DXLink refactoring + utilities | Extracted DXLink fetch logic into `dxlink.py` (5 async utilities + error classification). Created `symbols.py` (streamer symbol build/parse/convert). `market_data.py` now thin orchestrator. Added `AccountProvider` ABC + `TastyTradeAccount`. `connect_from_sessions` returns 3-tuple. eTrading engine.py updated. 990 tests. |

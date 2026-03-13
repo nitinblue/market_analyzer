@@ -10,18 +10,18 @@ from market_analyzer.cli._broker import (
 
 
 class TestConnectBroker:
-    def test_returns_none_none_when_tastytrade_not_installed(self):
+    def test_returns_none_tuple_when_tastytrade_not_installed(self):
         with patch.dict("sys.modules", {"tastytrade": None}):
             with patch(
                 "market_analyzer.cli._broker.connect_broker",
                 wraps=connect_broker,
             ):
-                md, mm = connect_broker()
+                md, mm, acct, wl = connect_broker()
                 # May or may not be None depending on install;
                 # just verify it doesn't crash
                 assert isinstance(md, type(None)) or md is not None
 
-    def test_returns_none_none_on_connection_failure(self):
+    def test_returns_none_tuple_on_connection_failure(self):
         mock_session = MagicMock()
         mock_session.connect.return_value = False
 
@@ -29,9 +29,11 @@ class TestConnectBroker:
             "market_analyzer.broker.tastytrade.session.TastyTradeBrokerSession",
             return_value=mock_session,
         ):
-            md, mm = connect_broker()
+            md, mm, acct, wl = connect_broker()
             assert md is None
             assert mm is None
+            assert acct is None
+            assert wl is None
 
     def test_returns_providers_on_success(self):
         mock_session = MagicMock()
@@ -45,12 +47,20 @@ class TestConnectBroker:
             "market_analyzer.broker.tastytrade.market_data.TastyTradeMarketData",
         ) as MockMD, patch(
             "market_analyzer.broker.tastytrade.metrics.TastyTradeMetrics",
-        ) as MockMM:
-            md, mm = connect_broker()
+        ) as MockMM, patch(
+            "market_analyzer.broker.tastytrade.account.TastyTradeAccount",
+        ) as MockAcct, patch(
+            "market_analyzer.broker.tastytrade.watchlist.TastyTradeWatchlist",
+        ) as MockWL:
+            md, mm, acct, wl = connect_broker()
             assert md is not None
             assert mm is not None
+            assert acct is not None
+            assert wl is not None
             MockMD.assert_called_once_with(mock_session)
             MockMM.assert_called_once_with(mock_session)
+            MockAcct.assert_called_once_with(mock_session)
+            MockWL.assert_called_once_with(mock_session)
 
 
 class TestAddBrokerArgs:
@@ -125,3 +135,47 @@ class TestNoBSPricingAnywhere:
         # Check the module doesn't have math in its namespace for BS
         source = open(helpers.__file__).read()
         assert "import math" not in source, "math import should be removed (was only for BS)"
+
+
+class TestAccountBalance:
+    """Test account balance integration."""
+
+    def test_account_balance_model(self):
+        from market_analyzer.models.quotes import AccountBalance
+        bal = AccountBalance(
+            account_number="TEST123",
+            net_liquidating_value=50000.0,
+            cash_balance=25000.0,
+            derivative_buying_power=40000.0,
+            equity_buying_power=50000.0,
+            maintenance_requirement=10000.0,
+            source="test",
+        )
+        assert bal.net_liquidating_value == 50000.0
+        assert bal.derivative_buying_power == 40000.0
+
+    def test_risk_budget_has_account_fields(self):
+        from market_analyzer.models.trading_plan import RiskBudget
+        rb = RiskBudget(
+            account_size=50000.0,
+            account_source="broker",
+            max_new_positions=3,
+            max_daily_risk_dollars=1000.0,
+            position_size_factor=1.0,
+        )
+        assert rb.account_size == 50000.0
+        assert rb.account_source == "broker"
+
+    def test_risk_budget_defaults_to_config(self):
+        from market_analyzer.models.trading_plan import RiskBudget
+        rb = RiskBudget(
+            max_new_positions=3,
+            max_daily_risk_dollars=1000.0,
+            position_size_factor=1.0,
+        )
+        assert rb.account_source == "config"
+
+    def test_account_provider_abc(self):
+        from market_analyzer.broker.base import AccountProvider
+        import abc
+        assert abc.ABC in AccountProvider.__mro__

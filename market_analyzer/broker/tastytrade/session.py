@@ -96,9 +96,11 @@ class TastyTradeBrokerSession(BrokerSession):
             for secret, token, is_test, label in cred_attempts:
                 try:
                     self._session = Session(secret, token, is_test=is_test)
+                    from market_analyzer.broker.tastytrade._async import run_sync
+
                     result = Account.get(self._session)
                     if asyncio.iscoroutine(result):
-                        accounts = asyncio.run(result)
+                        accounts = run_sync(result)
                     else:
                         accounts = result
                     if not isinstance(accounts, list):
@@ -120,10 +122,8 @@ class TastyTradeBrokerSession(BrokerSession):
             else:
                 self._account = next(iter(self._accounts.values()))
 
-            # DXLink data session — use DATA creds if available, else same as trading
-            data_secret = self._data_client_secret or self._client_secret
-            data_token = self._data_refresh_token or self._refresh_token
-            self._data_session = Session(data_secret, data_token, is_test=False)
+            # DXLink data session — try DATA creds first, fall back to trading session
+            self._data_session = self._create_data_session(Session)
 
             self._connected = True
             logger.info("Authenticated with TastyTrade (account %s)", self._account.account_number)
@@ -168,6 +168,88 @@ class TastyTradeBrokerSession(BrokerSession):
         if not self._account:
             raise RuntimeError("Not connected — call connect() first")
         return self._account
+
+    def _create_data_session(self, Session):
+        """Create DXLink data session with fallback chain.
+
+        Tries DATA creds first, validates with a DXLink probe (the only way
+        to detect ``invalid_grant`` — ``Session()`` doesn't fail eagerly).
+        Falls back to reusing the live trading session.
+        """
+        candidates: list[tuple] = []
+
+        # 1. Dedicated DATA credentials (preferred)
+        if self._data_client_secret and self._data_refresh_token:
+            candidates.append((
+                self._data_client_secret, self._data_refresh_token,
+                False, "DATA",
+            ))
+
+        # 2. Reuse trading session directly (if live)
+        if self._session and not self._is_paper:
+            candidates.append((None, None, None, "LIVE (reuse trading session)"))
+
+        # 3. Explicit live trading creds as fallback
+        if self._client_secret and self._refresh_token:
+            candidates.append((
+                self._client_secret, self._refresh_token,
+                False, "LIVE (new session)",
+            ))
+
+        for secret, token, is_test, label in candidates:
+            try:
+                if secret is None:
+                    # Reuse existing trading session
+                    session = self._session
+                else:
+                    session = Session(secret, token, is_test=is_test)
+
+                # Validate: open a DXLink streamer briefly to confirm grant
+                if self._validate_dxlink_session(session):
+                    logger.info("DXLink data session validated via %s", label)
+                    return session
+                else:
+                    logger.warning(
+                        "DXLink validation failed for %s credentials", label,
+                    )
+            except Exception as e:
+                logger.warning("%s credentials failed: %s", label, e)
+
+        logger.warning("No valid DXLink data session — streaming unavailable")
+        return self._session  # best effort
+
+    @staticmethod
+    def _validate_dxlink_session(session) -> bool:
+        """Open a DXLink streamer and fetch one quote to confirm the grant is valid.
+
+        Returns True if the session can open a DXLink connection and receive data.
+        This is the only reliable way to detect ``invalid_grant`` since
+        ``Session()`` accepts revoked tokens without error.
+
+        The probe subscribes to a real symbol (SPY quote) because SDK v12
+        errors on TaskGroup cleanup if no subscription was made.
+        """
+        try:
+            from tastytrade.dxfeed import Quote as DXQuote
+            from tastytrade.streamer import DXLinkStreamer
+            from market_analyzer.broker.tastytrade._async import run_sync
+
+            async def _probe():
+                async with DXLinkStreamer(session) as streamer:
+                    await streamer.subscribe(DXQuote, ["SPY"])
+                    event = await asyncio.wait_for(
+                        streamer.get_event(DXQuote), timeout=5.0,
+                    )
+                    return event is not None
+
+            return run_sync(_probe(), timeout=10)
+        except Exception as e:
+            err_str = str(e)
+            if "invalid_grant" in err_str or "Grant revoked" in err_str:
+                logger.warning("DXLink grant revoked for session")
+            else:
+                logger.warning("DXLink probe failed: %s", e)
+            return False
 
     # -- Credential loading --
 

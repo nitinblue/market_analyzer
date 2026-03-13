@@ -25,9 +25,15 @@ from market_analyzer.service.adjustment import AdjustmentService
 from market_analyzer.service.intraday import IntradayService
 from market_analyzer.service.option_quotes import OptionQuoteService
 from market_analyzer.service.trading_plan import TradingPlanService
+from market_analyzer.service.universe import UniverseService
 
 if TYPE_CHECKING:
-    from market_analyzer.broker.base import MarketDataProvider, MarketMetricsProvider
+    from market_analyzer.broker.base import (
+        AccountProvider,
+        MarketDataProvider,
+        MarketMetricsProvider,
+        WatchlistProvider,
+    )
     from market_analyzer.data.service import DataService
 
 
@@ -65,8 +71,11 @@ class MarketAnalyzer:
         market: str | None = None,
         market_data: MarketDataProvider | None = None,
         market_metrics: MarketMetricsProvider | None = None,
+        account_provider: AccountProvider | None = None,
+        watchlist_provider: WatchlistProvider | None = None,
     ) -> None:
         self.data = data_service
+        self.account_provider = account_provider
 
         # --- Existing services (unchanged) ---
         self.regime = RegimeService(config=config, data_service=data_service)
@@ -143,5 +152,9 @@ class MarketAnalyzer:
             market_data=market_data,
             market_metrics=market_metrics,
             data_service=data_service,
+        )
+        self.universe = UniverseService(
+            watchlist_provider=watchlist_provider,
+            metrics_provider=market_metrics,
         )
         self.plan = TradingPlanService(analyzer=self)

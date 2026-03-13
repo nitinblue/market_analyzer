@@ -16,7 +16,7 @@ import pandas as pd
 
 if TYPE_CHECKING:
     from market_analyzer.models.opportunity import LegSpec
-    from market_analyzer.models.quotes import MarketMetrics, OptionQuote
+    from market_analyzer.models.quotes import AccountBalance, MarketMetrics, OptionQuote
 
 
 class BrokerSession(ABC):
@@ -57,10 +57,19 @@ class MarketDataProvider(ABC):
         ...
 
     @abstractmethod
-    def get_quotes(self, legs: list[LegSpec]) -> list[OptionQuote]:
+    def get_quotes(
+        self,
+        legs: list[LegSpec],
+        *,
+        ticker: str = "",
+        include_greeks: bool = True,
+    ) -> list[OptionQuote]:
         """Fetch quotes for specific option legs (strike + exp + type).
 
-        Used by adjustment service for precise leg pricing.
+        Args:
+            legs: Option legs to fetch.
+            ticker: Underlying ticker (required for DXLink streamer symbols).
+            include_greeks: If False, skip Greeks (faster — bid/ask only).
         """
         ...
 
@@ -89,6 +98,55 @@ class MarketDataProvider(ABC):
     def get_underlying_price(self, ticker: str) -> float | None:
         """Real-time underlying price (mid of bid/ask). None if unavailable."""
         return None
+
+
+class WatchlistProvider(ABC):
+    """Abstract provider for broker-managed watchlists."""
+
+    @abstractmethod
+    def get_watchlist(self, name: str) -> list[str]:
+        """Fetch ticker symbols from a named watchlist.
+
+        Args:
+            name: Watchlist name (e.g., 'MA-Income', 'MA-Sectors').
+
+        Returns:
+            List of ticker symbols. Empty list if watchlist not found.
+        """
+        ...
+
+    @abstractmethod
+    def list_watchlists(self) -> list[str]:
+        """List all available watchlist names (private + public)."""
+        ...
+
+    def create_watchlist(self, name: str, tickers: list[str]) -> bool:
+        """Create or update a watchlist with the given tickers.
+
+        Returns True on success. Default: not supported.
+        """
+        return False
+
+    def get_all_equities(
+        self,
+        is_etf: bool | None = None,
+        is_index: bool | None = None,
+    ) -> list[dict]:
+        """Fetch all tradeable equities/ETFs from broker.
+
+        Returns list of dicts with at least: {symbol, is_etf, is_index, description}.
+        Default: empty (not all brokers support this).
+        """
+        return []
+
+
+class AccountProvider(ABC):
+    """Abstract provider for account balance and positions."""
+
+    @abstractmethod
+    def get_balance(self) -> AccountBalance:
+        """Fetch current account balance (buying power, NLV, margin)."""
+        ...
 
 
 class MarketMetricsProvider(ABC):

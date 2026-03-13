@@ -38,6 +38,19 @@ class QuoteSnapshot(BaseModel):
     source: str  # "tastytrade" | "schwab" | "yfinance" | etc.
 
 
+class AccountBalance(BaseModel):
+    """Broker account balance — real buying power for position sizing."""
+
+    account_number: str
+    net_liquidating_value: float      # Total account value
+    cash_balance: float               # Cash available
+    derivative_buying_power: float    # Options buying power (key for sizing)
+    equity_buying_power: float        # Stock buying power
+    maintenance_requirement: float    # Current margin in use
+    pending_cash: float = 0.0
+    source: str = ""                  # "tastytrade" | "schwab" | etc.
+
+
 class MarketMetrics(BaseModel):
     """Market-level metrics for an underlying (IV rank, beta, etc.)."""
 

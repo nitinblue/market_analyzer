@@ -1,0 +1,1148 @@
+"""Trade Lifecycle APIs — the complete trading workflow for eTrading.
+
+Pure computation functions covering every stage of a trade's lifecycle:
+
+    1. PRE-TRADE:  filter_trades_by_account()   — account-aware trade filtering
+                   compute_income_yield()        — ROC, annualized yield, credit/width
+                   align_strikes_to_levels()     — snap strikes to S/R levels
+                   estimate_pop()                — regime-based probability of profit
+                   compute_breakevens()          — breakeven prices
+                   check_income_entry()          — income-optimal entry confirmation
+
+    2. AT ENTRY:   aggregate_greeks()            — net delta/gamma/theta/vega
+
+    3. MONITORING: monitor_exit_conditions()     — profit target, stop loss, DTE, regime
+                   check_trade_health()          — combined exit + adjustment health check
+                   get_adjustment_recommendation() — wrapper for AdjustmentService
+
+Every function takes inputs and returns results. No state, no broker calls,
+no data fetching. eTrading provides the data, market_analyzer computes the answer.
+"""
+
+from __future__ import annotations
+
+import math
+from datetime import date
+from typing import TYPE_CHECKING
+
+from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from market_analyzer.models.adjustment import AdjustmentAnalysis
+    from market_analyzer.models.levels import LevelsAnalysis
+    from market_analyzer.models.opportunity import TradeSpec
+    from market_analyzer.models.quotes import OptionQuote
+    from market_analyzer.models.ranking import RankedEntry
+    from market_analyzer.models.regime import RegimeResult
+    from market_analyzer.models.technicals import TechnicalSnapshot
+    from market_analyzer.models.vol_surface import VolatilitySurface
+
+
+# ── F5: Income Yield Metrics ──
+
+
+class IncomeYield(BaseModel):
+    """Income yield metrics for a credit trade.
+
+    eTrading calls ``compute_income_yield(trade_spec, entry_credit)``
+    after getting a fill to assess capital efficiency.
+    """
+
+    credit_per_spread: float  # Net credit received per spread
+    wing_width: float  # Distance between short and long strikes
+    max_profit: float  # credit × 100 × contracts
+    max_loss: float  # (wing - credit) × 100 × contracts
+    credit_to_width_pct: float  # credit / wing_width (e.g., 0.16 = 16%)
+    return_on_capital_pct: float  # max_profit / max_loss (ROC per trade)
+    annualized_roc_pct: float  # ROC annualized by DTE
+    breakeven_low: float | None  # Short put - credit (bull put / IC)
+    breakeven_high: float | None  # Short call + credit (bear call / IC)
+    contracts: int
+
+
+def compute_income_yield(
+    trade_spec: TradeSpec,
+    entry_credit: float,
+    contracts: int = 1,
+) -> IncomeYield | None:
+    """Compute income yield metrics for a credit trade.
+
+    Args:
+        trade_spec: The trade structure (needs wing_width_points, legs).
+        entry_credit: Net credit received per spread.
+        contracts: Number of contracts.
+
+    Returns:
+        IncomeYield with ROC, annualized yield, breakevens. None if not a credit trade.
+    """
+    if not trade_spec.order_side or trade_spec.order_side != "credit":
+        return None
+    wing = trade_spec.wing_width_points
+    if not wing or wing <= 0:
+        return None
+
+    max_profit = entry_credit * 100 * contracts
+    max_loss = (wing - entry_credit) * 100 * contracts
+    credit_to_width = entry_credit / wing
+    roc = max_profit / max_loss if max_loss > 0 else 0.0
+
+    dte = trade_spec.target_dte or 30
+    annual_factor = 365.0 / max(dte, 1)
+    annualized = roc * annual_factor
+
+    # Breakevens from legs
+    be_low, be_high = _compute_breakevens(trade_spec, entry_credit)
+
+    return IncomeYield(
+        credit_per_spread=entry_credit,
+        wing_width=wing,
+        max_profit=round(max_profit, 2),
+        max_loss=round(max_loss, 2),
+        credit_to_width_pct=round(credit_to_width, 4),
+        return_on_capital_pct=round(roc, 4),
+        annualized_roc_pct=round(annualized, 4),
+        breakeven_low=be_low,
+        breakeven_high=be_high,
+        contracts=contracts,
+    )
+
+
+# ── F8: Breakeven Calculation ──
+
+
+class Breakevens(BaseModel):
+    """Breakeven prices for a trade structure."""
+
+    low: float | None = None  # Price below which you lose money
+    high: float | None = None  # Price above which you lose money
+    structure_type: str
+
+
+def compute_breakevens(
+    trade_spec: TradeSpec,
+    entry_price: float,
+) -> Breakevens:
+    """Compute breakeven prices for any structure.
+
+    Args:
+        trade_spec: The trade structure with legs.
+        entry_price: Net credit or debit per spread.
+
+    Returns:
+        Breakevens with low and/or high price levels.
+    """
+    low, high = _compute_breakevens(trade_spec, entry_price)
+    return Breakevens(
+        low=low, high=high,
+        structure_type=trade_spec.structure_type or "unknown",
+    )
+
+
+def _compute_breakevens(
+    trade_spec: TradeSpec,
+    entry_price: float,
+) -> tuple[float | None, float | None]:
+    """Internal: compute breakeven low/high from legs and fill price."""
+    from market_analyzer.models.opportunity import LegAction
+
+    st = trade_spec.structure_type or ""
+    legs = trade_spec.legs
+
+    if st in ("iron_condor", "iron_man"):
+        short_puts = [l for l in legs if l.option_type == "put" and l.action == LegAction.SELL_TO_OPEN]
+        short_calls = [l for l in legs if l.option_type == "call" and l.action == LegAction.SELL_TO_OPEN]
+        be_low = round(short_puts[0].strike - entry_price, 2) if short_puts else None
+        be_high = round(short_calls[0].strike + entry_price, 2) if short_calls else None
+        return be_low, be_high
+
+    if st == "iron_butterfly":
+        # Short straddle at ATM
+        short_strikes = [l for l in legs if l.action == LegAction.SELL_TO_OPEN]
+        if short_strikes:
+            atm = short_strikes[0].strike
+            return round(atm - entry_price, 2), round(atm + entry_price, 2)
+        return None, None
+
+    if st == "credit_spread":
+        short_legs = [l for l in legs if l.action == LegAction.SELL_TO_OPEN]
+        if short_legs:
+            s = short_legs[0]
+            if s.option_type == "put":
+                return round(s.strike - entry_price, 2), None
+            else:
+                return None, round(s.strike + entry_price, 2)
+        return None, None
+
+    if st == "debit_spread":
+        long_legs = [l for l in legs if l.action == LegAction.BUY_TO_OPEN]
+        if long_legs:
+            l = long_legs[0]
+            if l.option_type == "call":
+                return round(l.strike + entry_price, 2), None
+            else:
+                return None, round(l.strike - entry_price, 2)
+        return None, None
+
+    if st in ("straddle", "strangle"):
+        puts = [l for l in legs if l.option_type == "put"]
+        calls = [l for l in legs if l.option_type == "call"]
+        if puts and calls:
+            if trade_spec.order_side == "credit":
+                return round(puts[0].strike - entry_price, 2), round(calls[0].strike + entry_price, 2)
+            else:
+                return round(puts[0].strike - entry_price, 2), round(calls[0].strike + entry_price, 2)
+        return None, None
+
+    return None, None
+
+
+# ── F9: Greeks Aggregation ──
+
+
+class AggregatedGreeks(BaseModel):
+    """Net portfolio Greeks for a multi-leg trade.
+
+    eTrading calls ``aggregate_greeks(trade_spec, leg_quotes)``
+    after fetching broker quotes with Greeks.
+    """
+
+    net_delta: float
+    net_gamma: float
+    net_theta: float  # Daily theta income (positive = collecting)
+    net_vega: float
+    daily_theta_dollars: float  # net_theta × 100 × contracts
+    contracts: int
+
+
+def aggregate_greeks(
+    trade_spec: TradeSpec,
+    leg_quotes: list[OptionQuote],
+    contracts: int = 1,
+) -> AggregatedGreeks | None:
+    """Aggregate Greeks across all legs of a trade.
+
+    Args:
+        trade_spec: The trade structure with legs.
+        leg_quotes: Broker quotes with Greeks (one per leg, same order).
+        contracts: Number of contracts.
+
+    Returns:
+        AggregatedGreeks with net delta/gamma/theta/vega. None if Greeks unavailable.
+    """
+    from market_analyzer.models.opportunity import LegAction
+
+    if len(leg_quotes) != len(trade_spec.legs):
+        return None
+
+    net_d = net_g = net_t = net_v = 0.0
+
+    for leg, quote in zip(trade_spec.legs, leg_quotes):
+        if quote.delta is None:
+            return None  # Greeks not available
+
+        sign = 1.0 if leg.action == LegAction.BUY_TO_OPEN else -1.0
+        qty = leg.quantity
+
+        net_d += sign * qty * (quote.delta or 0.0)
+        net_g += sign * qty * (quote.gamma or 0.0)
+        net_t += sign * qty * (quote.theta or 0.0)
+        net_v += sign * qty * (quote.vega or 0.0)
+
+    return AggregatedGreeks(
+        net_delta=round(net_d, 4),
+        net_gamma=round(net_g, 6),
+        net_theta=round(net_t, 4),
+        net_vega=round(net_v, 4),
+        daily_theta_dollars=round(net_t * 100 * contracts, 2),
+        contracts=contracts,
+    )
+
+
+# ── F4: Account-Size Trade Filter ──
+
+
+class FilteredTrades(BaseModel):
+    """Result of filtering ranked trades by account constraints."""
+
+    affordable: list[dict]  # Trades that fit within available BP
+    filtered_out: list[dict]  # Trades removed (too expensive, wrong structure)
+    total_input: int
+    total_affordable: int
+    available_buying_power: float
+
+
+def filter_trades_by_account(
+    ranked_entries: list[RankedEntry],
+    available_buying_power: float,
+    allowed_structures: list[str] | None = None,
+    max_risk_per_trade: float | None = None,
+) -> FilteredTrades:
+    """Filter ranked trades by account size and structure constraints.
+
+    Args:
+        ranked_entries: Output from TradeRankingService.rank().top_trades.
+        available_buying_power: Current available BP from portfolio/broker.
+        allowed_structures: Only include these structure types.
+        max_risk_per_trade: Max dollar risk per trade.
+
+    Returns:
+        FilteredTrades with affordable trades and reasons for filtering.
+    """
+    affordable = []
+    filtered = []
+
+    for entry in ranked_entries:
+        ts = entry.trade_spec
+        reason = None
+
+        # Structure check
+        if allowed_structures and ts and ts.structure_type:
+            if ts.structure_type not in allowed_structures:
+                reason = f"structure '{ts.structure_type}' not allowed"
+
+        # BP check
+        if ts and ts.wing_width_points and not reason:
+            bp_needed = ts.wing_width_points * 100
+            if bp_needed > available_buying_power:
+                reason = f"needs ${bp_needed:.0f} BP, have ${available_buying_power:.0f}"
+
+        # Risk check
+        if ts and max_risk_per_trade and not reason:
+            risk = (ts.wing_width_points or 0) * 100
+            if ts.order_side == "debit" and ts.max_entry_price:
+                risk = ts.max_entry_price * 100
+            if risk > max_risk_per_trade:
+                reason = f"risk ${risk:.0f} exceeds limit ${max_risk_per_trade:.0f}"
+
+        rec = {
+            "rank": entry.rank,
+            "ticker": entry.ticker,
+            "strategy_type": str(entry.strategy_type),
+            "composite_score": entry.composite_score,
+            "verdict": str(entry.verdict),
+            "direction": entry.direction,
+            "structure_type": ts.structure_type if ts else None,
+            "wing_width": ts.wing_width_points if ts else None,
+            "max_entry_price": ts.max_entry_price if ts else None,
+        }
+
+        if reason:
+            rec["filter_reason"] = reason
+            filtered.append(rec)
+        else:
+            affordable.append(rec)
+
+    return FilteredTrades(
+        affordable=affordable,
+        filtered_out=filtered,
+        total_input=len(ranked_entries),
+        total_affordable=len(affordable),
+        available_buying_power=available_buying_power,
+    )
+
+
+# ── F6: Strike Alignment to Support/Resistance ──
+
+
+class AlignedStrikes(BaseModel):
+    """Strikes snapped to nearest support/resistance levels."""
+
+    original_strike: float
+    aligned_strike: float
+    level_price: float
+    level_source: str  # "support" or "resistance"
+    distance_from_level: float  # How far aligned strike is from the level
+    improved: bool  # True if aligned is different from original
+
+
+def align_strikes_to_levels(
+    trade_spec: TradeSpec,
+    levels: LevelsAnalysis,
+    max_snap_distance_pct: float = 0.02,
+) -> list[AlignedStrikes]:
+    """Snap short strikes to nearest support/resistance levels.
+
+    Args:
+        trade_spec: The trade with legs to align.
+        levels: Support/resistance from LevelsService.analyze().
+        max_snap_distance_pct: Max % distance to snap (default 2%).
+
+    Returns:
+        List of AlignedStrikes for each short leg that could be improved.
+    """
+    from market_analyzer.models.opportunity import LegAction
+    from market_analyzer.opportunity.option_plays._trade_spec_helpers import snap_strike
+
+    results = []
+    price = levels.current_price
+
+    for leg in trade_spec.legs:
+        if leg.action != LegAction.SELL_TO_OPEN:
+            continue
+
+        # Find nearest level
+        best_level = None
+        best_dist = float("inf")
+        best_source = ""
+
+        if leg.option_type == "put":
+            # Short puts: snap to support levels
+            for lvl in levels.support_levels:
+                dist = abs(leg.strike - lvl.price) / price
+                if dist < best_dist and dist <= max_snap_distance_pct:
+                    best_dist = dist
+                    best_level = lvl
+                    best_source = "support"
+        else:
+            # Short calls: snap to resistance levels
+            for lvl in levels.resistance_levels:
+                dist = abs(leg.strike - lvl.price) / price
+                if dist < best_dist and dist <= max_snap_distance_pct:
+                    best_dist = dist
+                    best_level = lvl
+                    best_source = "resistance"
+
+        if best_level is not None:
+            aligned = snap_strike(best_level.price, price)
+            results.append(AlignedStrikes(
+                original_strike=leg.strike,
+                aligned_strike=aligned,
+                level_price=best_level.price,
+                level_source=best_source,
+                distance_from_level=round(best_dist * 100, 2),
+                improved=aligned != leg.strike,
+            ))
+
+    return results
+
+
+# ── F7: Probability of Profit (POP) ──
+
+
+class POPEstimate(BaseModel):
+    """Regime-based probability of profit estimate.
+
+    Uses historical regime-specific return distributions, not Black-Scholes.
+    """
+
+    pop_pct: float  # Probability of profit (0-1)
+    expected_value: float  # EV = POP × max_profit - (1-POP) × max_loss
+    method: str  # "regime_historical" or "simple_distance"
+    regime_id: int
+    notes: str
+
+
+def estimate_pop(
+    trade_spec: TradeSpec,
+    entry_price: float,
+    regime_id: int,
+    atr_pct: float,
+    current_price: float,
+    contracts: int = 1,
+) -> POPEstimate | None:
+    """Estimate probability of profit using regime-aware distance analysis.
+
+    NOT Black-Scholes. Uses the regime's historical ATR behavior to estimate
+    the probability that price stays within the profit range.
+
+    Args:
+        trade_spec: The trade structure.
+        entry_price: Net credit or debit.
+        regime_id: Current regime (1-4).
+        atr_pct: Current ATR as % of price.
+        current_price: Current underlying price.
+        contracts: Number of contracts.
+
+    Returns:
+        POPEstimate. None if structure not supported.
+    """
+    be_low, be_high = _compute_breakevens(trade_spec, entry_price)
+
+    st = trade_spec.structure_type or ""
+    dte = trade_spec.target_dte or 30
+
+    if st in ("iron_condor", "iron_butterfly", "credit_spread", "strangle", "straddle"):
+        # Credit trade: profit if price stays between breakevens
+        # ATR% is daily. Convert to 1-sigma via ATR/1.25 (ATR ≈ 1.25σ for normal dist)
+        daily_sigma = (atr_pct / 100.0) / 1.25
+        expected_move = daily_sigma * math.sqrt(dte) * current_price
+
+        # Regime adjustments: MR regimes compress effective vol, trending expands it
+        regime_factor = {1: 0.40, 2: 0.70, 3: 1.10, 4: 1.50}.get(regime_id, 1.0)
+        adjusted_move = expected_move * regime_factor
+
+        if adjusted_move <= 0:
+            return None
+
+        # Distance to breakevens in units of expected move
+        if be_low and be_high:
+            dist_low = (current_price - be_low) / adjusted_move
+            dist_high = (be_high - current_price) / adjusted_move
+            # Approximate POP: probability price stays within range
+            # Using normal approximation: P(|Z| < d) ≈ erf(d/√2)
+            pop_low = 0.5 * (1 + math.erf(dist_low / math.sqrt(2)))
+            pop_high = 0.5 * (1 + math.erf(dist_high / math.sqrt(2)))
+            pop = pop_low + pop_high - 1.0
+        elif be_low:
+            dist = (current_price - be_low) / adjusted_move
+            pop = 0.5 * (1 + math.erf(dist / math.sqrt(2)))
+        elif be_high:
+            dist = (be_high - current_price) / adjusted_move
+            pop = 0.5 * (1 + math.erf(dist / math.sqrt(2)))
+        else:
+            return None
+
+        pop = max(0.0, min(1.0, pop))
+
+        # Expected value
+        wing = trade_spec.wing_width_points or 5.0
+        if trade_spec.order_side == "credit":
+            max_profit = entry_price * 100 * contracts
+            max_loss = (wing - entry_price) * 100 * contracts
+        else:
+            max_profit = (wing - entry_price) * 100 * contracts
+            max_loss = entry_price * 100 * contracts
+
+        ev = pop * max_profit - (1 - pop) * max_loss
+
+        regime_names = {1: "R1 Low-Vol MR", 2: "R2 High-Vol MR", 3: "R3 Low-Vol Trend", 4: "R4 High-Vol Trend"}
+        notes = (
+            f"Regime {regime_names.get(regime_id, f'R{regime_id}')}: "
+            f"expected {dte}d move ±${adjusted_move:.1f} "
+            f"(ATR {atr_pct:.1f}%, regime factor {regime_factor:.2f})"
+        )
+
+        return POPEstimate(
+            pop_pct=round(pop, 4),
+            expected_value=round(ev, 2),
+            method="regime_historical",
+            regime_id=regime_id,
+            notes=notes,
+        )
+
+    if st in ("debit_spread", "long_option"):
+        # Debit trade: need price to move in the right direction
+        from market_analyzer.models.opportunity import LegAction
+        long_legs = [l for l in trade_spec.legs if l.action == LegAction.BUY_TO_OPEN]
+        if not long_legs:
+            return None
+
+        daily_sigma = (atr_pct / 100.0) / 1.25
+        expected_move = daily_sigma * math.sqrt(dte) * current_price
+        regime_factor = {1: 0.40, 2: 0.70, 3: 1.10, 4: 1.50}.get(regime_id, 1.0)
+        adjusted_move = expected_move * regime_factor
+
+        if adjusted_move <= 0:
+            return None
+
+        l = long_legs[0]
+        if l.option_type == "call":
+            breakeven = l.strike + entry_price
+            dist = (breakeven - current_price) / adjusted_move
+            pop = 1.0 - 0.5 * (1 + math.erf(dist / math.sqrt(2)))
+        else:
+            breakeven = l.strike - entry_price
+            dist = (current_price - breakeven) / adjusted_move
+            pop = 1.0 - 0.5 * (1 + math.erf(dist / math.sqrt(2)))
+
+        pop = max(0.0, min(1.0, pop))
+
+        max_profit = ((trade_spec.wing_width_points or entry_price) - entry_price) * 100 * contracts
+        max_loss = entry_price * 100 * contracts
+        ev = pop * max_profit - (1 - pop) * max_loss
+
+        return POPEstimate(
+            pop_pct=round(pop, 4),
+            expected_value=round(ev, 2),
+            method="regime_historical",
+            regime_id=regime_id,
+            notes=f"Directional: needs ${adjusted_move:.1f} move to profit",
+        )
+
+    return None
+
+
+# ── F10: Income-Specific Entry Check ──
+
+
+class IncomeEntryCheck(BaseModel):
+    """Income-optimal entry confirmation.
+
+    Checks conditions specific to selling premium, not directional triggers.
+    """
+
+    confirmed: bool
+    score: float  # 0-1 composite score
+    conditions: list[dict]  # {name, passed, value, threshold, weight}
+    summary: str
+
+
+def check_income_entry(
+    iv_rank: float | None,
+    iv_percentile: float | None,
+    dte: int,
+    rsi: float,
+    atr_pct: float,
+    regime_id: int,
+    has_earnings_within_dte: bool = False,
+    has_macro_event_today: bool = False,
+) -> IncomeEntryCheck:
+    """Check if conditions are optimal for income (premium selling) entry.
+
+    Args:
+        iv_rank: IV rank (0-100). From broker metrics.
+        iv_percentile: IV percentile (0-100). From broker metrics.
+        dte: Days to expiration of the trade.
+        rsi: Current RSI (14-period).
+        atr_pct: ATR as % of price.
+        regime_id: Current regime (1-4).
+        has_earnings_within_dte: True if earnings before expiration.
+        has_macro_event_today: True if FOMC/CPI/NFP today.
+
+    Returns:
+        IncomeEntryCheck with pass/fail and detailed conditions.
+    """
+    conditions = []
+    total_score = 0.0
+    total_weight = 0.0
+
+    # 1. IV Rank sweet spot (25-75 ideal for selling; >50 better)
+    w = 0.25
+    if iv_rank is not None:
+        passed = 25 <= iv_rank <= 80
+        conditions.append({
+            "name": "iv_rank_sweet_spot",
+            "passed": passed,
+            "value": iv_rank,
+            "threshold": "25-80",
+            "weight": w,
+        })
+        total_score += w * (1.0 if passed else 0.0)
+    else:
+        conditions.append({
+            "name": "iv_rank_sweet_spot",
+            "passed": True,  # No data, don't block
+            "value": None,
+            "threshold": "25-80 (no data)",
+            "weight": 0,
+        })
+    total_weight += w
+
+    # 2. DTE sweet spot (30-45 ideal for theta decay curve)
+    w = 0.20
+    passed = 25 <= dte <= 50
+    conditions.append({
+        "name": "dte_sweet_spot",
+        "passed": passed,
+        "value": dte,
+        "threshold": "25-50",
+        "weight": w,
+    })
+    total_score += w * (1.0 if passed else 0.0)
+    total_weight += w
+
+    # 3. RSI neutral (40-60: not trending, ideal for range-bound trades)
+    w = 0.15
+    passed = 35 <= rsi <= 65
+    conditions.append({
+        "name": "rsi_neutral",
+        "passed": passed,
+        "value": round(rsi, 1),
+        "threshold": "35-65",
+        "weight": w,
+    })
+    total_score += w * (1.0 if passed else 0.0)
+    total_weight += w
+
+    # 4. Regime is income-friendly (R1 ideal, R2 acceptable)
+    w = 0.20
+    passed = regime_id in (1, 2)
+    conditions.append({
+        "name": "regime_income_friendly",
+        "passed": passed,
+        "value": f"R{regime_id}",
+        "threshold": "R1 or R2",
+        "weight": w,
+    })
+    total_score += w * (1.0 if passed else 0.0)
+    total_weight += w
+
+    # 5. No earnings surprise risk
+    w = 0.10
+    passed = not has_earnings_within_dte
+    conditions.append({
+        "name": "no_earnings_risk",
+        "passed": passed,
+        "value": has_earnings_within_dte,
+        "threshold": "no earnings within DTE",
+        "weight": w,
+    })
+    total_score += w * (1.0 if passed else 0.0)
+    total_weight += w
+
+    # 6. No macro event today
+    w = 0.10
+    passed = not has_macro_event_today
+    conditions.append({
+        "name": "no_macro_event",
+        "passed": passed,
+        "value": has_macro_event_today,
+        "threshold": "no FOMC/CPI/NFP today",
+        "weight": w,
+    })
+    total_score += w * (1.0 if passed else 0.0)
+    total_weight += w
+
+    score = total_score / total_weight if total_weight > 0 else 0.0
+    confirmed = score >= 0.60 and regime_id in (1, 2, 3)
+
+    failed = [c["name"] for c in conditions if not c["passed"]]
+    if confirmed:
+        summary = f"Income entry CONFIRMED (score {score:.0%})"
+    else:
+        summary = f"Income entry NOT CONFIRMED (score {score:.0%}): {', '.join(failed)}"
+
+    return IncomeEntryCheck(
+        confirmed=confirmed,
+        score=round(score, 4),
+        conditions=conditions,
+        summary=summary,
+    )
+
+
+# ── F12: Exit Condition Monitor ──
+
+
+class ExitSignal(BaseModel):
+    """A triggered or approaching exit condition."""
+
+    rule: str  # "profit_target", "stop_loss", "dte_exit", "regime_change"
+    triggered: bool
+    current_value: float | str
+    threshold: float | str
+    urgency: str  # "immediate", "soon", "monitor"
+    action: str  # What to do
+    detail: str = ""  # Additional context for this signal
+
+
+class ExitMonitorResult(BaseModel):
+    """Result of checking exit conditions for an open trade.
+
+    eTrading calls ``monitor_exit_conditions()`` with current market data
+    for each open position to get actionable exit signals.
+    """
+
+    trade_id: str
+    ticker: str
+    signals: list[ExitSignal]
+    should_close: bool  # True if any signal is triggered
+    most_urgent: ExitSignal | None
+    pnl_pct: float  # Current P&L as percentage
+    pnl_dollars: float  # Current P&L in dollars
+    summary: str
+    commentary: str  # Human-readable justification for the decision
+
+
+def monitor_exit_conditions(
+    trade_id: str,
+    ticker: str,
+    structure_type: str,
+    order_side: str,
+    entry_price: float,
+    current_mid_price: float,
+    contracts: int,
+    dte_remaining: int,
+    regime_id: int,
+    entry_regime_id: int | None = None,
+    profit_target_pct: float | None = None,
+    stop_loss_pct: float | None = None,
+    exit_dte: int | None = None,
+) -> ExitMonitorResult:
+    """Check all exit conditions for an open trade.
+
+    Args:
+        trade_id: Trade identifier.
+        ticker: Underlying symbol.
+        structure_type: Trade structure type.
+        order_side: "credit" or "debit".
+        entry_price: Original fill price.
+        current_mid_price: Current mid price to close.
+        contracts: Number of contracts.
+        dte_remaining: Days to expiration remaining.
+        regime_id: Current regime.
+        entry_regime_id: Regime when trade was opened (for regime change detection).
+        profit_target_pct: Close at X% of max profit.
+        stop_loss_pct: Credit: X× credit; Debit: X fraction loss.
+        exit_dte: Close when DTE drops to this.
+
+    Returns:
+        ExitMonitorResult with all triggered signals.
+    """
+    signals: list[ExitSignal] = []
+    regime_names = {1: "Low-Vol MR", 2: "High-Vol MR", 3: "Low-Vol Trend", 4: "High-Vol Trend"}
+
+    if order_side == "credit":
+        # Profit: entry_price - current_mid = profit per spread
+        profit_per = entry_price - current_mid_price
+        pnl_pct = profit_per / entry_price if entry_price > 0 else 0
+        pnl_dollars = profit_per * 100 * contracts
+
+        # Profit target
+        if profit_target_pct is not None:
+            triggered = pnl_pct >= profit_target_pct
+            approaching = pnl_pct >= profit_target_pct * 0.85
+            signals.append(ExitSignal(
+                rule="profit_target",
+                triggered=triggered,
+                current_value=f"{pnl_pct:.0%} ({pnl_dollars:+.0f}$)",
+                threshold=f"{profit_target_pct:.0%}",
+                urgency="immediate" if triggered else "soon" if approaching else "monitor",
+                action=f"Close for ${pnl_dollars:.0f} profit" if triggered else "Approaching target",
+                detail=f"Credit decayed {pnl_pct:.0%} of max ({profit_target_pct:.0%} target). "
+                       f"Lock in ${pnl_dollars:.0f} gain." if triggered
+                       else f"At {pnl_pct:.0%} of {profit_target_pct:.0%} target — approaching profit zone.",
+            ))
+
+        # Stop loss (credit: loss = current_mid - entry > X× entry)
+        if stop_loss_pct is not None:
+            loss_multiple = (current_mid_price - entry_price) / entry_price if entry_price > 0 else 0
+            triggered = loss_multiple >= stop_loss_pct
+            approaching = loss_multiple >= stop_loss_pct * 0.75
+            loss_dollars = (current_mid_price - entry_price) * 100 * contracts
+            signals.append(ExitSignal(
+                rule="stop_loss",
+                triggered=triggered,
+                current_value=f"{loss_multiple:.1f}× credit ({loss_dollars:+.0f}$)",
+                threshold=f"{stop_loss_pct:.0f}× credit",
+                urgency="immediate" if triggered else "soon" if approaching else "monitor",
+                action=f"Close to limit loss at ${loss_dollars:.0f}" if triggered else "Monitoring loss",
+                detail=f"Loss at {loss_multiple:.1f}× initial credit (${loss_dollars:+.0f}). "
+                       f"Stop at {stop_loss_pct:.0f}×. Close to prevent further damage." if triggered
+                       else f"Loss at {loss_multiple:.1f}× credit — within tolerance but elevated.",
+            ))
+    else:
+        # Debit trade
+        profit_per = current_mid_price - entry_price
+        pnl_pct = profit_per / entry_price if entry_price > 0 else 0
+        pnl_dollars = profit_per * 100 * contracts
+
+        if profit_target_pct is not None:
+            triggered = pnl_pct >= profit_target_pct
+            signals.append(ExitSignal(
+                rule="profit_target",
+                triggered=triggered,
+                current_value=f"{pnl_pct:.0%} ({pnl_dollars:+.0f}$)",
+                threshold=f"{profit_target_pct:.0%}",
+                urgency="immediate" if triggered else "monitor",
+                action=f"Close for ${pnl_dollars:.0f} profit" if triggered else "Monitoring",
+                detail=f"Debit gained {pnl_pct:.0%} (target {profit_target_pct:.0%}). Take profit." if triggered
+                       else f"Debit at {pnl_pct:.0%} — below {profit_target_pct:.0%} target.",
+            ))
+
+        if stop_loss_pct is not None:
+            loss_frac = -pnl_pct if pnl_pct < 0 else 0
+            triggered = loss_frac >= stop_loss_pct
+            signals.append(ExitSignal(
+                rule="stop_loss",
+                triggered=triggered,
+                current_value=f"{loss_frac:.0%} loss ({pnl_dollars:+.0f}$)",
+                threshold=f"{stop_loss_pct:.0%}",
+                urgency="immediate" if triggered else "monitor",
+                action=f"Close to limit loss" if triggered else "Monitoring",
+                detail=f"Down {loss_frac:.0%} from entry. Stop at {stop_loss_pct:.0%}." if triggered
+                       else f"Position within loss tolerance ({loss_frac:.0%} vs {stop_loss_pct:.0%} max).",
+            ))
+
+    # DTE exit
+    if exit_dte is not None:
+        triggered = dte_remaining <= exit_dte
+        approaching = dte_remaining <= exit_dte + 5
+        signals.append(ExitSignal(
+            rule="dte_exit",
+            triggered=triggered,
+            current_value=f"{dte_remaining} DTE",
+            threshold=f"≤{exit_dte} DTE",
+            urgency="immediate" if triggered else "soon" if approaching else "monitor",
+            action=f"Close — {dte_remaining} DTE (gamma risk)" if triggered else f"{dte_remaining} DTE remaining",
+            detail=f"Only {dte_remaining} DTE left (close at {exit_dte}). "
+                   f"Gamma acceleration makes holding risky — close regardless of P&L." if triggered
+                   else f"{dte_remaining} DTE — {'approaching close window, prepare exit order' if approaching else 'well within holding window'}.",
+        ))
+
+    # Regime change
+    if entry_regime_id is not None and regime_id != entry_regime_id:
+        severe = (entry_regime_id in (1, 2) and regime_id in (3, 4))
+        entry_name = regime_names.get(entry_regime_id, f"R{entry_regime_id}")
+        curr_name = regime_names.get(regime_id, f"R{regime_id}")
+        signals.append(ExitSignal(
+            rule="regime_change",
+            triggered=severe,
+            current_value=f"R{regime_id} (was R{entry_regime_id})",
+            threshold=f"R{entry_regime_id}",
+            urgency="immediate" if severe else "soon",
+            action=f"Regime shifted R{entry_regime_id}→R{regime_id}: review position" if severe
+                   else f"Minor regime shift R{entry_regime_id}→R{regime_id}",
+            detail=f"Regime changed from {entry_name} to {curr_name}. "
+                   f"{'Income structures are invalidated in trending regime — close or hedge.' if severe else 'Minor shift — monitor but no immediate action needed.'}",
+        ))
+
+    triggered_signals = [s for s in signals if s.triggered]
+    should_close = len(triggered_signals) > 0
+    most_urgent = None
+    if triggered_signals:
+        priority = {"immediate": 0, "soon": 1, "monitor": 2}
+        most_urgent = min(triggered_signals, key=lambda s: priority.get(s.urgency, 3))
+
+    parts = []
+    if should_close:
+        reasons = [s.rule for s in triggered_signals]
+        parts.append(f"CLOSE: {', '.join(reasons)}")
+    else:
+        parts.append("HOLD")
+    approaching_signals = [s for s in signals if s.urgency == "soon" and not s.triggered]
+    if approaching_signals:
+        parts.append(f"Watch: {', '.join(s.rule for s in approaching_signals)}")
+
+    # Build commentary: human-readable narrative justifying the decision
+    commentary_parts: list[str] = []
+    if should_close:
+        commentary_parts.append(
+            f"{ticker} — EXIT. {most_urgent.detail}" if most_urgent else f"{ticker} — EXIT."
+        )
+        other_triggered = [s for s in triggered_signals if s is not most_urgent]
+        if other_triggered:
+            commentary_parts.append(
+                f"Also triggered: {'; '.join(s.detail for s in other_triggered if s.detail)}."
+            )
+    else:
+        commentary_parts.append(f"{ticker} — HOLD at {pnl_pct:+.0%} P&L ({pnl_dollars:+,.0f}$).")
+        if approaching_signals:
+            commentary_parts.append(
+                f"Approaching: {'; '.join(s.detail for s in approaching_signals if s.detail)}."
+            )
+        else:
+            # Give a positive hold reason
+            if dte_remaining and dte_remaining > 14:
+                commentary_parts.append(f"Healthy theta decay with {dte_remaining} DTE remaining.")
+            elif pnl_pct > 0:
+                commentary_parts.append("Profitable — let theta work.")
+
+    return ExitMonitorResult(
+        trade_id=trade_id,
+        ticker=ticker,
+        signals=signals,
+        should_close=should_close,
+        most_urgent=most_urgent,
+        pnl_pct=round(pnl_pct, 4),
+        pnl_dollars=round(pnl_dollars, 2),
+        summary=" | ".join(parts),
+        commentary=" ".join(commentary_parts),
+    )
+
+
+# ── Trade Monitoring (combines exit + adjustment) ──
+
+
+class TradeHealthCheck(BaseModel):
+    """Complete health check for an open trade.
+
+    Combines exit monitoring + adjustment analysis into one API call
+    that eTrading runs for every open position daily.
+    """
+
+    trade_id: str
+    ticker: str
+    status: str  # "healthy", "tested", "breached", "exit_triggered"
+    exit_result: ExitMonitorResult
+    adjustment_needed: bool
+    adjustment_summary: str | None = None  # Top adjustment recommendation
+    adjustment_options: list[dict] = []  # Serialized AdjustmentOption list
+    overall_action: str  # "hold", "close", "adjust", "roll"
+    summary: str
+    commentary: str  # Human-readable decision justification for trading platform
+
+
+def check_trade_health(
+    trade_id: str,
+    trade_spec: TradeSpec,
+    entry_price: float,
+    contracts: int,
+    current_mid_price: float,
+    dte_remaining: int,
+    regime: RegimeResult,
+    technicals: TechnicalSnapshot,
+    entry_regime_id: int | None = None,
+    vol_surface: VolatilitySurface | None = None,
+    quote_service: object | None = None,
+) -> TradeHealthCheck:
+    """Complete health check for an open trade — the daily monitoring API.
+
+    Combines:
+    1. Exit condition monitoring (profit target, stop loss, DTE, regime change)
+    2. Adjustment analysis (position status, roll/narrow/close recommendations)
+
+    Args:
+        trade_id: Trade identifier from portfolio.
+        trade_spec: The original TradeSpec.
+        entry_price: Fill price at entry.
+        contracts: Number of contracts.
+        current_mid_price: Current mid price to close.
+        dte_remaining: Days to expiration remaining.
+        regime: Current RegimeResult from regime service.
+        technicals: Current TechnicalSnapshot.
+        entry_regime_id: Regime when trade was opened.
+        vol_surface: Optional vol surface for roll pricing.
+        quote_service: Optional OptionQuoteService for adjustment pricing.
+
+    Returns:
+        TradeHealthCheck with combined exit + adjustment analysis.
+    """
+    from market_analyzer.service.adjustment import AdjustmentService
+
+    ticker = trade_spec.ticker
+
+    # 1. Exit monitoring
+    exit_result = monitor_exit_conditions(
+        trade_id=trade_id,
+        ticker=ticker,
+        structure_type=trade_spec.structure_type or "",
+        order_side=trade_spec.order_side or "credit",
+        entry_price=entry_price,
+        current_mid_price=current_mid_price,
+        contracts=contracts,
+        dte_remaining=dte_remaining,
+        regime_id=int(regime.regime),
+        entry_regime_id=entry_regime_id,
+        profit_target_pct=trade_spec.profit_target_pct,
+        stop_loss_pct=trade_spec.stop_loss_pct,
+        exit_dte=trade_spec.exit_dte,
+    )
+
+    # 2. Adjustment analysis
+    adj_svc = AdjustmentService(quote_service=quote_service)
+    adj_analysis = adj_svc.analyze(
+        trade_spec=trade_spec,
+        regime=regime,
+        technicals=technicals,
+        vol_surface=vol_surface,
+    )
+
+    # Determine position status
+    position_status = adj_analysis.position_status.value
+    adjustment_needed = position_status in ("tested", "breached")
+    adj_options = []
+    adj_summary = None
+
+    if adj_analysis.adjustments:
+        # Top recommendation (first non-DO_NOTHING)
+        for adj in adj_analysis.adjustments:
+            adj_options.append({
+                "type": adj.adjustment_type.value,
+                "description": adj.description,
+                "estimated_cost": adj.estimated_cost,
+                "risk_change": adj.risk_change,
+                "urgency": adj.urgency,
+                "rationale": adj.rationale,
+            })
+            if adj_summary is None and adj.adjustment_type.value != "do_nothing":
+                adj_summary = f"{adj.adjustment_type.value}: {adj.description}"
+
+    # Overall action
+    if exit_result.should_close:
+        overall_action = "close"
+        status = "exit_triggered"
+    elif position_status == "breached":
+        overall_action = "adjust"
+        status = "breached"
+    elif position_status == "tested":
+        overall_action = "adjust" if adj_summary else "hold"
+        status = "tested"
+    else:
+        overall_action = "hold"
+        status = "healthy"
+
+    # Summary
+    parts = [f"{ticker}: {status.upper()}"]
+    if exit_result.should_close:
+        parts.append(exit_result.summary)
+    if adjustment_needed and adj_summary:
+        parts.append(f"Suggested: {adj_summary}")
+    if not exit_result.should_close and not adjustment_needed:
+        pnl = (entry_price - current_mid_price) * 100 * contracts if (trade_spec.order_side or "") == "credit" else (current_mid_price - entry_price) * 100 * contracts
+        parts.append(f"P&L: ${pnl:+.0f} | {dte_remaining} DTE")
+
+    # Build commentary: comprehensive narrative for trading platform
+    regime_names = {1: "Low-Vol MR", 2: "High-Vol MR", 3: "Low-Vol Trend", 4: "High-Vol Trend"}
+    regime_name = regime_names.get(int(regime.regime), f"R{regime.regime}")
+    commentary_parts: list[str] = []
+
+    if exit_result.should_close:
+        commentary_parts.append(exit_result.commentary)
+        if adjustment_needed and adj_summary:
+            commentary_parts.append(f"If not closing: {adj_summary}.")
+    elif position_status == "breached":
+        commentary_parts.append(
+            f"{ticker} — BREACHED. Price has moved past a short strike. "
+            f"Regime is {regime_name} ({regime.confidence:.0%}). "
+        )
+        if adj_summary:
+            commentary_parts.append(f"Recommended: {adj_summary}.")
+        else:
+            commentary_parts.append("Consider closing to cap losses.")
+    elif position_status == "tested":
+        commentary_parts.append(
+            f"{ticker} — TESTED. Price approaching a short strike. "
+            f"Regime: {regime_name}. "
+        )
+        if adj_summary:
+            commentary_parts.append(f"Consider: {adj_summary}.")
+        else:
+            commentary_parts.append("Monitor closely — may need adjustment soon.")
+    else:
+        commentary_parts.append(exit_result.commentary)
+        commentary_parts.append(f"Regime: {regime_name} ({regime.confidence:.0%}).")
+
+    return TradeHealthCheck(
+        trade_id=trade_id,
+        ticker=ticker,
+        status=status,
+        exit_result=exit_result,
+        adjustment_needed=adjustment_needed,
+        adjustment_summary=adj_summary,
+        adjustment_options=adj_options,
+        overall_action=overall_action,
+        summary=" | ".join(parts),
+        commentary=" ".join(commentary_parts),
+    )
+
+
+def get_adjustment_recommendation(
+    trade_spec: TradeSpec,
+    regime: RegimeResult,
+    technicals: TechnicalSnapshot,
+    vol_surface: VolatilitySurface | None = None,
+    quote_service: object | None = None,
+) -> AdjustmentAnalysis:
+    """Get adjustment recommendations for an open trade.
+
+    Thin wrapper around AdjustmentService.analyze() for eTrading API consistency.
+
+    Args:
+        trade_spec: The original TradeSpec.
+        regime: Current RegimeResult.
+        technicals: Current TechnicalSnapshot.
+        vol_surface: Optional vol surface for roll pricing.
+        quote_service: Optional OptionQuoteService for real prices.
+
+    Returns:
+        AdjustmentAnalysis with ranked adjustment options.
+    """
+    from market_analyzer.service.adjustment import AdjustmentService
+
+    adj_svc = AdjustmentService(quote_service=quote_service)
+    return adj_svc.analyze(
+        trade_spec=trade_spec,
+        regime=regime,
+        technicals=technicals,
+        vol_surface=vol_surface,
+    )

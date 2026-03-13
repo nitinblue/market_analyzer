@@ -1,6 +1,6 @@
 # market_analyzer API Reference
 
-Complete API reference for cotrader and external consumers.
+Complete API reference for cotrader, eTrading SaaS, and external consumers.
 
 ---
 
@@ -774,6 +774,317 @@ f.valuation, f.earnings, f.revenue, f.margins
 f.upcoming_events.days_to_earnings
 ```
 
+### Daily Trading Plan — `ma.plan`
+
+Orchestrates context → verdict → ranking → trade selection → fill pricing into one actionable plan.
+
+```python
+plan = ma.plan.generate()
+plan = ma.plan.generate(tickers=["SPY", "QQQ", "GLD"], skip_intraday=True)
+plan = ma.plan.generate(plan_date=date(2026, 3, 14))
+# Returns: DailyTradingPlan
+
+plan.day_verdict          # DayVerdict: TRADE | TRADE_LIGHT | AVOID | NO_TRADE
+plan.day_verdict_reasons  # list[str] — why this verdict
+plan.risk_budget          # RiskBudget (max_new_positions, max_daily_risk_dollars, position_size_factor)
+plan.all_trades           # list[PlanTrade] — ranked, capped at max_trades_per_plan
+plan.trades_by_horizon    # dict[PlanHorizon, list[PlanTrade]] — bucketed by 0dte/weekly/monthly/leap
+plan.total_trades         # int
+plan.expiry_events        # list[ExpiryEvent] — today's expiry events
+plan.upcoming_expiries    # list[ExpiryEvent] — next 7 days
+plan.data_warnings        # list[str] — broker failures, data gaps, stale cache
+plan.summary              # str
+
+# Each PlanTrade:
+t = plan.all_trades[0]
+t.rank                    # int
+t.ticker                  # str
+t.strategy_type           # StrategyType
+t.horizon                 # PlanHorizon (0dte, weekly, monthly, leap)
+t.verdict                 # Verdict (GO, CAUTION)
+t.composite_score         # float
+t.trade_spec              # TradeSpec | None
+t.max_entry_price         # float | None — chase limit (broker mid + slippage)
+t.expiry_note             # str | None — "Monthly OpEx", "VIX Settlement", etc.
+t.rationale               # str
+t.risk_notes              # list[str]
+```
+
+Day verdict logic:
+- **NO_TRADE**: Black swan CRITICAL
+- **AVOID**: FOMC day, quad witching, black swan HIGH
+- **TRADE_LIGHT**: CPI/NFP/PCE day, monthly OpEx, VIX settlement, black swan ELEVATED
+- **TRADE**: Normal conditions
+
+### Option Quotes — `ma.quotes`
+
+Broker-first live option quotes. Returns `None` for pricing without broker — never estimates.
+**No Black-Scholes, no theoretical pricing.** All prices come from the broker via DXLink.
+
+```python
+# Properties
+ma.quotes.source         # "tastytrade" | "yfinance"
+ma.quotes.has_broker     # bool
+
+# Full option chain with bid/ask/Greeks
+snap = ma.quotes.get_chain("SPY")
+snap = ma.quotes.get_chain("SPY", expiration=date(2026, 4, 17))
+# Returns: QuoteSnapshot
+
+snap.ticker              # str
+snap.underlying_price    # float — from DXLink equity Quote (bid+ask)/2
+snap.quotes              # list[OptionQuote]
+snap.source              # str — "tastytrade" or "yfinance"
+
+# Each OptionQuote:
+q = snap.quotes[0]
+q.ticker                 # str
+q.expiration             # date
+q.strike                 # float
+q.option_type            # "call" | "put"
+q.bid                    # float — from DXLink DXQuote event
+q.ask                    # float — from DXLink DXQuote event
+q.mid                    # float — (bid + ask) / 2
+q.implied_volatility     # float | None — from DXLink DXGreeks event
+q.delta                  # float | None — from DXLink DXGreeks event
+q.gamma                  # float | None
+q.theta                  # float | None
+q.vega                   # float | None
+
+# Specific leg quotes (broker only — returns [] without broker)
+from market_analyzer import LegSpec
+quotes = ma.quotes.get_leg_quotes(legs, ticker="SPY")
+# Returns: list[OptionQuote]
+
+# Batch prefetch for plan generation (avoids duplicate DXLink calls)
+all_legs = [leg for trade in trades for leg in trade.legs]
+ma.quotes.prefetch_leg_quotes(all_legs)  # one DXLink call, cached
+# Subsequent get_leg_quotes() calls hit cache — no extra DXLink connections
+
+# Clear cache between plan runs
+ma.quotes.clear_cache()
+
+# Market metrics (IV rank, beta, etc.)
+m = ma.quotes.get_metrics("SPY")
+# Returns: MarketMetrics | None
+
+m.iv_rank                # float | None — from TastyTrade REST API
+m.iv_percentile          # float | None
+m.iv_index               # float | None
+m.iv_30_day              # float | None
+m.hv_30_day              # float | None
+m.hv_60_day              # float | None
+m.beta                   # float | None
+m.corr_spy               # float | None
+m.liquidity_rating       # float | None
+m.earnings_date          # date | None
+```
+
+#### How Option Chain Data Flows
+
+```
+                    ┌─────────────────────────────────────────┐
+                    │         OptionQuoteService               │
+                    │  (service/option_quotes.py)               │
+                    │                                           │
+                    │  ┌─────────────┐  ┌───────────────────┐  │
+  get_chain() ─────►  │ Broker path │  │ yfinance fallback │  │
+                    │  │ (preferred) │  │ (chains only)     │  │
+                    │  └──────┬──────┘  └────────┬──────────┘  │
+                    │         │                  │              │
+                    └─────────┼──────────────────┼──────────────┘
+                              │                  │
+                              ▼                  ▼
+                    ┌──────────────────┐  ┌──────────────────┐
+                    │ TastyTradeMarket │  │ yfinance OPTIONS │
+                    │ Data (ABC impl)  │  │ _CHAIN provider  │
+                    └────────┬─────────┘  └──────────────────┘
+                             │
+              ┌──────────────┼──────────────┐
+              ▼              ▼              ▼
+    NestedOptionChain   fetch_quotes()  fetch_greeks()
+    .get() (REST)       (DXLink ws)     (DXLink ws)
+    → streamer symbols  → bid/ask       → delta/gamma/
+                                          theta/vega/iv
+```
+
+**Two data paths**:
+1. `get_chain(ticker)` — Full chain. REST call for symbols, then 2 DXLink connections (quotes + Greeks).
+   Used by `quotes` CLI command.
+2. `get_leg_quotes(legs)` — Specific legs only. Converts legs to streamer symbols, 2 DXLink connections.
+   Used by `plan`, `adjust` commands. Cached to avoid duplicate calls.
+
+#### DXLink Streamer Symbol Format
+
+All DXLink subscriptions use streamer symbols: `.{TICKER}{YYMMDD}{C|P}{STRIKE}`
+
+```python
+from market_analyzer.broker.tastytrade.symbols import (
+    build_streamer_symbol,     # ("SPY", date(2026,3,20), "put", 580) → ".SPY260320P580"
+    parse_streamer_symbol,     # ".SPY260320P580" → ParsedSymbol(ticker, exp, type, strike)
+    leg_to_streamer_symbol,    # (ticker, LegSpec) → ".SPY260320P580"
+    occ_to_streamer,           # "SPY   260320P00580000" → ".SPY260320P580"
+    streamer_to_occ,           # ".SPY260320P580" → "SPY   260320P00580000"
+)
+```
+
+#### DXLink Fetch Utilities
+
+Low-level async functions for direct DXLink access (used by TastyTradeMarketData internally):
+
+```python
+from market_analyzer.broker.tastytrade.dxlink import (
+    fetch_quotes,              # bid/ask for list of streamer symbols
+    fetch_greeks,              # delta/gamma/theta/vega/iv for streamer symbols
+    fetch_underlying_price,    # equity mid price for ticker
+    fetch_candles,             # intraday OHLCV candles
+    fetch_option_chain_symbols,  # NestedOptionChain → list of streamer symbol dicts
+    classify_error,            # Exception → DXLinkError enum
+    DXLinkError,               # GRANT_REVOKED, TIMEOUT, CONNECTION_FAILED, NO_DATA, UNKNOWN
+)
+from market_analyzer.broker.tastytrade._async import run_sync
+
+# Example: fetch quotes for specific symbols
+quotes = run_sync(fetch_quotes(data_session, [".SPY260320P580", ".SPY260320C600"]))
+# Returns: {".SPY260320P580": {"bid": 2.50, "ask": 2.55}, ...}
+
+# Example: get all option chain symbols for a ticker
+symbols = run_sync(fetch_option_chain_symbols(sdk_session, "SPY", expiration=date(2026, 4, 17)))
+# Returns: [{"sym": ".SPY260417C500", "strike": 500.0, "option_type": "call", "expiration": date(2026, 4, 17)}, ...]
+```
+
+#### Underlying Price
+
+```python
+# Via MarketDataProvider ABC (used by OptionQuoteService internally)
+price = market_data.get_underlying_price("SPY")
+# Returns: float | None — DXLink equity Quote mid price
+
+# Or via low-level utility
+price = run_sync(fetch_underlying_price(data_session, "SPY"))
+```
+
+#### Intraday Candles
+
+```python
+# Via MarketDataProvider ABC
+df = market_data.get_intraday_candles("SPY", interval="5m")
+# Returns: pd.DataFrame with columns [Open, High, Low, Close, Volume]
+# Index: DatetimeIndex (US/Eastern, tz-naive)
+
+# Via low-level utility (returns raw dict, caller builds DataFrame)
+rows = run_sync(fetch_candles(data_session, "SPY", interval="5m"))
+# Returns: {timestamp_ms: {"time": int, "Open": float, "High": float, ...}}
+```
+
+#### Account Balance
+
+```python
+# Via AccountProvider ABC
+balance = ma.account_provider.get_balance()
+# Returns: AccountBalance
+
+balance.net_liquidating_value   # float — total account value
+balance.cash_balance            # float
+balance.derivative_buying_power # float — options buying power
+balance.equity_buying_power     # float
+balance.maintenance_requirement # float — margin in use
+balance.pending_cash            # float
+balance.source                  # "tastytrade"
+```
+
+### Trade Adjustment — `ma.adjustment`
+
+Analyzes an open trade and ranks all possible adjustments based on regime, position status, and cost.
+
+```python
+analysis = ma.adjustment.analyze(
+    trade_spec=trade_spec,       # TradeSpec of the open position
+    regime=regime_result,
+    technicals=tech_snapshot,
+    vol_surface=vol_surface,     # optional
+)
+# Returns: AdjustmentAnalysis
+
+analysis.position_status  # PositionStatus: SAFE | TESTED | BREACHED | MAX_LOSS
+analysis.tested_side      # TestedSide | None: PUT_SIDE | CALL_SIDE
+analysis.urgency          # str: "none" | "monitor" | "soon" | "immediate"
+analysis.adjustments      # list[AdjustmentOption] — ranked best-first
+
+# Each AdjustmentOption:
+adj = analysis.adjustments[0]
+adj.adjustment_type       # AdjustmentType: DO_NOTHING | ROLL_AWAY | NARROW_UNTESTED | ...
+adj.description           # str
+adj.new_trade_spec        # TradeSpec | None
+adj.estimated_credit      # float | None (from broker, None without)
+adj.risk_reduction        # float | None
+adj.rationale             # str
+
+# Data source transparency
+ma.adjustment.quote_source  # "tastytrade (real quotes)" or "no broker (costs unavailable)"
+```
+
+### Intraday Monitoring — `ma.intraday`
+
+Real-time 0DTE position monitoring and entry window detection.
+
+```python
+# Monitor open positions
+result = ma.intraday.monitor(positions=[
+    {"ticker": "SPY", "strategy": "iron_condor", "short_put": 570, "short_call": 595},
+])
+# Returns: IntradayMonitorResult
+
+# Check entry window
+signal = ma.intraday.check_entry_window("SPY")
+# Returns: IntradaySignal | None
+```
+
+### Broker Integration
+
+Two connection modes: standalone (CLI) and embedded (SaaS). Both return a 3-tuple.
+
+```python
+# Mode 1: Standalone — market_analyzer authenticates
+from market_analyzer.broker.tastytrade import connect_tastytrade
+market_data, metrics, account = connect_tastytrade(is_paper=True)
+ma = MarketAnalyzer(data_service=DataService(),
+                    market_data=market_data, market_metrics=metrics,
+                    account_provider=account)
+
+# Mode 2: SaaS — caller passes pre-authenticated sessions (eTrading pattern)
+from market_analyzer.broker.tastytrade import connect_from_sessions
+market_data, metrics, account = connect_from_sessions(sdk_session, data_session)
+ma = MarketAnalyzer(data_service=DataService(),
+                    market_data=market_data, market_metrics=metrics,
+                    account_provider=account)
+```
+
+#### Credential Environment Variables
+
+```
+TASTYTRADE_***_LIVE   — client_secret + refresh_token for live trading
+TASTYTRADE_***_PAPER  — client_secret + refresh_token for paper trading
+TASTYTRADE_***_DATA   — client_secret + refresh_token for DXLink streaming (always live)
+```
+
+DXLink data session uses `_DATA` credentials. If DATA token is revoked, falls back to LIVE session.
+
+#### Async Bridge — `run_sync()`
+
+All DXLink calls are async. `run_sync()` bridges to sync callers:
+- **CLI/standalone**: Persistent event loop via `loop.run_until_complete()`
+- **FastAPI/SaaS**: Detects running loop, submits to thread pool
+- **Thread-safe**: Lock-protected event loop creation
+- **No event loop poisoning**: Reuses loop (unlike `asyncio.run()` which closes it)
+
+```python
+from market_analyzer.broker.tastytrade._async import run_sync
+
+# Works in both sync CLI and async FastAPI contexts
+result = run_sync(some_async_coroutine(), timeout=15)
+```
+
 ### Data Service — `ma.data`
 
 ```python
@@ -842,11 +1153,15 @@ analyzer-cli --market india     # India market
 | `strategy <ticker>` | Strategy recommendation | `strategy SPY` |
 | `exit_plan <ticker> <price>` | Exit plan | `exit_plan SPY 580` |
 | `rank <tickers...>` | Trade ranking | `rank SPY GLD QQQ TLT` |
+| `plan [tickers] [--date]` | Daily trading plan | `plan SPY GLD --date 2026-03-14` |
 | `regime <tickers...>` | Regime detection | `regime SPY GLD` |
 | `technicals <ticker>` | Technical snapshot | `technicals SPY` |
 | `levels <ticker>` | Support/resistance levels | `levels SPY` |
 | `vol <ticker>` | Volatility surface | `vol SPY` |
 | `opportunity <ticker> [play]` | Option play assessment | `opportunity SPY ic` |
+| `setup <type>` | Price-based setups | `setup breakout`, `setup orb`, `setup all` |
+| `quotes <ticker> [exp]` | Option chain with Greeks | `quotes SPY 2026-04-17` |
+| `adjust <ticker>` | Trade adjustment analysis | `adjust SPY` |
 | `macro` | Macro calendar | `macro` |
 | `stress` | Tail-risk alert | `stress` |
 | `help` | List all commands | `help` |

@@ -44,6 +44,8 @@ class PlanTrade(BaseModel):
 
 
 class RiskBudget(BaseModel):
+    account_size: float = 0.0
+    account_source: str = "config"  # "broker" | "config"
     max_new_positions: int
     max_daily_risk_dollars: float
     position_size_factor: float
@@ -61,3 +63,4 @@ class DailyTradingPlan(BaseModel):
     all_trades: list[PlanTrade]
     total_trades: int
     summary: str
+    data_warnings: list[str] = []  # Broker failures, data gaps, stale cache

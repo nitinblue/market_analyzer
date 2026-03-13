@@ -96,8 +96,8 @@ class TradingPlanService:
         # 3. Day verdict
         day_verdict, verdict_reasons = self._compute_day_verdict(context, today_events)
 
-        # 4. Risk budget
-        account_size = get_settings().strategy.default_account_size
+        # 4. Risk budget — use real account balance if broker connected
+        account_size, acct_source = self._get_account_size()
         max_positions = (
             cfg.max_new_positions_normal
             if day_verdict == DayVerdict.TRADE
@@ -106,6 +106,8 @@ class TradingPlanService:
             else 0
         )
         risk_budget = RiskBudget(
+            account_size=account_size,
+            account_source=acct_source,
             max_new_positions=max_positions,
             max_daily_risk_dollars=round(account_size * cfg.daily_risk_pct, 2),
             position_size_factor=context.position_size_factor,
@@ -141,7 +143,20 @@ class TradingPlanService:
             skip_intraday=skip_intraday,
         )
 
-        # 8. Convert ranked entries to PlanTrades
+        # 8. Prefetch all leg quotes grouped by ticker (one DXLink call per ticker).
+        #    include_greeks=False: plan only needs bid/ask for pricing, Greeks are
+        #    expensive (15s timeout per batch of 12 symbols) and not used here.
+        ticker_legs: dict[str, list] = {}
+        for entry in ranking_result.top_trades:
+            if entry.verdict != Verdict.NO_GO and entry.trade_spec and entry.trade_spec.legs:
+                tk = entry.trade_spec.ticker or entry.ticker
+                ticker_legs.setdefault(tk, []).extend(entry.trade_spec.legs)
+        if ticker_legs:
+            self.analyzer.quotes.prefetch_leg_quotes(
+                list(ticker_legs.items()), include_greeks=False,
+            )
+
+        # 9. Convert ranked entries to PlanTrades
         plan_trades: list[PlanTrade] = []
         slippage = cfg.fill_slippage_pct
 
@@ -177,14 +192,14 @@ class TradingPlanService:
                 expiry_note=expiry_note,
             ))
 
-        # 9. Cap at max trades
+        # 10. Cap at max trades
         plan_trades = plan_trades[:cfg.max_trades_per_plan]
 
-        # 10. Assign ranks
+        # 11. Assign ranks
         for i, pt in enumerate(plan_trades):
             pt.rank = i + 1
 
-        # 11. Bucket by horizon
+        # 12. Bucket by horizon
         by_horizon: dict[PlanHorizon, list[PlanTrade]] = defaultdict(list)
         for pt in plan_trades:
             by_horizon[pt.horizon].append(pt)
@@ -193,7 +208,10 @@ class TradingPlanService:
             if h not in by_horizon:
                 by_horizon[h] = []
 
-        # 12. Summary
+        # 13. Data warnings (broker connectivity, data gaps)
+        data_warnings = self._collect_data_warnings(plan_trades)
+
+        # 14. Summary
         summary = self._build_summary(
             day_verdict, plan_trades, risk_budget, today_events, ranking_result.black_swan_level,
         )
@@ -210,6 +228,7 @@ class TradingPlanService:
             all_trades=plan_trades,
             total_trades=len(plan_trades),
             summary=summary,
+            data_warnings=data_warnings,
         )
 
     def _compute_day_verdict(
@@ -278,6 +297,25 @@ class TradingPlanService:
         reasons.append("Normal conditions")
         return DayVerdict.TRADE, reasons
 
+    def _get_account_size(self) -> tuple[float, str]:
+        """Get account size — broker balance if available, config fallback.
+
+        Returns (account_size, source) where source is "broker" or "config".
+        """
+        if self.analyzer.account_provider is not None:
+            try:
+                balance = self.analyzer.account_provider.get_balance()
+                if balance.net_liquidating_value > 0:
+                    logger.info(
+                        "Using broker account balance: NLV=$%.0f, BP=$%.0f",
+                        balance.net_liquidating_value,
+                        balance.derivative_buying_power,
+                    )
+                    return balance.net_liquidating_value, "broker"
+            except Exception as e:
+                logger.warning("Failed to fetch account balance: %s", e)
+        return get_settings().strategy.default_account_size, "config"
+
     def _max_entry_from_broker(
         self, entry: RankedEntry, slippage_pct: float,
     ) -> float | None:
@@ -295,7 +333,9 @@ class TradingPlanService:
             return None
 
         try:
-            leg_quotes = quote_svc.get_leg_quotes(ts.legs, ticker=entry.ticker)
+            leg_quotes = quote_svc.get_leg_quotes(
+                ts.legs, ticker=entry.ticker, include_greeks=False,
+            )
             if not leg_quotes or len(leg_quotes) != len(ts.legs):
                 return None
 
@@ -318,6 +358,36 @@ class TradingPlanService:
         except Exception as e:
             logger.warning("Broker quote fetch for max_entry failed: %s", e)
             return None
+
+    def _collect_data_warnings(self, trades: list[PlanTrade]) -> list[str]:
+        """Surface broker/data issues that affect plan quality."""
+        warnings: list[str] = []
+
+        # Check broker connectivity
+        quote_svc = self.analyzer.quotes
+        if not quote_svc.has_broker:
+            warnings.append(
+                "No broker connected — all entry prices unavailable. "
+                "Run with --broker for live quotes."
+            )
+        else:
+            # Check if any trades are missing entry prices despite broker
+            missing_prices = [
+                t.ticker for t in trades
+                if t.trade_spec is not None and t.max_entry_price is None
+            ]
+            if missing_prices:
+                warnings.append(
+                    f"Broker quote fetch failed for: {', '.join(missing_prices)}. "
+                    "DXLink streaming may be down — check DATA credentials."
+                )
+
+        # Check data source
+        if quote_svc.has_broker:
+            source = quote_svc.source
+            warnings.append(f"Data source: {source}")
+
+        return warnings
 
     @staticmethod
     def _strategy_to_horizon(strategy_type: StrategyType, dte: int | None) -> PlanHorizon:
