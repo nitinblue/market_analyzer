@@ -35,9 +35,11 @@ logger = logging.getLogger(__name__)
 # within one plan generation run (~30-60s) the same bid/ask is reusable.
 _DEFAULT_CACHE_TTL = 60.0
 
-# After this many consecutive DXLink failures, stop trying for the rest
-# of the session (until clear_cache/reset is called).
-_CIRCUIT_BREAKER_THRESHOLD = 2
+# After this many consecutive DXLink failures, stop trying temporarily.
+_CIRCUIT_BREAKER_THRESHOLD = 3
+
+# Auto-reset circuit breaker after this many seconds (allows retry later in session).
+_CIRCUIT_BREAKER_COOLDOWN = 60.0
 
 
 class _CachedQuote:
@@ -83,6 +85,7 @@ class OptionQuoteService:
         # Circuit breaker: consecutive DXLink failures
         self._consecutive_failures = 0
         self._circuit_open = False
+        self._circuit_opened_at: float = 0.0
 
     def clear_cache(self) -> None:
         """Clear quote cache and reset circuit breaker."""
@@ -121,10 +124,26 @@ class OptionQuoteService:
             if not self._circuit_open:
                 logger.warning(
                     "DXLink circuit breaker OPEN after %d failures — "
-                    "skipping further quote fetches this session",
+                    "will auto-reset after %.0fs cooldown",
                     self._consecutive_failures,
+                    _CIRCUIT_BREAKER_COOLDOWN,
                 )
             self._circuit_open = True
+            self._circuit_opened_at = time.monotonic()
+
+    def _check_circuit(self) -> bool:
+        """Check if circuit breaker is open. Auto-resets after cooldown."""
+        if not self._circuit_open:
+            return False
+        elapsed = time.monotonic() - self._circuit_opened_at
+        if elapsed >= _CIRCUIT_BREAKER_COOLDOWN:
+            logger.info(
+                "DXLink circuit breaker auto-reset after %.0fs cooldown", elapsed,
+            )
+            self._circuit_open = False
+            self._consecutive_failures = 0
+            return False
+        return True
 
     @property
     def source(self) -> str:
@@ -194,7 +213,7 @@ class OptionQuoteService:
             return []
 
         # Circuit breaker: don't retry if DXLink is down
-        if self._circuit_open:
+        if self._check_circuit():
             return []
 
         # Check which legs are already cached
@@ -250,27 +269,31 @@ class OptionQuoteService:
         *,
         include_greeks: bool = True,
     ) -> None:
-        """Batch-fetch quotes for legs grouped by ticker, populating cache.
+        """Batch-fetch quotes for all tickers in ONE DXLink connection.
 
-        Call this before iterating over trades to avoid per-trade DXLink connections.
-        Fetches one DXLink call per ticker (only for uncached legs).
+        Uses ``get_quotes_batch()`` when available (e.g. TastyTrade) to open a
+        single WebSocket for all symbols across all tickers. Falls back to
+        per-ticker fetching if batch isn't supported.
+
+        Includes a single retry on failure — transient DXLink WebSocket errors
+        are common but usually succeed on second attempt.
 
         Args:
-            ticker_legs: List of (ticker, legs) tuples. Each ticker's legs
-                are fetched in a single DXLink connection.
+            ticker_legs: List of (ticker, legs) tuples.
             include_greeks: If False, skip Greeks (faster for plan pricing).
         """
         if not self._market_data or not ticker_legs:
             return
 
-        if self._circuit_open:
+        if self._check_circuit():
             logger.info("Circuit breaker open — skipping prefetch")
             return
 
-        total_legs = sum(len(legs) for _, legs in ticker_legs)
+        # Collect uncached legs per ticker
+        uncached_ticker_legs: list[tuple[str, list[LegSpec]]] = []
+        total_legs = 0
 
         for ticker, legs in ticker_legs:
-            # Deduplicate and skip already-cached
             unique_legs: list[LegSpec] = []
             seen: set[str] = set()
             for leg in legs:
@@ -278,32 +301,59 @@ class OptionQuoteService:
                 if self._get_cached(key) is None and key not in seen:
                     unique_legs.append(leg)
                     seen.add(key)
+            if unique_legs:
+                uncached_ticker_legs.append((ticker, unique_legs))
+                total_legs += len(unique_legs)
 
-            if not unique_legs:
-                continue
+        if not uncached_ticker_legs:
+            return
 
-            if self._circuit_open:
+        logger.info(
+            "Prefetching %d legs across %d tickers (greeks=%s)",
+            total_legs, len(uncached_ticker_legs), include_greeks,
+        )
+
+        # Try batch fetch (single DXLink connection for all tickers)
+        has_batch = hasattr(self._market_data, "get_quotes_batch")
+        fetched = False
+
+        for attempt in range(2):  # One retry on failure
+            try:
+                if has_batch:
+                    batch_result = self._market_data.get_quotes_batch(
+                        uncached_ticker_legs, include_greeks=include_greeks,
+                    )
+                    for ticker, legs in uncached_ticker_legs:
+                        quotes = batch_result.get(ticker, [])
+                        for leg, quote in zip(legs, quotes):
+                            key = self._leg_cache_key(leg, ticker)
+                            self._put_cached(key, quote)
+                else:
+                    # Fallback: per-ticker fetching
+                    for ticker, legs in uncached_ticker_legs:
+                        quotes = self._market_data.get_quotes(
+                            legs, ticker=ticker, include_greeks=include_greeks,
+                        )
+                        for leg, quote in zip(legs, quotes):
+                            key = self._leg_cache_key(leg, ticker)
+                            self._put_cached(key, quote)
+
+                self._record_success()
+                fetched = True
                 break
 
-            logger.info(
-                "Prefetching %d legs for %s (greeks=%s)",
-                len(unique_legs), ticker, include_greeks,
-            )
-            try:
-                quotes = self._market_data.get_quotes(
-                    unique_legs, ticker=ticker, include_greeks=include_greeks,
-                )
-                for leg, quote in zip(unique_legs, quotes):
-                    key = self._leg_cache_key(leg, ticker)
-                    self._put_cached(key, quote)
-                self._record_success()
-                logger.info("Cached %d quotes for %s", len(quotes), ticker)
             except Exception as e:
-                logger.warning("Prefetch failed for %s: %s", ticker, e)
-                self._record_failure()
+                if attempt == 0:
+                    logger.warning("Prefetch attempt 1 failed, retrying: %s", e)
+                else:
+                    logger.warning("Prefetch attempt 2 failed: %s", e)
+                    self._record_failure()
 
         cached_count = sum(1 for e in self._quote_cache.values() if e.is_fresh(self._cache_ttl))
-        logger.info("Prefetch complete: %d cached quotes from %d total legs", cached_count, total_legs)
+        logger.info(
+            "Prefetch %s: %d cached quotes from %d total legs",
+            "complete" if fetched else "FAILED", cached_count, total_legs,
+        )
 
     def get_metrics(self, ticker: str) -> MarketMetrics | None:
         """IV rank, percentile, beta. None if no metrics provider."""

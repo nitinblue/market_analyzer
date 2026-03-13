@@ -123,6 +123,80 @@ class TastyTradeMarketData(MarketDataProvider):
                 fetch_greeks(self._session.data_session, symbols),
             )
 
+        return self._assemble_quotes(legs, symbols, quotes_map, greeks_map, ticker)
+
+    def get_quotes_batch(
+        self,
+        ticker_legs: list[tuple[str, list[LegSpec]]],
+        *,
+        include_greeks: bool = False,
+    ) -> dict[str, list[OptionQuote]]:
+        """Fetch quotes for legs across MULTIPLE tickers in ONE DXLink connection.
+
+        Instead of opening a separate WebSocket per ticker, this collects all
+        streamer symbols and fetches them in a single connection. Much more
+        reliable for plan generation with 10+ tickers.
+
+        Args:
+            ticker_legs: List of (ticker, legs) tuples.
+            include_greeks: If False, skip Greeks (default for plan pricing).
+
+        Returns:
+            ``{ticker: [OptionQuote, ...]}``
+        """
+        # Build all symbols, tracking which ticker each belongs to
+        all_symbols: list[str] = []
+        symbol_to_ticker: dict[str, str] = {}
+        ticker_sym_legs: dict[str, list[tuple[LegSpec, str]]] = {}
+
+        for ticker, legs in ticker_legs:
+            sym_legs: list[tuple[LegSpec, str]] = []
+            for leg in legs:
+                sym = build_streamer_symbol(ticker, leg.expiration, leg.option_type, leg.strike)
+                if sym:
+                    all_symbols.append(sym)
+                    symbol_to_ticker[sym] = ticker
+                    sym_legs.append((leg, sym))
+            ticker_sym_legs[ticker] = sym_legs
+
+        if not all_symbols:
+            return {}
+
+        # Single DXLink connection for ALL symbols (with longer timeout for large batches)
+        total_timeout = max(5.0, min(15.0, len(all_symbols) * 0.3))
+        quotes_map = run_sync(
+            fetch_quotes(
+                self._session.data_session, all_symbols,
+                total_timeout=total_timeout,
+            ),
+        )
+
+        greeks_map: dict[str, dict] = {}
+        if include_greeks:
+            greeks_map = run_sync(
+                fetch_greeks(self._session.data_session, all_symbols),
+            )
+
+        # Distribute results back to per-ticker lists
+        result: dict[str, list[OptionQuote]] = {}
+        for ticker, sym_legs in ticker_sym_legs.items():
+            legs_list = [sl[0] for sl in sym_legs]
+            syms_list = [sl[1] for sl in sym_legs]
+            result[ticker] = self._assemble_quotes(
+                legs_list, syms_list, quotes_map, greeks_map, ticker,
+            )
+
+        return result
+
+    def _assemble_quotes(
+        self,
+        legs: list[LegSpec],
+        symbols: list[str],
+        quotes_map: dict[str, dict],
+        greeks_map: dict[str, dict],
+        ticker: str,
+    ) -> list[OptionQuote]:
+        """Build OptionQuote list from DXLink quote/greeks maps."""
         result: list[OptionQuote] = []
         for leg, sym in zip(legs, symbols):
             if not sym:

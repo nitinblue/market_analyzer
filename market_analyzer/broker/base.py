@@ -99,6 +99,27 @@ class MarketDataProvider(ABC):
         """Real-time underlying price (mid of bid/ask). None if unavailable."""
         return None
 
+    def get_quotes_batch(
+        self,
+        ticker_legs: list[tuple[str, list]],
+        *,
+        include_greeks: bool = False,
+    ) -> dict[str, list[OptionQuote]]:
+        """Fetch quotes for legs across multiple tickers in one connection.
+
+        Default implementation calls get_quotes() per ticker (subclasses can
+        override for single-connection batching).
+        """
+        result: dict[str, list[OptionQuote]] = {}
+        for ticker, legs in ticker_legs:
+            try:
+                result[ticker] = self.get_quotes(
+                    legs, ticker=ticker, include_greeks=include_greeks,
+                )
+            except Exception:
+                result[ticker] = []
+        return result
+
 
 class WatchlistProvider(ABC):
     """Abstract provider for broker-managed watchlists."""
