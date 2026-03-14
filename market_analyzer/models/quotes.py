@@ -21,6 +21,7 @@ class OptionQuote(BaseModel):
     volume: int = 0
     open_interest: int = 0
     implied_volatility: float | None = None
+    lot_size: int = 100  # Contract multiplier (100 for US equities, 10 for mini options)
     # Greeks (from DXLink or broker)
     delta: float | None = None
     gamma: float | None = None
@@ -49,6 +50,8 @@ class AccountBalance(BaseModel):
     maintenance_requirement: float    # Current margin in use
     pending_cash: float = 0.0
     source: str = ""                  # "tastytrade" | "schwab" | etc.
+    currency: str = "USD"             # Account currency code
+    timezone: str = "US/Eastern"      # Account timezone (market hours reference)
 
 
 class MarketMetrics(BaseModel):

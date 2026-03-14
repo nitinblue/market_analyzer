@@ -370,6 +370,11 @@ markets:
       market_close: "16:00"
       reference_tickers: ["SPY", "QQQ", "TLT", "GLD", "HYG"]
       stress_vix_ticker: "^VIX"
+      entry_windows:
+        zero_dte: ["09:45", "14:00"]
+        income: ["09:45", "15:00"]
+        earnings: ["09:45", "14:30"]
+        directional: ["09:45", "15:00"]
     India:
       name: "India"
       suffix: ".NS"
@@ -380,6 +385,19 @@ markets:
       market_close: "15:30"
       reference_tickers: ["^NSEI", "^NSEBANK", "GOLDBEES.NS"]
       stress_vix_ticker: "^INDIAVIX"
+      entry_windows:
+        zero_dte: ["09:30", "13:30"]
+        income: ["09:30", "14:30"]
+        earnings: ["09:30", "14:00"]
+        directional: ["09:30", "14:30"]
+      strategy_defaults:
+        weekly_expiry_day: "thursday"
+        max_dte: 90
+        primary_underlyings: ["NIFTY", "BANKNIFTY", "FINNIFTY"]
+        lot_sizes:
+          NIFTY: 25
+          BANKNIFTY: 15
+          FINNIFTY: 40
 
 screening:
   min_volume_20d_avg: 500000

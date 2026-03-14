@@ -104,3 +104,38 @@ class CalibrationResult(BaseModel):
 
     adjustments: list[WeightAdjustment]
     summary: str
+
+
+class SharpeResult(BaseModel):
+    """Risk-adjusted return metrics."""
+
+    sharpe_ratio: float
+    sortino_ratio: float
+    annualized_return_pct: float
+    annualized_volatility_pct: float
+    risk_free_rate: float
+    total_trades: int
+
+
+class DrawdownResult(BaseModel):
+    """Maximum drawdown analysis."""
+
+    max_drawdown_pct: float
+    max_drawdown_dollars: float
+    max_drawdown_duration_days: int
+    current_drawdown_pct: float
+    current_drawdown_dollars: float
+    recovery_trades: int  # Trades since max drawdown
+
+
+class RegimePerformance(BaseModel):
+    """Performance breakdown for a single regime."""
+
+    regime_id: int
+    regime_name: str
+    total_trades: int
+    win_rate: float
+    avg_pnl_pct: float
+    total_pnl_dollars: float
+    best_strategy: str | None
+    worst_strategy: str | None

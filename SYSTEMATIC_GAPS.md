@@ -4,7 +4,7 @@
 
 **Boundary:** MA is stateless. eTrading passes context in, MA computes and returns. eTrading owns all state (outcomes, bandit params, drift history).
 
-**Stats:** 1241 tests passing. 169 in test_systematic.py.
+**Stats:** 1305 tests passing. 233 in test_systematic.py.
 
 ---
 
@@ -31,6 +31,14 @@
 | ML1 | Learning | Drift detection | **DONE** | **Schedule daily:** `detect_drift(outcomes)`. If CRITICAL → suspend strategy cell. If WARNING → halve position size. Store alerts. |
 | ML2 | Learning | Thompson Sampling | **DONE** | **Store `StrategyBandit` per cell.** On close: `update_bandit(bandit, won)`. Daily: `select_strategies(bandits, regime)` → use in `rank(strategies=)`. |
 | ML3 | Learning | Threshold optimization | **DONE** | **Schedule monthly:** `optimize_thresholds(outcomes)`. Store `ThresholdConfig`. Apply as Settings override to MA services. |
+| CR6 | Multi-Market | Dhan + Zerodha broker stubs | **DONE** | Wire pre-authenticated sessions via `connect_dhan_from_session()` / `connect_zerodha_from_session()`. INR, Asia/Kolkata, lot_size=25. |
+| CR7 | Multi-Market | Currency + timezone + lot_size | **DONE** | Pass correct `lot_size` per instrument from `MarketRegistry`. All `* 100` → `* lot_size` in trade_lifecycle. |
+| CR8 | Multi-Market | India strategy config | **DONE** | Config-driven via `IndiaStrategyDefaults`. No eTrading action needed. |
+| CR9 | Multi-Market | India regime detection | **DONE** | Works out of box — `regime.detect("NIFTY")` via yfinance alias. No eTrading action. |
+| CR10 | Multi-Market | Timezone-aware entry windows | **DONE** | Read `entry_window_timezone` from TradeSpec. Convert to local time in platform scheduler. |
+| CR11 | Analytics | Sharpe, drawdown, regime perf | **DONE** | Call `compute_sharpe(outcomes)`, `compute_drawdown(outcomes)`, `compute_regime_performance(outcomes)`. Render in dashboard. |
+| CR12 | Multi-Market | India ticker mapping | **DONE** | Auto-resolved — NIFTY/BANKNIFTY/FINNIFTY/SENSEX aliases in DataService. No eTrading action. |
+| CR13 | Multi-Market | MarketRegistry static data | **DONE** | Call `ma.registry.get_instrument()` for lot sizes, `strategy_available()` for routing, `estimate_margin()` for sizing. |
 
 ---
 
@@ -318,3 +326,4 @@ save_threshold_config(optimized)
 | 2026-03-14 | Refreshed challenge/trader.py — full 9-step systematic flow | +0 | 1190 |
 | 2026-03-14 | SQ4-SQ10: Assessor overhauls, screening filters, IV ranking, pivot levels | +29 | 1219 |
 | 2026-03-14 | ML1-ML3: Drift detection, Thompson Sampling bandits, threshold optimization | +22 | 1241 |
+| 2026-03-14 | CR6-CR13: Multi-broker stubs, currency/timezone/lot_size, India data, MarketRegistry, analytics | +64 | 1305 |

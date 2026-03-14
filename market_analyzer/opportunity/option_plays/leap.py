@@ -61,6 +61,18 @@ def assess_leap(
         regime, phase, days_to_earnings, fund_score, cfg,
     )
 
+    # Market hard stop — LEAPs not available in India F&O (max ~3 months)
+    try:
+        from market_analyzer.registry import MarketRegistry
+        _reg = MarketRegistry()
+        if not _reg.strategy_available("leaps", ticker):
+            hard_stops.append(HardStop(
+                name="leaps_not_available",
+                description=f"LEAPs not available for {ticker} in this market (max DTE ~90 days)",
+            ))
+    except (KeyError, ImportError):
+        pass  # Unknown ticker — proceed with normal assessment
+
     # IV rank hard stop — LEAPs are long options, overpaying for IV is costly
     if iv_rank is not None and iv_rank > 70:
         hard_stops.append(HardStop(

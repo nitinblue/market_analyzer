@@ -84,8 +84,9 @@ def compute_income_yield(
     if not wing or wing <= 0:
         return None
 
-    max_profit = entry_credit * 100 * contracts
-    max_loss = (wing - entry_credit) * 100 * contracts
+    lot_size = trade_spec.lot_size
+    max_profit = entry_credit * lot_size * contracts
+    max_loss = (wing - entry_credit) * lot_size * contracts
     credit_to_width = entry_credit / wing
     roc = max_profit / max_loss if max_loss > 0 else 0.0
 
@@ -256,7 +257,7 @@ def aggregate_greeks(
         net_gamma=round(net_g, 6),
         net_theta=round(net_t, 4),
         net_vega=round(net_v, 4),
-        daily_theta_dollars=round(net_t * 100 * contracts, 2),
+        daily_theta_dollars=round(net_t * trade_spec.lot_size * contracts, 2),
         contracts=contracts,
     )
 
@@ -305,15 +306,15 @@ def filter_trades_by_account(
 
         # BP check
         if ts and ts.wing_width_points and not reason:
-            bp_needed = ts.wing_width_points * 100
+            bp_needed = ts.wing_width_points * ts.lot_size
             if bp_needed > available_buying_power:
                 reason = f"needs ${bp_needed:.0f} BP, have ${available_buying_power:.0f}"
 
         # Risk check
         if ts and max_risk_per_trade and not reason:
-            risk = (ts.wing_width_points or 0) * 100
+            risk = (ts.wing_width_points or 0) * ts.lot_size
             if ts.order_side == "debit" and ts.max_entry_price:
-                risk = ts.max_entry_price * 100
+                risk = ts.max_entry_price * ts.lot_size
             if risk > max_risk_per_trade:
                 reason = f"risk ${risk:.0f} exceeds limit ${max_risk_per_trade:.0f}"
 
@@ -508,12 +509,13 @@ def estimate_pop(
 
         # Expected value
         wing = trade_spec.wing_width_points or 5.0
+        lot_size = trade_spec.lot_size
         if trade_spec.order_side == "credit":
-            max_profit = entry_price * 100 * contracts
-            max_loss = (wing - entry_price) * 100 * contracts
+            max_profit = entry_price * lot_size * contracts
+            max_loss = (wing - entry_price) * lot_size * contracts
         else:
-            max_profit = (wing - entry_price) * 100 * contracts
-            max_loss = entry_price * 100 * contracts
+            max_profit = (wing - entry_price) * lot_size * contracts
+            max_loss = entry_price * lot_size * contracts
 
         ev = pop * max_profit - (1 - pop) * max_loss
 
@@ -574,8 +576,9 @@ def estimate_pop(
 
         pop = max(0.0, min(1.0, pop))
 
-        max_profit = ((trade_spec.wing_width_points or entry_price) - entry_price) * 100 * contracts
-        max_loss = entry_price * 100 * contracts
+        lot_size = trade_spec.lot_size
+        max_profit = ((trade_spec.wing_width_points or entry_price) - entry_price) * lot_size * contracts
+        max_loss = entry_price * lot_size * contracts
         ev = pop * max_profit - (1 - pop) * max_loss
 
         gaps: list[DataGap] = []
@@ -796,6 +799,7 @@ def monitor_exit_conditions(
     stop_loss_pct: float | None = None,
     exit_dte: int | None = None,
     time_of_day: dt_time | None = None,
+    lot_size: int = 100,
 ) -> ExitMonitorResult:
     """Check all exit conditions for an open trade.
 
@@ -825,7 +829,7 @@ def monitor_exit_conditions(
         # Profit: entry_price - current_mid = profit per spread
         profit_per = entry_price - current_mid_price
         pnl_pct = profit_per / entry_price if entry_price > 0 else 0
-        pnl_dollars = profit_per * 100 * contracts
+        pnl_dollars = profit_per * lot_size * contracts
 
         # Profit target
         if profit_target_pct is not None:
@@ -848,7 +852,7 @@ def monitor_exit_conditions(
             loss_multiple = (current_mid_price - entry_price) / entry_price if entry_price > 0 else 0
             triggered = loss_multiple >= stop_loss_pct
             approaching = loss_multiple >= stop_loss_pct * 0.75
-            loss_dollars = (current_mid_price - entry_price) * 100 * contracts
+            loss_dollars = (current_mid_price - entry_price) * lot_size * contracts
             signals.append(ExitSignal(
                 rule="stop_loss",
                 triggered=triggered,
@@ -864,7 +868,7 @@ def monitor_exit_conditions(
         # Debit trade
         profit_per = current_mid_price - entry_price
         pnl_pct = profit_per / entry_price if entry_price > 0 else 0
-        pnl_dollars = profit_per * 100 * contracts
+        pnl_dollars = profit_per * lot_size * contracts
 
         if profit_target_pct is not None:
             triggered = pnl_pct >= profit_target_pct
@@ -1087,6 +1091,7 @@ def check_trade_health(
         regime_id=int(regime.regime),
         entry_regime_id=entry_regime_id,
         profit_target_pct=trade_spec.profit_target_pct,
+        lot_size=trade_spec.lot_size,
         stop_loss_pct=trade_spec.stop_loss_pct,
         exit_dte=trade_spec.exit_dte,
         time_of_day=time_of_day,
@@ -1158,7 +1163,7 @@ def check_trade_health(
     if adjustment_needed and adj_summary:
         parts.append(f"Suggested: {adj_summary}")
     if not exit_result.should_close and not adjustment_needed:
-        pnl = (entry_price - current_mid_price) * 100 * contracts if (trade_spec.order_side or "") == "credit" else (current_mid_price - entry_price) * 100 * contracts
+        pnl = (entry_price - current_mid_price) * trade_spec.lot_size * contracts if (trade_spec.order_side or "") == "credit" else (current_mid_price - entry_price) * trade_spec.lot_size * contracts
         parts.append(f"P&L: ${pnl:+.0f} | {dte_remaining} DTE")
 
     # Build commentary: comprehensive narrative for trading platform

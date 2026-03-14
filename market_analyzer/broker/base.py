@@ -87,6 +87,29 @@ class MarketDataProvider(ABC):
         """'tastytrade', 'schwab', 'ibkr', etc."""
         ...
 
+    # -- Market properties (override per-broker / per-market) --
+
+    @property
+    def currency(self) -> str:
+        """Currency code for this market: 'USD', 'INR', etc."""
+        return "USD"
+
+    @property
+    def timezone(self) -> str:
+        """Timezone for this market's trading hours."""
+        return "US/Eastern"
+
+    @property
+    def market_hours(self) -> tuple:
+        """Market open and close times as (open, close) time objects."""
+        from datetime import time
+        return (time(9, 30), time(16, 0))
+
+    @property
+    def lot_size_default(self) -> int:
+        """Default contract multiplier for this market (100 for US equities)."""
+        return 100
+
     # -- Optional intraday / underlying price (default no-ops) --
 
     def get_intraday_candles(

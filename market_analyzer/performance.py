@@ -16,7 +16,10 @@ from collections import defaultdict
 from market_analyzer.features.ranking import REGIME_STRATEGY_ALIGNMENT
 from market_analyzer.models.feedback import (
     CalibrationResult,
+    DrawdownResult,
     PerformanceReport,
+    RegimePerformance,
+    SharpeResult,
     StrategyPerformance,
     TradeOutcome,
     WeightAdjustment,
@@ -758,6 +761,203 @@ def optimize_thresholds(
     if len(pop_outcomes) >= min_trades_per_bucket:
         result.pop_min = _find_optimal(
             pop_outcomes, current.pop_min, "min"
+        )
+
+    return result
+
+
+def compute_sharpe(
+    outcomes: list[TradeOutcome],
+    risk_free_rate: float = 0.05,
+) -> SharpeResult:
+    """Compute Sharpe and Sortino ratios from trade outcomes.
+
+    Annualizes returns based on average holding period. Sortino uses
+    downside deviation only (negative returns).
+
+    Args:
+        outcomes: Completed trade outcomes with pnl_pct and holding_days.
+        risk_free_rate: Annual risk-free rate as decimal (0.05 = 5%).
+
+    Returns:
+        SharpeResult with Sharpe, Sortino, annualized return/vol.
+    """
+    if len(outcomes) < 2:
+        return SharpeResult(
+            sharpe_ratio=0.0,
+            sortino_ratio=0.0,
+            annualized_return_pct=0.0,
+            annualized_volatility_pct=0.0,
+            risk_free_rate=risk_free_rate,
+            total_trades=len(outcomes),
+        )
+
+    returns = [o.pnl_pct for o in outcomes]
+    avg_return = sum(returns) / len(returns)
+
+    # Annualize: assume average holding period
+    avg_days = sum(o.holding_days for o in outcomes) / len(outcomes)
+    trades_per_year = 252 / max(avg_days, 1)
+    annualized_return = avg_return * trades_per_year
+
+    # Volatility
+    variance = sum((r - avg_return) ** 2 for r in returns) / (len(returns) - 1)
+    vol = math.sqrt(variance)
+    annualized_vol = vol * math.sqrt(trades_per_year)
+
+    # Sharpe
+    sharpe = (
+        (annualized_return - risk_free_rate) / annualized_vol
+        if annualized_vol > 0
+        else 0.0
+    )
+
+    # Sortino (downside deviation only)
+    downside = [r for r in returns if r < 0]
+    if downside:
+        downside_var = sum(r**2 for r in downside) / len(downside)
+        downside_vol = math.sqrt(downside_var) * math.sqrt(trades_per_year)
+        sortino = (
+            (annualized_return - risk_free_rate) / downside_vol
+            if downside_vol > 0
+            else 0.0
+        )
+    else:
+        sortino = float("inf")
+
+    return SharpeResult(
+        sharpe_ratio=round(sharpe, 3),
+        sortino_ratio=round(sortino, 3),
+        annualized_return_pct=round(annualized_return * 100, 2),
+        annualized_volatility_pct=round(annualized_vol * 100, 2),
+        risk_free_rate=risk_free_rate,
+        total_trades=len(outcomes),
+    )
+
+
+def compute_drawdown(outcomes: list[TradeOutcome]) -> DrawdownResult:
+    """Compute drawdown metrics from trade outcomes sorted by exit_date.
+
+    Tracks cumulative PnL, identifies maximum peak-to-trough decline,
+    and reports current drawdown from the equity peak.
+
+    Args:
+        outcomes: Completed trade outcomes with pnl_dollars and exit_date.
+
+    Returns:
+        DrawdownResult with max/current drawdown in dollars and percent.
+    """
+    if not outcomes:
+        return DrawdownResult(
+            max_drawdown_pct=0.0,
+            max_drawdown_dollars=0.0,
+            max_drawdown_duration_days=0,
+            current_drawdown_pct=0.0,
+            current_drawdown_dollars=0.0,
+            recovery_trades=0,
+        )
+
+    sorted_outcomes = sorted(outcomes, key=lambda o: o.exit_date)
+
+    cumulative = 0.0
+    peak = 0.0
+    max_dd_dollars = 0.0
+    max_dd_end = 0
+    peak_index = 0
+
+    for i, o in enumerate(sorted_outcomes):
+        cumulative += o.pnl_dollars
+        if cumulative > peak:
+            peak = cumulative
+            peak_index = i
+        dd = peak - cumulative
+        if dd > max_dd_dollars:
+            max_dd_dollars = dd
+            max_dd_end = i
+
+    # Current drawdown
+    current_dd = peak - cumulative
+
+    # Duration: find the last peak before max_dd_end
+    duration = 0
+    max_dd_start = 0
+    if max_dd_end > 0 and max_dd_dollars > 0:
+        # Walk backward from max_dd_end to find last peak
+        running = 0.0
+        local_peak = 0.0
+        for j in range(max_dd_end + 1):
+            running += sorted_outcomes[j].pnl_dollars
+            if running >= local_peak:
+                local_peak = running
+                max_dd_start = j
+        if max_dd_start < max_dd_end:
+            duration = (
+                sorted_outcomes[max_dd_end].exit_date
+                - sorted_outcomes[max_dd_start].exit_date
+            ).days
+
+    # Recovery trades since max dd
+    recovery = len(sorted_outcomes) - max_dd_end - 1
+
+    # Max drawdown as pct of peak equity
+    max_dd_pct = max_dd_dollars / peak if peak > 0 else 0.0
+    current_dd_pct = current_dd / peak if peak > 0 else 0.0
+
+    return DrawdownResult(
+        max_drawdown_pct=round(max_dd_pct, 4),
+        max_drawdown_dollars=round(max_dd_dollars, 2),
+        max_drawdown_duration_days=duration,
+        current_drawdown_pct=round(current_dd_pct, 4),
+        current_drawdown_dollars=round(current_dd, 2),
+        recovery_trades=max(recovery, 0),
+    )
+
+
+def compute_regime_performance(
+    outcomes: list[TradeOutcome],
+) -> dict[int, RegimePerformance]:
+    """Performance breakdown by regime.
+
+    Groups outcomes by regime_at_entry and computes win rate, average PnL,
+    and identifies best/worst strategy per regime by total PnL dollars.
+
+    Args:
+        outcomes: Completed trade outcomes with regime_at_entry.
+
+    Returns:
+        Dict mapping regime_id to RegimePerformance.
+    """
+    regime_names = {
+        1: "Low-Vol MR",
+        2: "High-Vol MR",
+        3: "Low-Vol Trend",
+        4: "High-Vol Trend",
+    }
+
+    by_regime: dict[int, list[TradeOutcome]] = defaultdict(list)
+    for o in outcomes:
+        by_regime[o.regime_at_entry].append(o)
+
+    result: dict[int, RegimePerformance] = {}
+    for regime_id, trades in by_regime.items():
+        wins = [t for t in trades if t.pnl_pct > 0]
+
+        # Best/worst strategy by total PnL
+        strat_pnl: dict[str, float] = defaultdict(float)
+        for t in trades:
+            strat_pnl[str(t.strategy_type)] += t.pnl_dollars
+        best = max(strat_pnl, key=strat_pnl.get) if strat_pnl else None  # type: ignore[arg-type]
+        worst = min(strat_pnl, key=strat_pnl.get) if strat_pnl else None  # type: ignore[arg-type]
+
+        result[regime_id] = RegimePerformance(
+            regime_id=regime_id,
+            regime_name=regime_names.get(regime_id, f"R{regime_id}"),
+            total_trades=len(trades),
+            win_rate=len(wins) / len(trades) if trades else 0.0,
+            avg_pnl_pct=sum(t.pnl_pct for t in trades) / len(trades) if trades else 0.0,
+            total_pnl_dollars=sum(t.pnl_dollars for t in trades),
+            best_strategy=best,
+            worst_strategy=worst,
         )
 
     return result

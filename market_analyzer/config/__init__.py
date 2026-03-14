@@ -418,6 +418,28 @@ class DisplaySettings(BaseModel):
     plot: PlotSettings = Field(default_factory=PlotSettings)
 
 
+class EntryWindowConfig(BaseModel):
+    """Entry windows for a specific market — (start, end) times in local tz."""
+
+    zero_dte: tuple[str, str] = ("09:45", "14:00")
+    income: tuple[str, str] = ("09:45", "15:00")
+    earnings: tuple[str, str] = ("09:45", "14:30")
+    directional: tuple[str, str] = ("09:45", "15:00")
+
+
+class IndiaStrategyDefaults(BaseModel):
+    """India-specific strategy configuration."""
+
+    weekly_expiry_day: str = "thursday"
+    max_dte: int = 90
+    primary_underlyings: list[str] = Field(
+        default_factory=lambda: ["NIFTY", "BANKNIFTY", "FINNIFTY"],
+    )
+    lot_sizes: dict[str, int] = Field(
+        default_factory=lambda: {"NIFTY": 25, "BANKNIFTY": 15, "FINNIFTY": 40},
+    )
+
+
 class MarketDef(BaseModel):
     """Definition for a single market (US, India, etc.)."""
 
@@ -430,6 +452,8 @@ class MarketDef(BaseModel):
     market_close: str = "16:00"
     reference_tickers: list[str] = Field(default_factory=list)
     stress_vix_ticker: str = "^VIX"     # Market-specific VIX equivalent
+    entry_windows: EntryWindowConfig = Field(default_factory=EntryWindowConfig)
+    strategy_defaults: IndiaStrategyDefaults | None = None
 
 
 class MarketSettings(BaseModel):
@@ -447,6 +471,12 @@ class MarketSettings(BaseModel):
             market_close="16:00",
             reference_tickers=["SPY", "QQQ", "TLT", "GLD", "HYG"],
             stress_vix_ticker="^VIX",
+            entry_windows=EntryWindowConfig(
+                zero_dte=("09:45", "14:00"),
+                income=("09:45", "15:00"),
+                earnings=("09:45", "14:30"),
+                directional=("09:45", "15:00"),
+            ),
         ),
         "India": MarketDef(
             name="India",
@@ -458,6 +488,13 @@ class MarketSettings(BaseModel):
             market_close="15:30",
             reference_tickers=["^NSEI", "^NSEBANK", "GOLDBEES.NS"],
             stress_vix_ticker="^INDIAVIX",
+            entry_windows=EntryWindowConfig(
+                zero_dte=("09:30", "13:30"),
+                income=("09:30", "14:30"),
+                earnings=("09:30", "14:00"),
+                directional=("09:30", "14:30"),
+            ),
+            strategy_defaults=IndiaStrategyDefaults(),
         ),
     })
 

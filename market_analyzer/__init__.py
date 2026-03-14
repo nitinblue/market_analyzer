@@ -123,6 +123,9 @@ from market_analyzer.models.vol_surface import (
 from market_analyzer.service.vol_surface import VolSurfaceService
 from market_analyzer.features.vol_surface import compute_vol_surface
 
+# Market registry
+from market_analyzer.registry import MarketRegistry, MarketInfo, InstrumentInfo, MarginEstimate
+
 # Universe filtering
 from market_analyzer.models.universe import (
     AssetType,
@@ -228,7 +231,10 @@ from market_analyzer.features.black_swan import compute_black_swan_alert
 # Performance feedback
 from market_analyzer.models.feedback import (
     CalibrationResult,
+    DrawdownResult,
     PerformanceReport,
+    RegimePerformance,
+    SharpeResult,
     StrategyPerformance,
     TradeExitReason,
     TradeOutcome,
@@ -244,7 +250,10 @@ from market_analyzer.performance import (
     build_bandits,
     calibrate_pop_factors,
     calibrate_weights,
+    compute_drawdown,
     compute_performance_report,
+    compute_regime_performance,
+    compute_sharpe,
     compute_strategy_performance,
     detect_drift,
     optimize_thresholds,
@@ -504,6 +513,11 @@ __all__ = [
     "MarketDataProvider",
     "MarketMetricsProvider",
     "WatchlistProvider",
+    # Market registry
+    "MarketRegistry",
+    "MarketInfo",
+    "InstrumentInfo",
+    "MarginEstimate",
     # Universe filtering
     "AssetType",
     "SortField",
@@ -564,10 +578,16 @@ __all__ = [
     "PerformanceReport",
     "WeightAdjustment",
     "CalibrationResult",
+    "SharpeResult",
+    "DrawdownResult",
+    "RegimePerformance",
     "compute_strategy_performance",
     "compute_performance_report",
     "calibrate_weights",
     "calibrate_pop_factors",
+    "compute_sharpe",
+    "compute_drawdown",
+    "compute_regime_performance",
     # Drift detection
     "DriftAlert",
     "DriftSeverity",

@@ -26,6 +26,7 @@ from market_analyzer.service.intraday import IntradayService
 from market_analyzer.service.option_quotes import OptionQuoteService
 from market_analyzer.service.trading_plan import TradingPlanService
 from market_analyzer.service.universe import UniverseService
+from market_analyzer.registry import MarketRegistry
 
 if TYPE_CHECKING:
     from market_analyzer.broker.base import (
@@ -76,6 +77,7 @@ class MarketAnalyzer:
     ) -> None:
         self.data = data_service
         self.account_provider = account_provider
+        self.registry = MarketRegistry()
 
         # --- Existing services (unchanged) ---
         self.regime = RegimeService(config=config, data_service=data_service)

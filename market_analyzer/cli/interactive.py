@@ -2535,6 +2535,169 @@ Requires --broker connection."""
         print(f"    {_styled('report = compute_performance_report(outcomes)', 'dim')}")
         print(f"    {_styled('calibration = calibrate_weights(outcomes)', 'dim')}")
 
+    def do_registry(self, arg: str) -> None:
+        """Browse market registry — instruments, markets, strategies.\nUsage: registry [TICKER|MARKET|strategies]\n  registry           — list markets\n  registry US        — US market info\n  registry INDIA     — India market info\n  registry NIFTY     — instrument info\n  registry SPY       — instrument info\n  registry strategies NIFTY — available strategies"""
+        ma = self._get_ma()
+        parts = arg.strip().split()
+        registry = ma.registry
+
+        if not parts:
+            _print_header("Markets")
+            for mid in ("US", "INDIA"):
+                m = registry.get_market(mid)
+                print(f"\n  {_styled(mid, 'bold')} ({m.currency})")
+                print(f"    Timezone:   {m.timezone}")
+                print(f"    Hours:      {m.open_time.strftime('%H:%M')}-{m.close_time.strftime('%H:%M')}")
+                print(f"    Settlement: T+{m.settlement_days}")
+                instruments = registry.list_instruments(market=mid)
+                print(f"    Instruments: {len(instruments)}")
+            return
+
+        query = parts[0].upper()
+
+        # Strategies for a ticker
+        if query == "STRATEGIES" and len(parts) > 1:
+            ticker = parts[1].upper()
+            _print_header(f"Strategies for {ticker}")
+            strategies = ["iron_condor", "iron_butterfly", "credit_spread", "debit_spread",
+                          "calendar", "diagonal", "straddle", "strangle", "leaps",
+                          "zero_dte", "ratio_spread", "pmcc", "earnings", "covered_call"]
+            for s in strategies:
+                available = registry.strategy_available(s, ticker)
+                icon = _styled("YES", "green") if available else _styled("NO", "red")
+                print(f"    {s:20s} {icon}")
+            return
+
+        # Try as market
+        try:
+            m = registry.get_market(query)
+            _print_header(f"Market: {query}")
+            print(f"  Currency:     {m.currency}")
+            print(f"  Timezone:     {m.timezone}")
+            print(f"  Hours:        {m.open_time.strftime('%H:%M')}-{m.close_time.strftime('%H:%M')}")
+            print(f"  Settlement:   T+{m.settlement_days}")
+            print(f"  Force close:  {m.force_close_time.strftime('%H:%M')}")
+            instruments = registry.list_instruments(market=query)
+            print(f"\n  Instruments ({len(instruments)}):")
+            for inst in instruments[:25]:
+                print(f"    {inst.ticker:12s} lot={inst.lot_size:5d}  strike_int={inst.strike_interval:6.1f}  "
+                      f"{'0DTE' if inst.has_0dte else '    '} {'LEAP' if inst.has_leaps else '    '} "
+                      f"{inst.settlement:8s} {inst.exercise_style}")
+            if len(instruments) > 25:
+                print(f"    ... and {len(instruments) - 25} more")
+            return
+        except KeyError:
+            pass
+
+        # Try as instrument
+        try:
+            inst = registry.get_instrument(query)
+            _print_header(f"Instrument: {inst.ticker} ({inst.market})")
+            print(f"  Lot size:       {inst.lot_size}")
+            print(f"  Strike interval: {inst.strike_interval}")
+            print(f"  Expiry types:   {', '.join(inst.expiry_types)}")
+            if inst.weekly_expiry_day:
+                print(f"  Weekly expiry:  {inst.weekly_expiry_day}")
+            print(f"  Settlement:     {inst.settlement}")
+            print(f"  Exercise:       {inst.exercise_style}")
+            print(f"  0DTE:           {'Yes' if inst.has_0dte else 'No'}")
+            print(f"  LEAPs:          {'Yes' if inst.has_leaps else 'No'}")
+            print(f"  Max DTE:        {inst.max_dte}")
+            print(f"  yfinance:       {inst.yfinance_symbol}")
+            # Margin estimate
+            m = registry.estimate_margin("iron_condor", inst.ticker, wing_width=5 if inst.market == "US" else 200)
+            print(f"  Margin (IC):    {m.currency} {m.margin_amount:,.0f} ({m.method})")
+            return
+        except KeyError:
+            pass
+
+        print(f"  Unknown market or instrument: '{query}'")
+        print("  Try: registry US, registry INDIA, registry SPY, registry NIFTY")
+
+    def do_sharpe(self, arg: str) -> None:
+        """Compute Sharpe ratio from trade outcomes.\nUsage: sharpe\n\nRequires TradeOutcome records from eTrading."""
+        _print_header("Sharpe Ratio")
+        print(f"\n  {_styled('Not available in standalone CLI.', 'yellow')}")
+        print()
+        print("  Requires TradeOutcome records from eTrading.")
+        print(f"  {_styled('from market_analyzer import compute_sharpe', 'dim')}")
+        print(f"  {_styled('result = compute_sharpe(outcomes, risk_free_rate=0.05)', 'dim')}")
+        print(f"  {_styled('# -> SharpeResult(sharpe_ratio, sortino_ratio, annualized_return_pct, ...)', 'dim')}")
+
+    def do_drawdown(self, arg: str) -> None:
+        """Compute max drawdown from trade outcomes.\nUsage: drawdown\n\nRequires TradeOutcome records from eTrading."""
+        _print_header("Drawdown Analysis")
+        print(f"\n  {_styled('Not available in standalone CLI.', 'yellow')}")
+        print()
+        print("  Requires TradeOutcome records from eTrading.")
+        print(f"  {_styled('from market_analyzer import compute_drawdown', 'dim')}")
+        print(f"  {_styled('result = compute_drawdown(outcomes)', 'dim')}")
+        print(f"  {_styled('# -> DrawdownResult(max_drawdown_pct, max_drawdown_dollars, ...)', 'dim')}")
+
+    def do_drift(self, arg: str) -> None:
+        """Detect strategy performance drift.\nUsage: drift\n\nRequires TradeOutcome records from eTrading."""
+        _print_header("Strategy Drift Detection")
+        print(f"\n  {_styled('Not available in standalone CLI.', 'yellow')}")
+        print()
+        print("  Requires TradeOutcome records from eTrading.")
+        print(f"  {_styled('from market_analyzer import detect_drift', 'dim')}")
+        print(f"  {_styled('alerts = detect_drift(outcomes, window=20)', 'dim')}")
+        print(f"  {_styled('# -> list[DriftAlert] with severity WARNING/CRITICAL', 'dim')}")
+
+    def do_bandit(self, arg: str) -> None:
+        """Thompson Sampling strategy selection.\nUsage: bandit\n\nRequires trade history from eTrading."""
+        _print_header("Thompson Sampling Bandits")
+        print(f"\n  {_styled('Not available in standalone CLI.', 'yellow')}")
+        print()
+        print("  Requires trade outcome history from eTrading.")
+        print(f"  {_styled('from market_analyzer import build_bandits, select_strategies', 'dim')}")
+        print(f"  {_styled('bandits = build_bandits(outcomes)', 'dim')}")
+        print(f"  {_styled('selected = select_strategies(bandits, regime_id, strategies, n=5)', 'dim')}")
+        print(f"  {_styled('# -> [(StrategyType, sampled_score), ...]', 'dim')}")
+
+    def do_margin(self, arg: str) -> None:
+        """Estimate margin for a strategy on an instrument.\nUsage: margin TICKER [STRATEGY] [--width N]\n  margin NIFTY ic --width 200\n  margin SPY ic --width 5"""
+        ma = self._get_ma()
+        parts = arg.strip().split()
+        if not parts:
+            print("Usage: margin TICKER [STRATEGY] [--width N]")
+            print("  STRATEGY: ic, cs, straddle, etc. (default: iron_condor)")
+            print("  --width N: wing width in points (default: 5 for US, 200 for India)")
+            return
+
+        ticker = parts[0].upper()
+        strategy = "iron_condor"
+        width = None
+
+        i = 1
+        while i < len(parts):
+            if parts[i] == "--width" and i + 1 < len(parts):
+                try:
+                    width = float(parts[i + 1])
+                except ValueError:
+                    print(f"Invalid width: {parts[i + 1]}")
+                    return
+                i += 2
+            else:
+                strategy = parts[i].lower()
+                strategy_map = {"ic": "iron_condor", "cs": "credit_spread", "ds": "debit_spread",
+                                "cal": "calendar", "ifly": "iron_butterfly", "str": "straddle"}
+                strategy = strategy_map.get(strategy, strategy)
+                i += 1
+
+        registry = ma.registry
+        try:
+            inst = registry.get_instrument(ticker)
+            if width is None:
+                width = 5.0 if inst.market == "US" else 200.0
+        except KeyError:
+            if width is None:
+                width = 5.0
+
+        for contracts in (1, 2, 5, 10):
+            m = registry.estimate_margin(strategy, ticker, wing_width=width, contracts=contracts)
+            print(f"  {contracts:2d} contracts: {m.currency} {m.margin_amount:>10,.0f}  ({m.method})")
+
     def do_quit(self, arg: str) -> bool:
         """Exit the REPL."""
         print("Goodbye.")

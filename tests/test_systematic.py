@@ -6,6 +6,11 @@ Covers:
   G03: entry_window on TradeSpec
   G04: time_of_day in monitor_exit_conditions
   G05: assess_overnight_risk
+  CR-6: Multi-broker (Dhan, Zerodha) imports and properties
+  CR-7: Currency, timezone, lot_size on models and providers
+  CR-11: Performance analytics (Sharpe, drawdown, regime performance)
+  CR-12: India data aliases (NIFTY, BANKNIFTY, SENSEX)
+  CR-13: MarketRegistry (markets, instruments, strategies, margin, yfinance)
 """
 
 from __future__ import annotations
@@ -3287,3 +3292,594 @@ class TestML3ThresholdOptimization:
         result = optimize_thresholds(outcomes)
         assert result.trades_analyzed == 5
         assert result.last_optimized == date.today()
+
+
+# ── CR-6: Multi-Broker (Dhan, Zerodha) ──
+
+
+class TestCR6MultiBroker:
+    """CR-6: Dhan and Zerodha broker stubs are importable and have correct properties."""
+
+    def test_dhan_imports(self):
+        from market_analyzer.broker.dhan import connect_dhan, connect_dhan_from_session
+        assert callable(connect_dhan)
+        assert callable(connect_dhan_from_session)
+
+    def test_zerodha_imports(self):
+        from market_analyzer.broker.zerodha import connect_zerodha, connect_zerodha_from_session
+        assert callable(connect_zerodha)
+        assert callable(connect_zerodha_from_session)
+
+    def test_dhan_market_data_properties(self):
+        from market_analyzer.broker.dhan.market_data import DhanMarketData
+        md = DhanMarketData()
+        assert md.currency == "INR"
+        assert md.timezone == "Asia/Kolkata"
+        assert md.lot_size_default == 25
+        assert md.provider_name == "dhan"
+
+    def test_zerodha_market_data_properties(self):
+        from market_analyzer.broker.zerodha.market_data import ZerodhaMarketData
+        md = ZerodhaMarketData()
+        assert md.currency == "INR"
+        assert md.timezone == "Asia/Kolkata"
+        assert md.lot_size_default == 25
+        assert md.provider_name == "zerodha"
+
+    def test_dhan_market_hours(self):
+        from market_analyzer.broker.dhan.market_data import DhanMarketData
+        md = DhanMarketData()
+        open_t, close_t = md.market_hours
+        assert open_t == time(9, 15)
+        assert close_t == time(15, 30)
+
+    def test_zerodha_market_hours(self):
+        from market_analyzer.broker.zerodha.market_data import ZerodhaMarketData
+        md = ZerodhaMarketData()
+        open_t, close_t = md.market_hours
+        assert open_t == time(9, 15)
+        assert close_t == time(15, 30)
+
+    def test_dhan_connect_returns_4_tuple(self):
+        from market_analyzer.broker.dhan import connect_dhan
+        result = connect_dhan(api_key="test", access_token="test")
+        assert len(result) == 4
+
+    def test_zerodha_connect_returns_4_tuple(self):
+        from market_analyzer.broker.zerodha import connect_zerodha
+        result = connect_zerodha(api_key="test", access_token="test")
+        assert len(result) == 4
+
+    def test_dhan_stubs_raise_not_implemented(self):
+        from market_analyzer.broker.dhan.market_data import DhanMarketData
+        md = DhanMarketData()
+        with pytest.raises(NotImplementedError):
+            md.get_option_chain("NIFTY")
+
+    def test_zerodha_stubs_raise_not_implemented(self):
+        from market_analyzer.broker.zerodha.market_data import ZerodhaMarketData
+        md = ZerodhaMarketData()
+        with pytest.raises(NotImplementedError):
+            md.get_option_chain("NIFTY")
+
+
+# ── CR-7: Currency, Timezone, LotSize on Models and Providers ──
+
+
+class TestCR7CurrencyTimezone:
+    """CR-7: Currency, timezone, and lot_size fields on models and providers."""
+
+    def test_account_balance_currency_default(self):
+        """AccountBalance.currency defaults to USD."""
+        from market_analyzer.models.quotes import AccountBalance
+        bal = AccountBalance(
+            account_number="TEST001",
+            net_liquidating_value=50000.0,
+            cash_balance=10000.0,
+            derivative_buying_power=25000.0,
+            equity_buying_power=50000.0,
+            maintenance_requirement=5000.0,
+        )
+        assert bal.currency == "USD"
+        assert bal.timezone == "US/Eastern"
+
+    def test_account_balance_currency_inr(self):
+        """AccountBalance accepts INR currency."""
+        from market_analyzer.models.quotes import AccountBalance
+        bal = AccountBalance(
+            account_number="DHAN001",
+            net_liquidating_value=5000000.0,
+            cash_balance=1000000.0,
+            derivative_buying_power=2500000.0,
+            equity_buying_power=5000000.0,
+            maintenance_requirement=500000.0,
+            currency="INR",
+            timezone="Asia/Kolkata",
+        )
+        assert bal.currency == "INR"
+        assert bal.timezone == "Asia/Kolkata"
+
+    def test_option_quote_lot_size_default(self):
+        """OptionQuote.lot_size defaults to 100."""
+        quote = OptionQuote(
+            ticker="SPY",
+            expiration=date(2026, 3, 20),
+            strike=580.0,
+            option_type="put",
+            bid=3.50,
+            ask=3.80,
+            mid=3.65,
+        )
+        assert quote.lot_size == 100
+
+    def test_option_quote_lot_size_custom(self):
+        """OptionQuote.lot_size can be set for India (e.g. 25)."""
+        quote = OptionQuote(
+            ticker="NIFTY",
+            expiration=date(2026, 3, 20),
+            strike=22000.0,
+            option_type="call",
+            bid=150.0,
+            ask=160.0,
+            mid=155.0,
+            lot_size=25,
+        )
+        assert quote.lot_size == 25
+
+    def test_trade_spec_lot_size_default(self):
+        """TradeSpec.lot_size defaults to 100."""
+        leg = LegSpec(
+            role="short_put",
+            action=LegAction.SELL_TO_OPEN,
+            option_type="put",
+            strike=570.0,
+            strike_label="1 ATR OTM put",
+            expiration=date(2026, 4, 17),
+            days_to_expiry=35,
+            atm_iv_at_expiry=0.18,
+        )
+        ts = TradeSpec(
+            ticker="SPY",
+            legs=[leg],
+            underlying_price=590.0,
+            target_dte=35,
+            target_expiration=date(2026, 4, 17),
+            spec_rationale="test",
+        )
+        assert ts.lot_size == 100
+        assert ts.currency == "USD"
+
+    def test_trade_spec_lot_size_india(self):
+        """TradeSpec with lot_size=25 uses 25 in position_size."""
+        leg = LegSpec(
+            role="short_put",
+            action=LegAction.SELL_TO_OPEN,
+            option_type="put",
+            strike=22000.0,
+            strike_label="1 ATR OTM put",
+            expiration=date(2026, 4, 17),
+            days_to_expiry=35,
+            atm_iv_at_expiry=0.18,
+        )
+        ts = TradeSpec(
+            ticker="NIFTY",
+            legs=[leg],
+            underlying_price=22500.0,
+            target_dte=35,
+            target_expiration=date(2026, 4, 17),
+            spec_rationale="test",
+            lot_size=25,
+            currency="INR",
+            wing_width_points=200.0,
+        )
+        assert ts.lot_size == 25
+        assert ts.currency == "INR"
+        # position_size should use lot_size=25: risk_per = 200 * 25 = 5000
+        contracts = ts.position_size(capital=100000, risk_pct=0.02)
+        # max_risk_budget = 100000 * 0.02 = 2000; 2000 / 5000 = 0 -> clamped to 1
+        assert contracts == 1
+
+    def test_trade_spec_entry_window_timezone_default(self):
+        """TradeSpec.entry_window_timezone defaults to US/Eastern."""
+        leg = LegSpec(
+            role="short_put",
+            action=LegAction.SELL_TO_OPEN,
+            option_type="put",
+            strike=570.0,
+            strike_label="1 ATR OTM put",
+            expiration=date(2026, 4, 17),
+            days_to_expiry=35,
+            atm_iv_at_expiry=0.18,
+        )
+        ts = TradeSpec(
+            ticker="SPY",
+            legs=[leg],
+            underlying_price=590.0,
+            target_dte=35,
+            target_expiration=date(2026, 4, 17),
+            spec_rationale="test",
+        )
+        assert ts.entry_window_timezone == "US/Eastern"
+
+    def test_market_data_provider_defaults(self):
+        """MarketDataProvider base class has USD/US/Eastern defaults."""
+        from market_analyzer.broker.base import MarketDataProvider
+        # Check that the properties exist on the class
+        assert hasattr(MarketDataProvider, "currency")
+        assert hasattr(MarketDataProvider, "timezone")
+        assert hasattr(MarketDataProvider, "market_hours")
+        assert hasattr(MarketDataProvider, "lot_size_default")
+
+
+# ── CR-11: Performance Analytics ──
+
+
+class TestCR11Analytics:
+    """CR-11: compute_sharpe, compute_drawdown, compute_regime_performance."""
+
+    def test_compute_sharpe_basic(self):
+        """10 outcomes produce a SharpeResult with non-zero sharpe_ratio."""
+        from market_analyzer.performance import compute_sharpe
+        outcomes = [
+            _make_outcome(
+                pnl_pct=0.10 if i % 3 != 0 else -0.05,
+                pnl_dollars=40.0 if i % 3 != 0 else -20.0,
+                trade_id=f"sharpe-{i}",
+            )
+            for i in range(10)
+        ]
+        result = compute_sharpe(outcomes)
+        assert result.total_trades == 10
+        assert result.sharpe_ratio != 0.0
+        assert result.annualized_return_pct != 0.0
+        assert result.annualized_volatility_pct > 0.0
+        assert result.risk_free_rate == 0.05
+
+    def test_compute_sharpe_empty(self):
+        """Empty outcomes produce sharpe_ratio = 0."""
+        from market_analyzer.performance import compute_sharpe
+        result = compute_sharpe([])
+        assert result.sharpe_ratio == 0.0
+        assert result.total_trades == 0
+
+    def test_compute_sharpe_single_trade(self):
+        """Single trade (< 2 required) produces sharpe_ratio = 0."""
+        from market_analyzer.performance import compute_sharpe
+        result = compute_sharpe([_make_outcome(trade_id="single-1")])
+        assert result.sharpe_ratio == 0.0
+        assert result.total_trades == 1
+
+    def test_compute_drawdown_basic(self):
+        """Outcomes with a loss streak produce max_drawdown_dollars > 0."""
+        from market_analyzer.performance import compute_drawdown
+        outcomes = [
+            _make_outcome(pnl_pct=0.10, pnl_dollars=100.0, trade_id="dd-0"),
+            _make_outcome(pnl_pct=0.10, pnl_dollars=100.0, trade_id="dd-1"),
+            _make_outcome(pnl_pct=-0.20, pnl_dollars=-150.0, trade_id="dd-2"),
+            _make_outcome(pnl_pct=-0.10, pnl_dollars=-80.0, trade_id="dd-3"),
+            _make_outcome(pnl_pct=0.10, pnl_dollars=50.0, trade_id="dd-4"),
+        ]
+        result = compute_drawdown(outcomes)
+        assert result.max_drawdown_dollars > 0
+        assert result.max_drawdown_pct > 0.0
+
+    def test_compute_drawdown_empty(self):
+        """Empty outcomes produce max_drawdown = 0."""
+        from market_analyzer.performance import compute_drawdown
+        result = compute_drawdown([])
+        assert result.max_drawdown_dollars == 0.0
+        assert result.max_drawdown_pct == 0.0
+        assert result.recovery_trades == 0
+
+    def test_compute_regime_performance_basic(self):
+        """Outcomes in R1 and R2 produce dict with keys 1, 2."""
+        from market_analyzer.performance import compute_regime_performance
+        outcomes = [
+            _make_outcome(regime=1, pnl_pct=0.10, pnl_dollars=40.0, trade_id="rp-0"),
+            _make_outcome(regime=1, pnl_pct=0.15, pnl_dollars=60.0, trade_id="rp-1"),
+            _make_outcome(regime=2, pnl_pct=-0.05, pnl_dollars=-20.0, trade_id="rp-2"),
+            _make_outcome(regime=2, pnl_pct=0.08, pnl_dollars=30.0, trade_id="rp-3"),
+        ]
+        result = compute_regime_performance(outcomes)
+        assert 1 in result
+        assert 2 in result
+        assert result[1].total_trades == 2
+        assert result[2].total_trades == 2
+        assert result[1].win_rate == 1.0  # Both trades positive
+        assert result[2].win_rate == 0.5  # 1 win, 1 loss
+
+    def test_compute_regime_performance_empty(self):
+        """Empty outcomes produce empty dict."""
+        from market_analyzer.performance import compute_regime_performance
+        result = compute_regime_performance([])
+        assert result == {}
+
+    def test_sharpe_result_model_fields(self):
+        """SharpeResult has all expected fields."""
+        from market_analyzer.models.feedback import SharpeResult
+        fields = SharpeResult.model_fields
+        assert "sharpe_ratio" in fields
+        assert "sortino_ratio" in fields
+        assert "annualized_return_pct" in fields
+        assert "annualized_volatility_pct" in fields
+        assert "risk_free_rate" in fields
+        assert "total_trades" in fields
+
+    def test_drawdown_result_model_fields(self):
+        """DrawdownResult has all expected fields."""
+        from market_analyzer.models.feedback import DrawdownResult
+        fields = DrawdownResult.model_fields
+        assert "max_drawdown_pct" in fields
+        assert "max_drawdown_dollars" in fields
+        assert "max_drawdown_duration_days" in fields
+        assert "current_drawdown_pct" in fields
+        assert "current_drawdown_dollars" in fields
+        assert "recovery_trades" in fields
+
+    def test_regime_performance_model_fields(self):
+        """RegimePerformance has all expected fields."""
+        from market_analyzer.models.feedback import RegimePerformance
+        fields = RegimePerformance.model_fields
+        assert "regime_id" in fields
+        assert "regime_name" in fields
+        assert "total_trades" in fields
+        assert "win_rate" in fields
+        assert "avg_pnl_pct" in fields
+        assert "total_pnl_dollars" in fields
+        assert "best_strategy" in fields
+        assert "worst_strategy" in fields
+
+    def test_compute_sharpe_custom_risk_free(self):
+        """Custom risk-free rate is passed through."""
+        from market_analyzer.performance import compute_sharpe
+        outcomes = [
+            _make_outcome(pnl_pct=0.10, pnl_dollars=40.0, trade_id=f"rfr-{i}")
+            for i in range(5)
+        ]
+        result = compute_sharpe(outcomes, risk_free_rate=0.03)
+        assert result.risk_free_rate == 0.03
+
+
+# ── CR-12: India Data Aliases ──
+
+
+class TestCR12IndiaData:
+    """CR-12: yfinance aliases for Indian indices."""
+
+    def test_nifty_alias_exists(self):
+        from market_analyzer.data.providers.yfinance import _YFINANCE_ALIASES
+        assert _YFINANCE_ALIASES.get("NIFTY") == "^NSEI"
+
+    def test_banknifty_alias(self):
+        from market_analyzer.data.providers.yfinance import _YFINANCE_ALIASES
+        assert _YFINANCE_ALIASES.get("BANKNIFTY") == "^NSEBANK"
+
+    def test_finnifty_alias(self):
+        from market_analyzer.data.providers.yfinance import _YFINANCE_ALIASES
+        assert _YFINANCE_ALIASES.get("FINNIFTY") == "NIFTY_FIN_SERVICE.NS"
+
+    def test_sensex_alias(self):
+        from market_analyzer.data.providers.yfinance import _YFINANCE_ALIASES
+        assert _YFINANCE_ALIASES.get("SENSEX") == "^BSESN"
+
+
+# ── CR-13: MarketRegistry ──
+
+
+class TestCR13MarketRegistry:
+    """CR-13: MarketRegistry for static market/instrument data."""
+
+    def test_get_market_us(self):
+        from market_analyzer import MarketRegistry
+        r = MarketRegistry()
+        m = r.get_market("US")
+        assert m.currency == "USD"
+        assert m.timezone == "US/Eastern"
+        assert m.market_id == "US"
+
+    def test_get_market_india(self):
+        from market_analyzer import MarketRegistry
+        r = MarketRegistry()
+        m = r.get_market("INDIA")
+        assert m.currency == "INR"
+        assert m.timezone == "Asia/Kolkata"
+        assert m.market_id == "INDIA"
+
+    def test_get_market_case_insensitive(self):
+        from market_analyzer import MarketRegistry
+        r = MarketRegistry()
+        m = r.get_market("india")
+        assert m.market_id == "INDIA"
+
+    def test_get_instrument_nifty(self):
+        from market_analyzer import MarketRegistry
+        r = MarketRegistry()
+        inst = r.get_instrument("NIFTY")
+        assert inst.lot_size == 25
+        assert inst.market == "INDIA"
+        assert inst.has_leaps is False
+        assert inst.settlement == "cash"
+        assert inst.exercise_style == "european"
+
+    def test_get_instrument_spy(self):
+        from market_analyzer import MarketRegistry
+        r = MarketRegistry()
+        inst = r.get_instrument("SPY")
+        assert inst.lot_size == 100
+        assert inst.market == "US"
+        assert inst.has_leaps is True
+        assert inst.settlement == "physical"
+
+    def test_strategy_available_leaps_india(self):
+        from market_analyzer import MarketRegistry
+        r = MarketRegistry()
+        assert r.strategy_available("leaps", "NIFTY") is False
+
+    def test_strategy_available_pmcc_india(self):
+        from market_analyzer import MarketRegistry
+        r = MarketRegistry()
+        assert r.strategy_available("pmcc", "NIFTY") is False
+
+    def test_strategy_available_ic_india(self):
+        from market_analyzer import MarketRegistry
+        r = MarketRegistry()
+        assert r.strategy_available("iron_condor", "NIFTY") is True
+
+    def test_strategy_available_zero_dte_india(self):
+        from market_analyzer import MarketRegistry
+        r = MarketRegistry()
+        assert r.strategy_available("zero_dte", "NIFTY") is True
+
+    def test_strategy_available_leaps_us(self):
+        from market_analyzer import MarketRegistry
+        r = MarketRegistry()
+        assert r.strategy_available("leaps", "SPY") is True
+
+    def test_to_yfinance_nifty(self):
+        from market_analyzer import MarketRegistry
+        r = MarketRegistry()
+        assert r.to_yfinance("NIFTY") == "^NSEI"
+
+    def test_to_yfinance_reliance(self):
+        from market_analyzer import MarketRegistry
+        r = MarketRegistry()
+        assert r.to_yfinance("RELIANCE") == "RELIANCE.NS"
+
+    def test_to_yfinance_spy(self):
+        from market_analyzer import MarketRegistry
+        r = MarketRegistry()
+        assert r.to_yfinance("SPY") == "SPY"
+
+    def test_to_yfinance_banknifty(self):
+        from market_analyzer import MarketRegistry
+        r = MarketRegistry()
+        assert r.to_yfinance("BANKNIFTY") == "^NSEBANK"
+
+    def test_to_yfinance_unknown_india_fallback(self):
+        """Unknown ticker with market=INDIA gets .NS suffix."""
+        from market_analyzer import MarketRegistry
+        r = MarketRegistry()
+        assert r.to_yfinance("ZOMATO", market="INDIA") == "ZOMATO.NS"
+
+    def test_estimate_margin_us(self):
+        from market_analyzer import MarketRegistry
+        r = MarketRegistry()
+        m = r.estimate_margin("iron_condor", "SPY", wing_width=5)
+        assert m.currency == "USD"
+        assert m.margin_amount == 500  # 5 * 100 * 1
+        assert m.method == "reg_t"
+
+    def test_estimate_margin_india(self):
+        from market_analyzer import MarketRegistry
+        r = MarketRegistry()
+        m = r.estimate_margin("iron_condor", "NIFTY", wing_width=200)
+        assert m.currency == "INR"
+        assert m.margin_amount == 5000  # 200 * 25 * 1
+        assert m.method == "span_exposure"
+
+    def test_estimate_margin_contracts(self):
+        from market_analyzer import MarketRegistry
+        r = MarketRegistry()
+        m = r.estimate_margin("iron_condor", "SPY", wing_width=5, contracts=3)
+        assert m.margin_amount == 1500  # 5 * 100 * 3
+
+    def test_list_instruments_india(self):
+        from market_analyzer import MarketRegistry
+        r = MarketRegistry()
+        india = r.list_instruments(market="INDIA")
+        assert len(india) >= 23  # 3 indices + 20 stocks
+
+    def test_list_instruments_us(self):
+        from market_analyzer import MarketRegistry
+        r = MarketRegistry()
+        us = r.list_instruments(market="US")
+        assert len(us) >= 14  # SPY, QQQ, IWM, SPX, GLD, TLT, + 8 equities
+
+    def test_list_instruments_all(self):
+        from market_analyzer import MarketRegistry
+        r = MarketRegistry()
+        all_inst = r.list_instruments()
+        assert len(all_inst) >= 37  # 14 US + 23 India
+
+    def test_unknown_market_raises(self):
+        from market_analyzer import MarketRegistry
+        r = MarketRegistry()
+        with pytest.raises(KeyError, match="Unknown market"):
+            r.get_market("MARS")
+
+    def test_unknown_instrument_raises(self):
+        from market_analyzer import MarketRegistry
+        r = MarketRegistry()
+        with pytest.raises(KeyError, match="Unknown instrument"):
+            r.get_instrument("ZZZZZ")
+
+    def test_india_stock_lot_sizes(self):
+        from market_analyzer import MarketRegistry
+        r = MarketRegistry()
+        assert r.get_instrument("RELIANCE").lot_size == 250
+        assert r.get_instrument("BANKNIFTY").lot_size == 15
+        assert r.get_instrument("FINNIFTY").lot_size == 40
+        assert r.get_instrument("TCS").lot_size == 150
+        assert r.get_instrument("INFY").lot_size == 300
+
+    def test_us_market_hours(self):
+        from market_analyzer import MarketRegistry
+        r = MarketRegistry()
+        m = r.get_market("US")
+        assert m.open_time == time(9, 30)
+        assert m.close_time == time(16, 0)
+
+    def test_india_market_hours(self):
+        from market_analyzer import MarketRegistry
+        r = MarketRegistry()
+        m = r.get_market("INDIA")
+        assert m.open_time == time(9, 15)
+        assert m.close_time == time(15, 30)
+
+    def test_nifty_has_0dte(self):
+        from market_analyzer import MarketRegistry
+        r = MarketRegistry()
+        inst = r.get_instrument("NIFTY")
+        assert inst.has_0dte is True
+        assert inst.max_dte == 90
+
+    def test_india_stock_no_0dte(self):
+        from market_analyzer import MarketRegistry
+        r = MarketRegistry()
+        inst = r.get_instrument("RELIANCE")
+        assert inst.has_0dte is False
+
+    def test_market_info_model(self):
+        """MarketInfo Pydantic model has expected fields."""
+        from market_analyzer.registry import MarketInfo
+        fields = MarketInfo.model_fields
+        assert "market_id" in fields
+        assert "currency" in fields
+        assert "timezone" in fields
+        assert "open_time" in fields
+        assert "close_time" in fields
+        assert "settlement_days" in fields
+        assert "force_close_time" in fields
+
+    def test_instrument_info_model(self):
+        """InstrumentInfo Pydantic model has expected fields."""
+        from market_analyzer.registry import InstrumentInfo
+        fields = InstrumentInfo.model_fields
+        assert "ticker" in fields
+        assert "lot_size" in fields
+        assert "strike_interval" in fields
+        assert "settlement" in fields
+        assert "has_0dte" in fields
+        assert "has_leaps" in fields
+        assert "yfinance_symbol" in fields
+
+    def test_margin_estimate_model(self):
+        """MarginEstimate Pydantic model has expected fields."""
+        from market_analyzer.registry import MarginEstimate
+        fields = MarginEstimate.model_fields
+        assert "strategy" in fields
+        assert "ticker" in fields
+        assert "margin_amount" in fields
+        assert "currency" in fields
+        assert "method" in fields
+        assert "notes" in fields

@@ -483,7 +483,10 @@ class TradeSpec(BaseModel):
     max_entry_price: float | None = None  # Don't chase beyond this price
     entry_window_start: time | None = None  # Earliest time to submit order (e.g., 09:45)
     entry_window_end: time | None = None  # Latest time to submit order (e.g., 14:00)
+    entry_window_timezone: str = "US/Eastern"  # Timezone for entry_window_start/end
     exit_plan: ExitPlan | None = None  # First-class exit plan (REQ-3)
+    currency: str = "USD"  # Currency for all dollar amounts
+    lot_size: int = 100  # Contract multiplier (100 for US equities, 10 for mini options)
 
     @property
     def leg_codes(self) -> list[str]:
@@ -565,9 +568,9 @@ class TradeSpec(BaseModel):
         """
         max_risk_budget = capital * risk_pct
 
-        # 1. Defined-risk: wing_width * 100 is the max loss per spread
+        # 1. Defined-risk: wing_width * lot_size is the max loss per spread
         if self.wing_width_points is not None and self.wing_width_points > 0:
-            risk_per_contract = self.wing_width_points * 100
+            risk_per_contract = self.wing_width_points * self.lot_size
             contracts = int(max_risk_budget / risk_per_contract)
             return max(1, min(contracts, max_contracts))
 
@@ -584,9 +587,9 @@ class TradeSpec(BaseModel):
             except (ValueError, AttributeError):
                 pass
 
-        # 3. Fallback: use max_entry_price * 100 as risk
+        # 3. Fallback: use max_entry_price * lot_size as risk
         if self.max_entry_price and self.max_entry_price > 0:
-            risk_per = self.max_entry_price * 100
+            risk_per = self.max_entry_price * self.lot_size
             contracts = int(max_risk_budget / risk_per)
             return max(1, min(contracts, max_contracts))
 

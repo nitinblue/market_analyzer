@@ -15,6 +15,7 @@ from market_analyzer.models.data import DataRequest, DataType, ProviderType
 # Aliases for tickers whose yfinance symbol differs from the common name.
 # Keys: user-facing ticker.  Values: yfinance symbol.
 _YFINANCE_ALIASES: dict[str, str] = {
+    # US indices
     "SPX":  "^GSPC",   # S&P 500 Index
     "NDX":  "^NDX",    # Nasdaq-100 Index
     "DJX":  "^DJI",    # Dow Jones Industrial Average
@@ -25,6 +26,11 @@ _YFINANCE_ALIASES: dict[str, str] = {
     "TNX":  "^TNX",    # 10-Year Treasury Yield
     "OEX":  "^OEX",    # S&P 100 Index
     "XSP":  "^GSPC",   # Mini-SPX (same underlying as SPX)
+    # India indices
+    "NIFTY":     "^NSEI",                # Nifty 50
+    "BANKNIFTY": "^NSEBANK",             # Bank Nifty
+    "FINNIFTY":  "NIFTY_FIN_SERVICE.NS", # Fin Nifty
+    "SENSEX":    "^BSESN",               # BSE Sensex
 }
 
 
@@ -35,10 +41,24 @@ class YFinanceProvider(DataProvider):
     def _resolve_ticker(ticker: str) -> str:
         """Translate user-facing ticker to yfinance symbol.
 
-        Handles DXLink-style ``$SPX`` prefixes and standard aliases.
+        Handles DXLink-style ``$SPX`` prefixes, standard aliases,
+        and India NSE stock suffix (.NS) for known Indian instruments.
         """
         clean = ticker.lstrip("$").upper()
-        return _YFINANCE_ALIASES.get(clean, clean)
+        resolved = _YFINANCE_ALIASES.get(clean, clean)
+
+        # If still unresolved and looks like an India stock (check MarketRegistry)
+        if resolved == clean and not clean.startswith("^") and "." not in clean:
+            try:
+                from market_analyzer.registry import MarketRegistry
+                registry = MarketRegistry()
+                inst = registry.get_instrument(clean)
+                if inst.market == "INDIA":
+                    return inst.yfinance_symbol
+            except (KeyError, ImportError):
+                pass
+
+        return resolved
 
     @property
     def provider_type(self) -> ProviderType:
