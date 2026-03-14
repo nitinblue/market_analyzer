@@ -410,6 +410,29 @@ def _score_signals(
         ),
     ))
 
+    # 10. Donchian breakout confirmation (0.12)
+    if technicals.donchian is not None:
+        at_high = technicals.donchian.is_at_upper
+        signals.append(OpportunitySignal(
+            name="donchian_breakout",
+            favorable=at_high,
+            weight=0.12,
+            description=(
+                "At 20-day high — breakout confirmed"
+                if at_high
+                else "Below 20-day high — no breakout yet"
+            ),
+        ))
+
+    # 11. Keltner squeeze (0.10)
+    if technicals.keltner is not None and technicals.keltner.squeeze:
+        signals.append(OpportunitySignal(
+            name="keltner_squeeze",
+            favorable=True,
+            weight=0.10,
+            description="Bollinger inside Keltner — volatility compression, breakout imminent",
+        ))
+
     return signals
 
 

@@ -17,11 +17,16 @@ from market_analyzer.features.patterns.vcp import (  # noqa: F401
     generate_vcp_signals as _generate_vcp_signals,
 )
 from market_analyzer.models.technicals import (
+    ADXData,
     BollingerBands,
+    DonchianChannels,
+    FibonacciLevels,
+    KeltnerChannels,
     MACDData,
     MarketPhase,
     MovingAverages,
     PhaseIndicator,
+    PivotPoints,
     RSIData,
     SignalDirection,
     SignalStrength,
@@ -29,6 +34,7 @@ from market_analyzer.models.technicals import (
     SupportResistance,
     TechnicalSignal,
     TechnicalSnapshot,
+    VWAPData,
 )
 
 
@@ -428,6 +434,256 @@ def compute_phase_indicator(
     )
 
 
+def compute_fibonacci(
+    high: pd.Series, low: pd.Series, close: pd.Series, lookback: int = 60
+) -> FibonacciLevels:
+    """Compute Fibonacci retracement levels from the most significant swing in lookback period."""
+    recent_high = high.tail(lookback)
+    recent_low = low.tail(lookback)
+    swing_high = float(recent_high.max())
+    swing_low = float(recent_low.min())
+    swing_high_idx = recent_high.idxmax()
+    swing_low_idx = recent_low.idxmin()
+    price = float(close.iloc[-1])
+
+    # Direction: if high came after low, it's an upswing (retrace down from high)
+    # If low came after high, it's a downswing (retrace up from low)
+    diff = swing_high - swing_low
+    if swing_high_idx > swing_low_idx:
+        direction = "up"  # upswing — fib levels are retracement from high toward low
+        level_236 = swing_high - 0.236 * diff
+        level_382 = swing_high - 0.382 * diff
+        level_500 = swing_high - 0.500 * diff
+        level_618 = swing_high - 0.618 * diff
+        level_786 = swing_high - 0.786 * diff
+    else:
+        direction = "down"  # downswing — fib levels are retracement from low toward high
+        level_236 = swing_low + 0.236 * diff
+        level_382 = swing_low + 0.382 * diff
+        level_500 = swing_low + 0.500 * diff
+        level_618 = swing_low + 0.618 * diff
+        level_786 = swing_low + 0.786 * diff
+
+    # Determine where current price sits relative to fib levels
+    if direction == "up":
+        # Levels descend from high to low
+        if price > level_236:
+            current_level = "above_236"
+        elif price > level_382:
+            current_level = "between_236_382"
+        elif price > level_500:
+            current_level = "between_382_500"
+        elif price > level_618:
+            current_level = "between_500_618"
+        elif price > level_786:
+            current_level = "between_618_786"
+        else:
+            current_level = "below_786"
+    else:
+        # Levels ascend from low to high
+        if price < level_236:
+            current_level = "below_236"
+        elif price < level_382:
+            current_level = "between_236_382"
+        elif price < level_500:
+            current_level = "between_382_500"
+        elif price < level_618:
+            current_level = "between_500_618"
+        elif price < level_786:
+            current_level = "between_618_786"
+        else:
+            current_level = "above_786"
+
+    return FibonacciLevels(
+        swing_high=swing_high,
+        swing_low=swing_low,
+        direction=direction,
+        level_236=round(level_236, 2),
+        level_382=round(level_382, 2),
+        level_500=round(level_500, 2),
+        level_618=round(level_618, 2),
+        level_786=round(level_786, 2),
+        current_price_level=current_level,
+    )
+
+
+def compute_adx(
+    high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14
+) -> ADXData:
+    """Average Directional Index with +DI/-DI."""
+    # +DM = high - prev_high (if positive and > -DM)
+    # -DM = prev_low - low (if positive and > +DM)
+    plus_dm = high.diff()
+    minus_dm = -low.diff()
+    plus_dm = plus_dm.where((plus_dm > minus_dm) & (plus_dm > 0), 0.0)
+    minus_dm = minus_dm.where((minus_dm > plus_dm) & (minus_dm > 0), 0.0)
+
+    # True Range
+    tr = pd.concat(
+        [high - low, (high - close.shift(1)).abs(), (low - close.shift(1)).abs()],
+        axis=1,
+    ).max(axis=1)
+
+    # Smoothed (Wilder's)
+    atr = tr.ewm(alpha=1.0 / period, min_periods=period, adjust=False).mean()
+    plus_di_series = (
+        100
+        * plus_dm.ewm(alpha=1.0 / period, min_periods=period, adjust=False).mean()
+        / atr
+    )
+    minus_di_series = (
+        100
+        * minus_dm.ewm(alpha=1.0 / period, min_periods=period, adjust=False).mean()
+        / atr
+    )
+
+    # DX and ADX
+    dx = (
+        100
+        * (plus_di_series - minus_di_series).abs()
+        / (plus_di_series + minus_di_series).replace(0, np.nan)
+    )
+    adx_series = dx.ewm(alpha=1.0 / period, min_periods=period, adjust=False).mean()
+
+    adx_val = (
+        float(adx_series.iloc[-1]) if not pd.isna(adx_series.iloc[-1]) else 0.0
+    )
+    plus_di_val = (
+        float(plus_di_series.iloc[-1])
+        if not pd.isna(plus_di_series.iloc[-1])
+        else 0.0
+    )
+    minus_di_val = (
+        float(minus_di_series.iloc[-1])
+        if not pd.isna(minus_di_series.iloc[-1])
+        else 0.0
+    )
+
+    if plus_di_val > minus_di_val:
+        direction = "bullish"
+    elif minus_di_val > plus_di_val:
+        direction = "bearish"
+    else:
+        direction = "neutral"
+
+    return ADXData(
+        adx=round(adx_val, 2),
+        plus_di=round(plus_di_val, 2),
+        minus_di=round(minus_di_val, 2),
+        is_trending=adx_val > 25,
+        is_ranging=adx_val < 20,
+        trend_direction=direction,
+    )
+
+
+def compute_donchian(
+    high: pd.Series, low: pd.Series, close: pd.Series, period: int = 20
+) -> DonchianChannels:
+    """Donchian Channels — N-period high/low breakout levels."""
+    upper = float(high.rolling(period).max().iloc[-1])
+    lower = float(low.rolling(period).min().iloc[-1])
+    middle = (upper + lower) / 2
+    width_pct = (upper - lower) / middle * 100 if middle > 0 else 0.0
+    price = float(close.iloc[-1])
+    is_at_upper = price >= upper * 0.995
+    is_at_lower = price <= lower * 1.005
+    return DonchianChannels(
+        upper=round(upper, 2),
+        lower=round(lower, 2),
+        middle=round(middle, 2),
+        width_pct=round(width_pct, 2),
+        is_at_upper=is_at_upper,
+        is_at_lower=is_at_lower,
+    )
+
+
+def compute_keltner(
+    close: pd.Series, high: pd.Series, low: pd.Series,
+    ema_period: int = 20, atr_period: int = 14, multiplier: float = 2.0,
+    bb_upper: float = 0, bb_lower: float = 0,
+) -> KeltnerChannels:
+    """Keltner Channels with Bollinger squeeze detection."""
+    ema = close.ewm(span=ema_period, adjust=False).mean()
+    tr = pd.concat(
+        [high - low, (high - close.shift(1)).abs(), (low - close.shift(1)).abs()],
+        axis=1,
+    ).max(axis=1)
+    atr = tr.rolling(atr_period).mean()
+
+    ema_val = float(ema.iloc[-1])
+    atr_val = float(atr.iloc[-1]) if not pd.isna(atr.iloc[-1]) else 0
+    upper = ema_val + multiplier * atr_val
+    lower = ema_val - multiplier * atr_val
+    middle = ema_val
+    width_pct = (upper - lower) / middle * 100 if middle > 0 else 0
+
+    # Squeeze: BB inside Keltner = volatility compression about to expand
+    squeeze = bb_upper < upper and bb_lower > lower if bb_upper > 0 else False
+
+    return KeltnerChannels(
+        upper=round(upper, 2),
+        middle=round(middle, 2),
+        lower=round(lower, 2),
+        width_pct=round(width_pct, 2),
+        squeeze=squeeze,
+    )
+
+
+def compute_pivot_points(
+    high: pd.Series, low: pd.Series, close: pd.Series,
+) -> PivotPoints:
+    """Classic pivot points from prior day's H/L/C."""
+    # Use the second-to-last bar as "prior period" (last bar is current)
+    if len(high) < 2:
+        h = float(high.iloc[-1])
+        l = float(low.iloc[-1])
+        c = float(close.iloc[-1])
+    else:
+        h = float(high.iloc[-2])
+        l = float(low.iloc[-2])
+        c = float(close.iloc[-2])
+
+    pp = (h + l + c) / 3
+    r1 = 2 * pp - l
+    r2 = pp + (h - l)
+    r3 = h + 2 * (pp - l)
+    s1 = 2 * pp - h
+    s2 = pp - (h - l)
+    s3 = l - 2 * (h - pp)
+
+    return PivotPoints(
+        pp=round(pp, 2),
+        r1=round(r1, 2),
+        r2=round(r2, 2),
+        r3=round(r3, 2),
+        s1=round(s1, 2),
+        s2=round(s2, 2),
+        s3=round(s3, 2),
+        period="daily",
+    )
+
+
+def compute_daily_vwap(
+    high: pd.Series, low: pd.Series, close: pd.Series, volume: pd.Series,
+    lookback: int = 20,
+) -> VWAPData:
+    """Rolling VWAP over lookback period (daily bars — not intraday VWAP)."""
+    typical_price = (high + low + close) / 3
+    cumulative_tp_vol = (typical_price * volume).rolling(lookback).sum()
+    cumulative_vol = volume.rolling(lookback).sum()
+    vwap_series = cumulative_tp_vol / cumulative_vol.replace(0, np.nan)
+
+    vwap_val = float(vwap_series.iloc[-1]) if not pd.isna(vwap_series.iloc[-1]) else float(close.iloc[-1])
+    price = float(close.iloc[-1])
+    pct = (price - vwap_val) / vwap_val * 100 if vwap_val > 0 else 0.0
+
+    return VWAPData(
+        vwap=round(vwap_val, 2),
+        price_vs_vwap_pct=round(pct, 2),
+        is_above_vwap=price > vwap_val,
+    )
+
+
 def compute_technicals(
     ohlcv: pd.DataFrame,
     ticker: str,
@@ -615,6 +871,24 @@ def compute_technicals(
     smart_money = compute_smart_money(ohlcv, price, atr_series, settings)
     signals.extend(_generate_smart_money_signals(smart_money))
 
+    # Fibonacci retracement levels
+    fibonacci = compute_fibonacci(high, low, close)
+
+    # ADX (Average Directional Index)
+    adx_data = compute_adx(high, low, close)
+
+    # Donchian Channels
+    donchian = compute_donchian(high, low, close)
+
+    # Keltner Channels (uses BB values for squeeze detection)
+    keltner = compute_keltner(close, high, low, bb_upper=bb_upper_val, bb_lower=bb_lower_val)
+
+    # Pivot Points (classic floor trader pivots from prior day)
+    pivot_data = compute_pivot_points(high, low, close)
+
+    # Daily VWAP (rolling volume-weighted average price)
+    vwap_data = compute_daily_vwap(high, low, close, volume)
+
     as_of = ohlcv.index[-1]
     as_of_date = as_of.date() if hasattr(as_of, "date") else as_of
 
@@ -634,5 +908,11 @@ def compute_technicals(
         phase=phase_indicator,
         vcp=vcp,
         smart_money=smart_money,
+        fibonacci=fibonacci,
+        adx=adx_data,
+        donchian=donchian,
+        keltner=keltner,
+        pivot_points=pivot_data,
+        daily_vwap=vwap_data,
         signals=signals,
     )

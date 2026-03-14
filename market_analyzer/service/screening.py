@@ -132,6 +132,20 @@ class ScreeningService:
         # Sort by score descending
         candidates.sort(key=lambda c: c.score, reverse=True)
 
+        # Liquidity filter: very low ATR suggests illiquid/dead ticker
+        candidates = [c for c in candidates if c.atr_pct >= 0.3]
+
+        # Correlation dedup: if two candidates from same screen have same regime
+        # and RSI within the same 10-point bucket, keep only the higher-scored one
+        seen: set[tuple[str, int, int]] = set()  # (screen, regime_id, rsi_bucket)
+        deduped: list[ScreenCandidate] = []
+        for c in candidates:
+            key = (c.screen, c.regime_id, int(c.rsi / 10))
+            if key not in seen:
+                seen.add(key)
+                deduped.append(c)
+        candidates = deduped
+
         # Filter by minimum score
         unfiltered_count = len(candidates)
         if min_score > 0:

@@ -71,6 +71,15 @@ _ASSESS_METHODS: dict[StrategyType, str] = {
     StrategyType.MEAN_REVERSION: "assess_mean_reversion",
 }
 
+# Assessor methods that accept an iv_rank keyword argument
+_IV_RANK_ASSESSORS: set[str] = {
+    "assess_iron_condor",
+    "assess_iron_butterfly",
+    "assess_calendar",
+    "assess_earnings",
+    "assess_leap",
+}
+
 
 def _extract_regime_id(result: OpportunityResult) -> int:
     """Extract regime_id from any opportunity result."""
@@ -184,6 +193,7 @@ class TradeRankingService:
         as_of: date | None = None,
         skip_intraday: bool = False,
         debug: bool = False,
+        iv_rank_map: dict[str, float | None] | None = None,
     ) -> TradeRankingResult:
         """Run all assessments, score, and rank.
 
@@ -266,13 +276,20 @@ class TradeRankingService:
                     continue
 
                 try:
+                    # Build kwargs for the assessor call
+                    kwargs: dict[str, Any] = {"as_of": as_of}
+
                     # Skip intraday (ORB/DXLink) for 0DTE during plan generation
                     if skip_intraday and strategy == StrategyType.ZERO_DTE:
-                        result: OpportunityResult = assess_fn(
-                            ticker, intraday=pd.DataFrame(), as_of=as_of,
-                        )
-                    else:
-                        result: OpportunityResult = assess_fn(ticker, as_of=as_of)
+                        kwargs["intraday"] = pd.DataFrame()
+
+                    # Thread IV rank to assessors that accept it
+                    if method_name in _IV_RANK_ASSESSORS and iv_rank_map:
+                        iv_rank = iv_rank_map.get(ticker)
+                        if iv_rank is not None:
+                            kwargs["iv_rank"] = iv_rank
+
+                    result: OpportunityResult = assess_fn(ticker, **kwargs)
 
                     regime_id = _extract_regime_id(result)
                     phase_id = _extract_phase_id(result)

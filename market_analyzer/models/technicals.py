@@ -218,6 +218,70 @@ class ORBData(BaseModel):
     description: str
 
 
+class FibonacciLevels(BaseModel):
+    """Fibonacci retracement levels from recent swing high/low."""
+
+    swing_high: float
+    swing_low: float
+    direction: str  # "up" (retracement of upswing) or "down" (retracement of downswing)
+    level_236: float  # 23.6% retracement
+    level_382: float  # 38.2%
+    level_500: float  # 50.0%
+    level_618: float  # 61.8%
+    level_786: float  # 78.6%
+    current_price_level: str  # "above_236", "between_382_500", "below_786", etc.
+
+
+class ADXData(BaseModel):
+    """Average Directional Index — trend strength measurement."""
+
+    adx: float  # 0-100, >25 = trending, <20 = ranging
+    plus_di: float  # +DI (bullish directional)
+    minus_di: float  # -DI (bearish directional)
+    is_trending: bool  # ADX > 25
+    is_ranging: bool  # ADX < 20
+    trend_direction: str  # "bullish" (+DI > -DI), "bearish" (-DI > +DI), "neutral"
+
+
+class DonchianChannels(BaseModel):
+    """Donchian Channels — N-period high/low breakout levels."""
+
+    upper: float  # Highest high over period
+    lower: float  # Lowest low over period
+    middle: float  # (upper + lower) / 2
+    width_pct: float  # (upper - lower) / middle * 100
+    is_at_upper: bool  # Price at or near upper channel (within 0.5%)
+    is_at_lower: bool  # Price at or near lower channel (within 0.5%)
+
+
+class KeltnerChannels(BaseModel):
+    """Keltner Channels — EMA ± ATR multiplier."""
+    upper: float       # EMA + multiplier * ATR
+    middle: float      # EMA (20-period)
+    lower: float       # EMA - multiplier * ATR
+    width_pct: float   # (upper - lower) / middle * 100
+    squeeze: bool      # True when Bollinger Bands are inside Keltner (volatility compression)
+
+
+class PivotPoints(BaseModel):
+    """Classic floor trader pivot points from prior period."""
+    pp: float          # Pivot Point = (H + L + C) / 3
+    r1: float          # Resistance 1 = 2*PP - L
+    r2: float          # Resistance 2 = PP + (H - L)
+    r3: float          # Resistance 3 = H + 2*(PP - L)
+    s1: float          # Support 1 = 2*PP - H
+    s2: float          # Support 2 = PP - (H - L)
+    s3: float          # Support 3 = L - 2*(H - PP)
+    period: str        # "daily" or "weekly"
+
+
+class VWAPData(BaseModel):
+    """Volume-Weighted Average Price."""
+    vwap: float           # Current VWAP value
+    price_vs_vwap_pct: float  # Price distance from VWAP as %
+    is_above_vwap: bool   # Price > VWAP
+
+
 class TechnicalSnapshot(BaseModel):
     ticker: str
     as_of_date: date
@@ -234,6 +298,12 @@ class TechnicalSnapshot(BaseModel):
     phase: PhaseIndicator
     vcp: VCPData | None = None
     smart_money: SmartMoneyData | None = None
+    fibonacci: FibonacciLevels | None = None
+    adx: ADXData | None = None
+    donchian: DonchianChannels | None = None
+    keltner: KeltnerChannels | None = None
+    pivot_points: PivotPoints | None = None
+    daily_vwap: VWAPData | None = None
     signals: list[TechnicalSignal]
     commentary: list[str] = []      # Step-by-step calculation trace (populated when debug=True)
     data_gaps: list[DataGap] = []   # Known gaps in this analysis

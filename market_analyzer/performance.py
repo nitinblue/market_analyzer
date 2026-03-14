@@ -10,6 +10,7 @@ No state, no I/O, no side effects.
 from __future__ import annotations
 
 import math
+import random
 from collections import defaultdict
 
 from market_analyzer.features.ranking import REGIME_STRATEGY_ALIGNMENT
@@ -19,6 +20,12 @@ from market_analyzer.models.feedback import (
     StrategyPerformance,
     TradeOutcome,
     WeightAdjustment,
+)
+from market_analyzer.models.learning import (
+    DriftAlert,
+    DriftSeverity,
+    StrategyBandit,
+    ThresholdConfig,
 )
 from market_analyzer.models.ranking import StrategyType
 
@@ -423,3 +430,334 @@ def calibrate_pop_factors(
         calibrated[regime_id] = round(calibrated_factor, 3)
 
     return calibrated
+
+
+def detect_drift(
+    outcomes: list[TradeOutcome],
+    window: int = 20,
+    min_trades: int = 10,
+    warning_threshold: float = 0.15,
+    critical_threshold: float = 0.25,
+) -> list[DriftAlert]:
+    """Detect strategy performance drift from historical baseline.
+
+    For each (regime, strategy) cell with enough trades:
+    1. Compute historical win rate (all outcomes)
+    2. Compute recent win rate (last ``window`` trades in that cell)
+    3. If recent drops more than warning_threshold below historical -> warning
+    4. If drops more than critical_threshold -> critical
+
+    Args:
+        outcomes: All completed trade outcomes to analyze.
+        window: Number of recent trades to compare against baseline.
+        min_trades: Minimum total trades in a cell to consider it.
+        warning_threshold: Drop in win rate (as decimal, e.g. 0.15 = 15pp)
+            that triggers a WARNING.
+        critical_threshold: Drop in win rate that triggers CRITICAL.
+
+    Returns:
+        List of DriftAlert for cells with WARNING or CRITICAL drift.
+        Cells with OK performance are not included.
+    """
+    if not outcomes:
+        return []
+
+    # Group outcomes by (regime, strategy)
+    cells: dict[tuple[int, StrategyType], list[TradeOutcome]] = defaultdict(list)
+    for o in outcomes:
+        cells[(o.regime_at_entry, o.strategy_type)].append(o)
+
+    alerts: list[DriftAlert] = []
+
+    for (regime_id, strategy_type), cell_outcomes in sorted(cells.items()):
+        if len(cell_outcomes) < min_trades:
+            continue
+
+        # Historical win rate across all trades in this cell
+        total_wins = sum(1 for o in cell_outcomes if o.pnl_dollars > 0)
+        historical_win_rate = total_wins / len(cell_outcomes)
+
+        # Recent trades: sort by exit_date descending, take last `window`
+        sorted_outcomes = sorted(cell_outcomes, key=lambda o: o.exit_date, reverse=True)
+        recent = sorted_outcomes[:window]
+
+        # Skip if not enough recent data
+        if len(recent) < window // 2:
+            continue
+
+        recent_wins = sum(1 for o in recent if o.pnl_dollars > 0)
+        recent_win_rate = recent_wins / len(recent)
+
+        drop = historical_win_rate - recent_win_rate
+
+        if drop > critical_threshold:
+            severity = DriftSeverity.CRITICAL
+            recommendation = (
+                f"Suspend {strategy_type.value} in R{regime_id}: "
+                f"win rate dropped {drop:.0%} from {historical_win_rate:.0%} "
+                f"to {recent_win_rate:.0%} over last {len(recent)} trades."
+            )
+        elif drop > warning_threshold:
+            severity = DriftSeverity.WARNING
+            recommendation = (
+                f"Reduce allocation for {strategy_type.value} in R{regime_id}: "
+                f"win rate dropped {drop:.0%} from {historical_win_rate:.0%} "
+                f"to {recent_win_rate:.0%} over last {len(recent)} trades."
+            )
+        else:
+            # OK — don't include in results
+            continue
+
+        alerts.append(
+            DriftAlert(
+                regime_id=regime_id,
+                strategy_type=strategy_type,
+                historical_win_rate=round(historical_win_rate, 4),
+                recent_win_rate=round(recent_win_rate, 4),
+                recent_trades=len(recent),
+                drop_pct=round(drop, 4),
+                severity=severity,
+                recommendation=recommendation,
+            )
+        )
+
+    return alerts
+
+
+def build_bandits(outcomes: list[TradeOutcome]) -> dict[str, StrategyBandit]:
+    """Build bandit state from trade history.
+
+    Creates one StrategyBandit per (regime, strategy) cell found in outcomes.
+    Alpha = 1 + wins, Beta = 1 + losses (prior = 1,1 = uniform).
+    """
+    cells: dict[str, dict] = defaultdict(
+        lambda: {"wins": 0, "losses": 0, "total": 0, "last": None}
+    )
+    for o in outcomes:
+        key = f"R{o.regime_at_entry}_{o.strategy_type}"
+        cells[key]["total"] += 1
+        if o.pnl_pct > 0:
+            cells[key]["wins"] += 1
+        else:
+            cells[key]["losses"] += 1
+        if cells[key]["last"] is None or o.exit_date > cells[key]["last"]:
+            cells[key]["last"] = o.exit_date
+
+    bandits: dict[str, StrategyBandit] = {}
+    for key, data in cells.items():
+        parts = key.split("_", 1)
+        regime_id = int(parts[0][1:])  # "R1" -> 1
+        strategy = parts[1]
+        bandits[key] = StrategyBandit(
+            regime_id=regime_id,
+            strategy_type=StrategyType(strategy),
+            alpha=1.0 + data["wins"],
+            beta_param=1.0 + data["losses"],
+            total_trades=data["total"],
+            last_updated=data["last"],
+        )
+    return bandits
+
+
+def update_bandit(bandit: StrategyBandit, won: bool) -> StrategyBandit:
+    """Update a bandit after a trade outcome. Returns new instance (immutable)."""
+    from datetime import date as dt_date
+
+    return StrategyBandit(
+        regime_id=bandit.regime_id,
+        strategy_type=bandit.strategy_type,
+        alpha=bandit.alpha + (1.0 if won else 0.0),
+        beta_param=bandit.beta_param + (0.0 if won else 1.0),
+        total_trades=bandit.total_trades + 1,
+        last_updated=dt_date.today(),
+    )
+
+
+def select_strategies(
+    bandits: dict[str, StrategyBandit],
+    regime_id: int,
+    available_strategies: list[StrategyType],
+    n: int = 3,
+    seed: int | None = None,
+) -> list[tuple[StrategyType, float]]:
+    """Select top N strategies for a regime using Thompson Sampling.
+
+    Samples from each bandit's Beta distribution. Higher sample = more likely to select.
+    Strategies with no bandit data get a uniform prior Beta(1,1) = max exploration.
+
+    Returns list of (strategy, sampled_score) sorted by score descending.
+    """
+    rng = random.Random(seed)
+
+    scores: list[tuple[StrategyType, float]] = []
+    for strategy in available_strategies:
+        key = f"R{regime_id}_{strategy}"
+        bandit = bandits.get(key)
+        if bandit is not None:
+            # Sample from Beta(alpha, beta)
+            sample = rng.betavariate(bandit.alpha, bandit.beta_param)
+        else:
+            # No data -> uniform prior -> high variance -> exploration
+            sample = rng.betavariate(1.0, 1.0)
+        scores.append((strategy, sample))
+
+    scores.sort(key=lambda x: -x[1])
+    return scores[:n]
+
+
+def optimize_thresholds(
+    outcomes: list[TradeOutcome],
+    current: ThresholdConfig | None = None,
+    min_trades_per_bucket: int = 15,
+    max_change_pct: float = 0.20,
+) -> ThresholdConfig:
+    """Optimize hard-coded thresholds based on actual trade outcomes.
+
+    For each threshold, bucket outcomes by whether they were above/below
+    the threshold at entry. Compare win rates. Adjust threshold toward
+    the boundary that maximizes win rate, clamped to +/-max_change_pct.
+
+    Requires outcomes to have iv_rank_at_entry and dte_at_entry populated.
+
+    Args:
+        outcomes: Completed trade outcomes with entry context.
+        current: Current threshold config to adjust from. Uses defaults if None.
+        min_trades_per_bucket: Minimum trades needed to consider optimization.
+            Returned unchanged if fewer than 2x this many total outcomes.
+        max_change_pct: Maximum relative change per threshold (0.20 = 20%).
+
+    Returns:
+        ThresholdConfig with adjusted values and metadata.
+    """
+    from datetime import date as dt_date
+
+    if current is None:
+        current = ThresholdConfig()
+
+    result = current.model_copy()
+    result.trades_analyzed = len(outcomes)
+    result.last_optimized = dt_date.today()
+
+    if len(outcomes) < min_trades_per_bucket * 2:
+        return result  # Not enough data to optimize
+
+    def _find_optimal(
+        values: list[tuple[float, bool]],
+        current_threshold: float,
+        direction: str,
+    ) -> float:
+        """Find threshold that best separates winners from losers.
+
+        Args:
+            values: List of (metric_value, won) tuples.
+            current_threshold: Starting threshold to adjust from.
+            direction: "min" = reject below threshold, "max" = reject above.
+
+        Returns:
+            Optimized threshold clamped to +/-max_change_pct of current.
+        """
+        if len(values) < min_trades_per_bucket:
+            return current_threshold
+
+        values.sort(key=lambda x: x[0])
+        best_threshold = current_threshold
+        best_score = 0.0
+
+        unique_vals = sorted(set(v for v, _ in values))
+        for candidate in unique_vals:
+            if direction == "min":
+                above = [(v, w) for v, w in values if v >= candidate]
+                below = [(v, w) for v, w in values if v < candidate]
+            else:
+                above = [(v, w) for v, w in values if v <= candidate]
+                below = [(v, w) for v, w in values if v > candidate]
+
+            if len(above) < 3 or len(below) < 3:
+                continue
+
+            win_rate_above = sum(1 for _, w in above if w) / len(above)
+            win_rate_below = sum(1 for _, w in below if w) / len(below)
+
+            score = win_rate_above - win_rate_below
+            if score > best_score:
+                best_score = score
+                best_threshold = candidate
+
+        # Clamp change to +/-max_change_pct of current
+        max_delta = current_threshold * max_change_pct
+        clamped = max(
+            current_threshold - max_delta,
+            min(current_threshold + max_delta, best_threshold),
+        )
+        return round(clamped, 2)
+
+    # --- Optimize IC IV rank minimum ---
+    ic_outcomes = [
+        (o.iv_rank_at_entry, o.pnl_pct > 0)
+        for o in outcomes
+        if o.strategy_type == StrategyType.IRON_CONDOR
+        and o.iv_rank_at_entry is not None
+    ]
+    if len(ic_outcomes) >= min_trades_per_bucket:
+        result.ic_iv_rank_min = _find_optimal(
+            ic_outcomes, current.ic_iv_rank_min, "min"
+        )
+
+    # --- Optimize Iron Butterfly IV rank minimum ---
+    ifly_outcomes = [
+        (o.iv_rank_at_entry, o.pnl_pct > 0)
+        for o in outcomes
+        if o.strategy_type == StrategyType.IRON_BUTTERFLY
+        and o.iv_rank_at_entry is not None
+    ]
+    if len(ifly_outcomes) >= min_trades_per_bucket:
+        result.ifly_iv_rank_min = _find_optimal(
+            ifly_outcomes, current.ifly_iv_rank_min, "min"
+        )
+
+    # --- Optimize Earnings IV rank minimum ---
+    earnings_outcomes = [
+        (o.iv_rank_at_entry, o.pnl_pct > 0)
+        for o in outcomes
+        if o.strategy_type == StrategyType.EARNINGS
+        and o.iv_rank_at_entry is not None
+    ]
+    if len(earnings_outcomes) >= min_trades_per_bucket:
+        result.earnings_iv_rank_min = _find_optimal(
+            earnings_outcomes, current.earnings_iv_rank_min, "min"
+        )
+
+    # --- Optimize LEAP IV rank maximum (reject above) ---
+    leap_outcomes = [
+        (o.iv_rank_at_entry, o.pnl_pct > 0)
+        for o in outcomes
+        if o.strategy_type == StrategyType.LEAP
+        and o.iv_rank_at_entry is not None
+    ]
+    if len(leap_outcomes) >= min_trades_per_bucket:
+        result.leap_iv_rank_max = _find_optimal(
+            leap_outcomes, current.leap_iv_rank_max, "max"
+        )
+
+    # --- Optimize score minimum (composite_score as proxy) ---
+    score_outcomes = [
+        (o.composite_score_at_entry, o.pnl_pct > 0) for o in outcomes
+    ]
+    if len(score_outcomes) >= min_trades_per_bucket:
+        result.score_min = _find_optimal(
+            score_outcomes, current.score_min, "min"
+        )
+
+    # --- Optimize POP minimum using credit trades ---
+    # POP correlates with composite score; use it for credit-side threshold
+    pop_outcomes = [
+        (o.composite_score_at_entry, o.pnl_pct > 0)
+        for o in outcomes
+        if o.order_side == "credit"
+    ]
+    if len(pop_outcomes) >= min_trades_per_bucket:
+        result.pop_min = _find_optimal(
+            pop_outcomes, current.pop_min, "min"
+        )
+
+    return result

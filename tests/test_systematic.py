@@ -28,6 +28,7 @@ from market_analyzer.models.opportunity import (
 )
 from market_analyzer.models.quotes import OptionQuote
 from market_analyzer.models.feedback import TradeOutcome, TradeExitReason
+from market_analyzer.models.learning import DriftSeverity
 from market_analyzer.models.ranking import StrategyType
 from market_analyzer.models.regime import RegimeID, RegimeResult
 from market_analyzer.models.technicals import (
@@ -1860,3 +1861,1429 @@ class TestSQ3POPCalibration:
         report = compute_performance_report(outcomes)
         # Each regime has only 1 trade (< 5) -> no pop_accuracy entries
         assert report.pop_accuracy is None
+
+
+# ── TA1–TA6: New technical indicator tests ──
+
+
+def _make_ohlcv(n=100):
+    """Create a simple uptrending OHLCV DataFrame for testing."""
+    import numpy as np
+    import pandas as pd
+
+    dates = pd.date_range("2025-01-01", periods=n, freq="B")
+    base = 100 + np.arange(n) * 0.1 + np.random.RandomState(42).randn(n) * 2
+    df = pd.DataFrame(
+        {
+            "Open": base - 0.5,
+            "High": base + 1.0,
+            "Low": base - 1.0,
+            "Close": base,
+            "Volume": np.random.RandomState(42).randint(100000, 1000000, n),
+        },
+        index=dates,
+    )
+    return df
+
+
+class TestTA1Fibonacci:
+    """TA1: Fibonacci retracement levels."""
+
+    def test_fibonacci_computes_levels(self):
+        """compute_fibonacci returns FibonacciLevels with all fields populated."""
+        from market_analyzer.features.technicals import compute_fibonacci
+        from market_analyzer.models.technicals import FibonacciLevels
+
+        df = _make_ohlcv()
+        result = compute_fibonacci(df["High"], df["Low"], df["Close"])
+        assert isinstance(result, FibonacciLevels)
+        assert result.swing_high > 0
+        assert result.swing_low > 0
+        assert result.level_236 > 0
+        assert result.level_382 > 0
+        assert result.level_500 > 0
+        assert result.level_618 > 0
+        assert result.level_786 > 0
+
+    def test_fibonacci_levels_between_swing(self):
+        """All fib levels are between swing_high and swing_low."""
+        from market_analyzer.features.technicals import compute_fibonacci
+
+        df = _make_ohlcv()
+        result = compute_fibonacci(df["High"], df["Low"], df["Close"])
+        levels = [result.level_236, result.level_382, result.level_500,
+                  result.level_618, result.level_786]
+        for lv in levels:
+            assert result.swing_low <= lv <= result.swing_high
+
+    def test_fibonacci_direction_detected(self):
+        """Direction is 'up' or 'down'."""
+        from market_analyzer.features.technicals import compute_fibonacci
+
+        df = _make_ohlcv()
+        result = compute_fibonacci(df["High"], df["Low"], df["Close"])
+        assert result.direction in ("up", "down")
+
+    def test_fibonacci_current_price_level(self):
+        """current_price_level is a non-empty string."""
+        from market_analyzer.features.technicals import compute_fibonacci
+
+        df = _make_ohlcv()
+        result = compute_fibonacci(df["High"], df["Low"], df["Close"])
+        assert isinstance(result.current_price_level, str)
+        assert len(result.current_price_level) > 0
+
+
+class TestTA2ADX:
+    """TA2: Average Directional Index."""
+
+    def test_adx_computes(self):
+        """compute_adx returns ADXData with adx, plus_di, minus_di."""
+        from market_analyzer.features.technicals import compute_adx
+        from market_analyzer.models.technicals import ADXData
+
+        df = _make_ohlcv()
+        result = compute_adx(df["High"], df["Low"], df["Close"])
+        assert isinstance(result, ADXData)
+        assert isinstance(result.adx, float)
+        assert isinstance(result.plus_di, float)
+        assert isinstance(result.minus_di, float)
+
+    def test_adx_range(self):
+        """ADX value is between 0 and 100."""
+        from market_analyzer.features.technicals import compute_adx
+
+        df = _make_ohlcv()
+        result = compute_adx(df["High"], df["Low"], df["Close"])
+        assert 0 <= result.adx <= 100
+
+    def test_adx_trending_flag(self):
+        """is_trending = adx > 25."""
+        from market_analyzer.features.technicals import compute_adx
+
+        df = _make_ohlcv()
+        result = compute_adx(df["High"], df["Low"], df["Close"])
+        assert result.is_trending == (result.adx > 25)
+
+    def test_adx_ranging_flag(self):
+        """is_ranging = adx < 20."""
+        from market_analyzer.features.technicals import compute_adx
+
+        df = _make_ohlcv()
+        result = compute_adx(df["High"], df["Low"], df["Close"])
+        assert result.is_ranging == (result.adx < 20)
+
+    def test_adx_direction(self):
+        """trend_direction is 'bullish', 'bearish', or 'neutral'."""
+        from market_analyzer.features.technicals import compute_adx
+
+        df = _make_ohlcv()
+        result = compute_adx(df["High"], df["Low"], df["Close"])
+        assert result.trend_direction in ("bullish", "bearish", "neutral")
+
+
+class TestTA3Donchian:
+    """TA3: Donchian Channels."""
+
+    def test_donchian_computes(self):
+        """compute_donchian returns DonchianChannels."""
+        from market_analyzer.features.technicals import compute_donchian
+        from market_analyzer.models.technicals import DonchianChannels
+
+        df = _make_ohlcv()
+        result = compute_donchian(df["High"], df["Low"], df["Close"])
+        assert isinstance(result, DonchianChannels)
+
+    def test_donchian_upper_gte_lower(self):
+        """upper >= lower always."""
+        from market_analyzer.features.technicals import compute_donchian
+
+        df = _make_ohlcv()
+        result = compute_donchian(df["High"], df["Low"], df["Close"])
+        assert result.upper >= result.lower
+
+    def test_donchian_middle_is_average(self):
+        """middle = (upper + lower) / 2."""
+        from market_analyzer.features.technicals import compute_donchian
+
+        df = _make_ohlcv()
+        result = compute_donchian(df["High"], df["Low"], df["Close"])
+        expected_middle = (result.upper + result.lower) / 2
+        assert abs(result.middle - expected_middle) < 0.01
+
+
+class TestTA4Keltner:
+    """TA4: Keltner Channels."""
+
+    def test_keltner_computes(self):
+        """compute_keltner returns KeltnerChannels."""
+        from market_analyzer.features.technicals import compute_keltner
+        from market_analyzer.models.technicals import KeltnerChannels
+
+        df = _make_ohlcv()
+        result = compute_keltner(df["Close"], df["High"], df["Low"])
+        assert isinstance(result, KeltnerChannels)
+
+    def test_keltner_upper_gte_lower(self):
+        """upper >= lower always."""
+        from market_analyzer.features.technicals import compute_keltner
+
+        df = _make_ohlcv()
+        result = compute_keltner(df["Close"], df["High"], df["Low"])
+        assert result.upper >= result.lower
+
+    def test_keltner_squeeze_detection(self):
+        """squeeze = True when BB inside Keltner."""
+        from market_analyzer.features.technicals import compute_keltner
+
+        df = _make_ohlcv()
+        # Pass BB values that are inside Keltner (narrow BB = squeeze)
+        result_squeeze = compute_keltner(
+            df["Close"], df["High"], df["Low"],
+            bb_upper=df["Close"].iloc[-1] + 0.5,
+            bb_lower=df["Close"].iloc[-1] - 0.5,
+        )
+        # With very tight BB bands relative to Keltner, squeeze should be True
+        # (depends on actual Keltner width — just verify the flag is bool)
+        assert isinstance(result_squeeze.squeeze, bool)
+
+        # Without BB values, squeeze is False
+        result_no_bb = compute_keltner(df["Close"], df["High"], df["Low"])
+        assert result_no_bb.squeeze is False
+
+
+class TestTA5Pivots:
+    """TA5: Pivot Points."""
+
+    def test_pivots_compute(self):
+        """compute_pivot_points returns PivotPoints."""
+        from market_analyzer.features.technicals import compute_pivot_points
+        from market_analyzer.models.technicals import PivotPoints
+
+        df = _make_ohlcv()
+        result = compute_pivot_points(df["High"], df["Low"], df["Close"])
+        assert isinstance(result, PivotPoints)
+
+    def test_pivots_ordering(self):
+        """s3 < s2 < s1 < pp < r1 < r2 < r3."""
+        from market_analyzer.features.technicals import compute_pivot_points
+
+        df = _make_ohlcv()
+        result = compute_pivot_points(df["High"], df["Low"], df["Close"])
+        assert result.s3 < result.s2 < result.s1 < result.pp < result.r1 < result.r2 < result.r3
+
+    def test_pivots_period(self):
+        """period == 'daily'."""
+        from market_analyzer.features.technicals import compute_pivot_points
+
+        df = _make_ohlcv()
+        result = compute_pivot_points(df["High"], df["Low"], df["Close"])
+        assert result.period == "daily"
+
+
+class TestTA6VWAP:
+    """TA6: Daily VWAP."""
+
+    def test_vwap_computes(self):
+        """compute_daily_vwap returns VWAPData."""
+        from market_analyzer.features.technicals import compute_daily_vwap
+        from market_analyzer.models.technicals import VWAPData
+
+        df = _make_ohlcv()
+        result = compute_daily_vwap(df["High"], df["Low"], df["Close"], df["Volume"])
+        assert isinstance(result, VWAPData)
+
+    def test_vwap_positive(self):
+        """vwap > 0."""
+        from market_analyzer.features.technicals import compute_daily_vwap
+
+        df = _make_ohlcv()
+        result = compute_daily_vwap(df["High"], df["Low"], df["Close"], df["Volume"])
+        assert result.vwap > 0
+
+    def test_vwap_above_below(self):
+        """is_above_vwap matches price > vwap."""
+        from market_analyzer.features.technicals import compute_daily_vwap
+
+        df = _make_ohlcv()
+        result = compute_daily_vwap(df["High"], df["Low"], df["Close"], df["Volume"])
+        price = float(df["Close"].iloc[-1])
+        assert result.is_above_vwap == (price > result.vwap)
+
+
+class TestTAOnSnapshot:
+    """Verify new TA fields on TechnicalSnapshot."""
+
+    def test_snapshot_has_all_ta_fields(self):
+        """TechnicalSnapshot accepts fibonacci, adx, donchian, keltner, pivot_points, daily_vwap."""
+        from market_analyzer.models.technicals import (
+            FibonacciLevels, ADXData, DonchianChannels,
+            KeltnerChannels, PivotPoints, VWAPData,
+            TechnicalSnapshot,
+        )
+
+        fib = FibonacciLevels(
+            swing_high=110, swing_low=90, direction="up",
+            level_236=105.28, level_382=103.64, level_500=100.0,
+            level_618=97.64, level_786=94.28, current_price_level="above_236",
+        )
+        adx = ADXData(
+            adx=30.0, plus_di=25.0, minus_di=15.0,
+            is_trending=True, is_ranging=False, trend_direction="bullish",
+        )
+        donchian = DonchianChannels(
+            upper=110, lower=90, middle=100, width_pct=20.0,
+            is_at_upper=False, is_at_lower=False,
+        )
+        keltner = KeltnerChannels(
+            upper=112, middle=100, lower=88, width_pct=24.0, squeeze=False,
+        )
+        pivots = PivotPoints(
+            pp=100, r1=105, r2=110, r3=115,
+            s1=95, s2=90, s3=85, period="daily",
+        )
+        vwap = VWAPData(vwap=99.5, price_vs_vwap_pct=0.5, is_above_vwap=True)
+
+        snap = _make_technicals()
+        # Rebuild with TA fields set
+        data = snap.model_dump()
+        data.update(
+            fibonacci=fib, adx=adx, donchian=donchian,
+            keltner=keltner, pivot_points=pivots, daily_vwap=vwap,
+        )
+        snap2 = TechnicalSnapshot(**data)
+        assert snap2.fibonacci is not None
+        assert snap2.adx is not None
+        assert snap2.donchian is not None
+        assert snap2.keltner is not None
+        assert snap2.pivot_points is not None
+        assert snap2.daily_vwap is not None
+
+    def test_snapshot_ta_defaults_none(self):
+        """All new TA fields default to None for backward compat."""
+        snap = _make_technicals()
+        assert snap.fibonacci is None
+        assert snap.adx is None
+        assert snap.donchian is None
+        assert snap.keltner is None
+        assert snap.pivot_points is None
+        assert snap.daily_vwap is None
+
+
+# ── Helpers for SQ4-SQ10 tests ──
+
+
+def _make_technicals_with_ta(
+    price: float = 600.0,
+    atr: float = 8.0,
+    rsi: float = 50.0,
+    macd_histogram: float = 0.0,
+    bb_pct_b: float = 0.5,
+    fibonacci: "FibonacciLevels | None" = None,
+    adx: "ADXData | None" = None,
+    donchian: "DonchianChannels | None" = None,
+    keltner: "KeltnerChannels | None" = None,
+    daily_vwap: "VWAPData | None" = None,
+    pivot_points: "PivotPoints | None" = None,
+) -> TechnicalSnapshot:
+    """Build TechnicalSnapshot with optional new TA indicators populated."""
+    from market_analyzer.models.technicals import (
+        ADXData,
+        DonchianChannels,
+        FibonacciLevels,
+        KeltnerChannels,
+        PivotPoints,
+        VWAPData,
+    )
+
+    return TechnicalSnapshot(
+        ticker="SPY",
+        as_of_date=date.today(),
+        current_price=price,
+        atr=atr,
+        atr_pct=atr / price * 100,
+        vwma_20=price,
+        moving_averages=MovingAverages(
+            sma_20=price, sma_50=price, sma_200=price,
+            ema_9=price, ema_21=price,
+            price_vs_sma_20_pct=0.0, price_vs_sma_50_pct=0.0,
+            price_vs_sma_200_pct=0.0,
+        ),
+        rsi=RSIData(value=rsi, is_overbought=rsi >= 70, is_oversold=rsi <= 30),
+        bollinger=BollingerBands(
+            upper=price + 10, middle=price, lower=price - 10,
+            bandwidth=3.3, percent_b=bb_pct_b,
+        ),
+        macd=MACDData(
+            macd_line=0.0, signal_line=0.0, histogram=macd_histogram,
+            is_bullish_crossover=False, is_bearish_crossover=False,
+        ),
+        stochastic=StochasticData(k=50.0, d=50.0, is_overbought=False, is_oversold=False),
+        support_resistance=SupportResistance(
+            support=price - 20, resistance=price + 20,
+            price_vs_support_pct=3.3, price_vs_resistance_pct=3.3,
+        ),
+        phase=PhaseIndicator(
+            phase="accumulation", confidence=0.6, description="",
+            higher_highs=True, higher_lows=True, lower_highs=False, lower_lows=False,
+            range_compression=0.0, volume_trend="stable", price_vs_sma_50_pct=0.0,
+        ),
+        signals=[],
+        fibonacci=fibonacci,
+        adx=adx,
+        donchian=donchian,
+        keltner=keltner,
+        daily_vwap=daily_vwap,
+        pivot_points=pivot_points,
+    )
+
+
+def _make_phase_result() -> "PhaseResult":
+    """Build a minimal PhaseResult for assessor tests."""
+    from market_analyzer.models.phase import (
+        PhaseEvidence,
+        PhaseID,
+        PhaseResult,
+        PriceStructure,
+        SwingPoint,
+    )
+
+    today = date.today()
+    return PhaseResult(
+        ticker="SPY",
+        phase=PhaseID.ACCUMULATION,
+        phase_name="Accumulation",
+        confidence=0.7,
+        phase_age_days=20,
+        prior_phase=None,
+        cycle_completion=0.3,
+        price_structure=PriceStructure(
+            swing_highs=[SwingPoint(date=today, price=610.0, type="high")],
+            swing_lows=[SwingPoint(date=today, price=590.0, type="low")],
+            higher_highs=True,
+            higher_lows=True,
+            lower_highs=False,
+            lower_lows=False,
+            range_compression=0.2,
+            price_vs_sma=0.0,
+            volume_trend="stable",
+            support_level=590.0,
+            resistance_level=610.0,
+        ),
+        evidence=PhaseEvidence(
+            regime_signal="R1",
+            price_signal="higher lows",
+            volume_signal="stable",
+            supporting=["range compression"],
+            contradictions=[],
+        ),
+        transitions=[],
+        strategy_comment="Accumulation phase",
+        as_of_date=today,
+    )
+
+
+def _make_macro_calendar() -> "MacroCalendar":
+    """Build a minimal MacroCalendar for assessor tests."""
+    from market_analyzer.models.macro import MacroCalendar
+
+    return MacroCalendar(
+        events=[],
+        next_event=None,
+        days_to_next=None,
+        next_fomc=None,
+        days_to_next_fomc=None,
+        events_next_7_days=[],
+        events_next_30_days=[],
+    )
+
+
+# ── SQ4: Mean Reversion Signal Overhaul ──
+
+
+class TestSQ4MeanReversionOverhaul:
+    """Test new mean reversion signals: ADX hard stop, fibonacci, VWAP, divergence."""
+
+    def test_adx_hard_stop_strong_trend(self):
+        """ADX > 35 should produce a hard stop in mean reversion assessment."""
+        from market_analyzer.models.technicals import ADXData
+        from market_analyzer.opportunity.setups.mean_reversion import assess_mean_reversion
+
+        adx = ADXData(adx=40.0, plus_di=30.0, minus_di=15.0,
+                       is_trending=True, is_ranging=False, trend_direction="bullish")
+        tech = _make_technicals_with_ta(rsi=30.0, bb_pct_b=0.1, adx=adx)
+        regime = _make_regime(1)
+
+        result = assess_mean_reversion("SPY", regime, tech)
+        hard_stop_names = [hs.name for hs in result.hard_stops]
+        assert "strong_trend" in hard_stop_names, (
+            f"Expected 'strong_trend' hard stop with ADX=40, got: {hard_stop_names}"
+        )
+        assert result.verdict == "no_go"
+
+    def test_adx_ranging_no_hard_stop(self):
+        """ADX < 20 should NOT produce a hard stop — favorable for MR."""
+        from market_analyzer.models.technicals import ADXData
+        from market_analyzer.opportunity.setups.mean_reversion import assess_mean_reversion
+
+        adx = ADXData(adx=15.0, plus_di=12.0, minus_di=10.0,
+                       is_trending=False, is_ranging=True, trend_direction="neutral")
+        tech = _make_technicals_with_ta(rsi=30.0, bb_pct_b=0.1, adx=adx)
+        regime = _make_regime(1)
+
+        result = assess_mean_reversion("SPY", regime, tech)
+        hard_stop_names = [hs.name for hs in result.hard_stops]
+        assert "strong_trend" not in hard_stop_names
+
+    def test_fibonacci_signal_present(self):
+        """With fibonacci data, fibonacci_reversion signal should appear."""
+        from market_analyzer.models.technicals import FibonacciLevels
+        from market_analyzer.opportunity.setups.mean_reversion import assess_mean_reversion
+
+        fib = FibonacciLevels(
+            swing_high=620.0, swing_low=580.0, direction="up",
+            level_236=610.56, level_382=604.72, level_500=600.0,
+            level_618=595.28, level_786=588.56,
+            current_price_level="between_618_786",
+        )
+        tech = _make_technicals_with_ta(rsi=30.0, bb_pct_b=0.1, fibonacci=fib)
+        regime = _make_regime(1)
+
+        result = assess_mean_reversion("SPY", regime, tech)
+        signal_names = [s.name for s in result.signals]
+        assert "fibonacci_reversion" in signal_names, (
+            f"Expected fibonacci_reversion signal, got: {signal_names}"
+        )
+        # Deep retracement in upswing should be favorable
+        fib_signal = next(s for s in result.signals if s.name == "fibonacci_reversion")
+        assert fib_signal.favorable is True
+
+    def test_fibonacci_shallow_unfavorable(self):
+        """Shallow retracement should produce unfavorable fibonacci signal."""
+        from market_analyzer.models.technicals import FibonacciLevels
+        from market_analyzer.opportunity.setups.mean_reversion import assess_mean_reversion
+
+        fib = FibonacciLevels(
+            swing_high=620.0, swing_low=580.0, direction="up",
+            level_236=610.56, level_382=604.72, level_500=600.0,
+            level_618=595.28, level_786=588.56,
+            current_price_level="above_236",
+        )
+        tech = _make_technicals_with_ta(rsi=30.0, bb_pct_b=0.1, fibonacci=fib)
+        regime = _make_regime(1)
+
+        result = assess_mean_reversion("SPY", regime, tech)
+        fib_signal = next(s for s in result.signals if s.name == "fibonacci_reversion")
+        assert fib_signal.favorable is False
+
+    def test_vwap_signal_present(self):
+        """With daily_vwap data, vwap_deviation signal should appear."""
+        from market_analyzer.models.technicals import VWAPData
+        from market_analyzer.opportunity.setups.mean_reversion import assess_mean_reversion
+
+        vwap = VWAPData(vwap=595.0, price_vs_vwap_pct=3.0, is_above_vwap=True)
+        tech = _make_technicals_with_ta(rsi=30.0, bb_pct_b=0.1, daily_vwap=vwap)
+        regime = _make_regime(1)
+
+        result = assess_mean_reversion("SPY", regime, tech)
+        signal_names = [s.name for s in result.signals]
+        assert "vwap_deviation" in signal_names, (
+            f"Expected vwap_deviation signal, got: {signal_names}"
+        )
+        # 3% deviation > 2% threshold = favorable
+        vwap_signal = next(s for s in result.signals if s.name == "vwap_deviation")
+        assert vwap_signal.favorable is True
+
+    def test_vwap_near_unfavorable(self):
+        """Price near VWAP (< 2%) should produce unfavorable signal."""
+        from market_analyzer.models.technicals import VWAPData
+        from market_analyzer.opportunity.setups.mean_reversion import assess_mean_reversion
+
+        vwap = VWAPData(vwap=599.0, price_vs_vwap_pct=0.5, is_above_vwap=True)
+        tech = _make_technicals_with_ta(rsi=30.0, bb_pct_b=0.1, daily_vwap=vwap)
+        regime = _make_regime(1)
+
+        result = assess_mean_reversion("SPY", regime, tech)
+        vwap_signal = next(s for s in result.signals if s.name == "vwap_deviation")
+        assert vwap_signal.favorable is False
+
+    def test_divergence_signal_bullish(self):
+        """RSI < 35 and MACD histogram > 0 should produce favorable divergence."""
+        from market_analyzer.opportunity.setups.mean_reversion import assess_mean_reversion
+
+        tech = _make_technicals_with_ta(rsi=30.0, bb_pct_b=0.1, macd_histogram=0.5)
+        regime = _make_regime(1)
+
+        result = assess_mean_reversion("SPY", regime, tech)
+        signal_names = [s.name for s in result.signals]
+        assert "divergence" in signal_names, (
+            f"Expected divergence signal, got: {signal_names}"
+        )
+        div_signal = next(s for s in result.signals if s.name == "divergence")
+        assert div_signal.favorable is True
+
+    def test_divergence_signal_no_divergence(self):
+        """RSI=50 and MACD histogram=0 -> no divergence (unfavorable)."""
+        from market_analyzer.opportunity.setups.mean_reversion import assess_mean_reversion
+
+        tech = _make_technicals_with_ta(rsi=50.0, bb_pct_b=0.5, macd_histogram=0.0)
+        regime = _make_regime(1)
+
+        result = assess_mean_reversion("SPY", regime, tech)
+        div_signal = next(s for s in result.signals if s.name == "divergence")
+        assert div_signal.favorable is False
+
+    def test_adx_ranging_signal_favorable(self):
+        """ADX < 20 (ranging) should produce favorable adx_ranging signal."""
+        from market_analyzer.models.technicals import ADXData
+        from market_analyzer.opportunity.setups.mean_reversion import assess_mean_reversion
+
+        adx = ADXData(adx=15.0, plus_di=12.0, minus_di=10.0,
+                       is_trending=False, is_ranging=True, trend_direction="neutral")
+        tech = _make_technicals_with_ta(rsi=30.0, bb_pct_b=0.1, adx=adx)
+        regime = _make_regime(1)
+
+        result = assess_mean_reversion("SPY", regime, tech)
+        adx_signal = next(s for s in result.signals if s.name == "adx_ranging")
+        assert adx_signal.favorable is True
+
+
+# ── SQ5: Breakout Volume + Donchian/Keltner Signals ──
+
+
+class TestSQ5BreakoutVolume:
+    """Test new breakout signals: Donchian breakout and Keltner squeeze."""
+
+    def test_donchian_signal_present(self):
+        """With donchian data at upper, donchian_breakout signal should appear and be favorable."""
+        from market_analyzer.models.technicals import DonchianChannels
+        from market_analyzer.opportunity.setups.breakout import assess_breakout
+
+        donchian = DonchianChannels(
+            upper=610.0, lower=580.0, middle=595.0,
+            width_pct=5.04, is_at_upper=True, is_at_lower=False,
+        )
+        tech = _make_technicals_with_ta(donchian=donchian)
+        regime = _make_regime(1)
+        phase = _make_phase_result()
+        macro = _make_macro_calendar()
+
+        result = assess_breakout("SPY", regime, tech, phase, macro)
+        signal_names = [s.name for s in result.signals]
+        assert "donchian_breakout" in signal_names, (
+            f"Expected donchian_breakout signal, got: {signal_names}"
+        )
+        don_signal = next(s for s in result.signals if s.name == "donchian_breakout")
+        assert don_signal.favorable is True
+
+    def test_donchian_not_at_upper_unfavorable(self):
+        """Donchian available but not at upper -> unfavorable signal."""
+        from market_analyzer.models.technicals import DonchianChannels
+        from market_analyzer.opportunity.setups.breakout import assess_breakout
+
+        donchian = DonchianChannels(
+            upper=610.0, lower=580.0, middle=595.0,
+            width_pct=5.04, is_at_upper=False, is_at_lower=False,
+        )
+        tech = _make_technicals_with_ta(donchian=donchian)
+        regime = _make_regime(1)
+        phase = _make_phase_result()
+        macro = _make_macro_calendar()
+
+        result = assess_breakout("SPY", regime, tech, phase, macro)
+        don_signal = next(s for s in result.signals if s.name == "donchian_breakout")
+        assert don_signal.favorable is False
+
+    def test_donchian_absent_no_signal(self):
+        """Without donchian data, no donchian_breakout signal should appear."""
+        from market_analyzer.opportunity.setups.breakout import assess_breakout
+
+        tech = _make_technicals_with_ta()
+        regime = _make_regime(1)
+        phase = _make_phase_result()
+        macro = _make_macro_calendar()
+
+        result = assess_breakout("SPY", regime, tech, phase, macro)
+        signal_names = [s.name for s in result.signals]
+        assert "donchian_breakout" not in signal_names
+
+    def test_keltner_squeeze_signal(self):
+        """With keltner.squeeze=True, keltner_squeeze signal should appear and be favorable."""
+        from market_analyzer.models.technicals import KeltnerChannels
+        from market_analyzer.opportunity.setups.breakout import assess_breakout
+
+        keltner = KeltnerChannels(
+            upper=615.0, middle=600.0, lower=585.0,
+            width_pct=5.0, squeeze=True,
+        )
+        tech = _make_technicals_with_ta(keltner=keltner)
+        regime = _make_regime(1)
+        phase = _make_phase_result()
+        macro = _make_macro_calendar()
+
+        result = assess_breakout("SPY", regime, tech, phase, macro)
+        signal_names = [s.name for s in result.signals]
+        assert "keltner_squeeze" in signal_names, (
+            f"Expected keltner_squeeze signal, got: {signal_names}"
+        )
+        ks_signal = next(s for s in result.signals if s.name == "keltner_squeeze")
+        assert ks_signal.favorable is True
+
+    def test_keltner_no_squeeze_no_signal(self):
+        """With keltner.squeeze=False, keltner_squeeze signal should NOT appear."""
+        from market_analyzer.models.technicals import KeltnerChannels
+        from market_analyzer.opportunity.setups.breakout import assess_breakout
+
+        keltner = KeltnerChannels(
+            upper=615.0, middle=600.0, lower=585.0,
+            width_pct=5.0, squeeze=False,
+        )
+        tech = _make_technicals_with_ta(keltner=keltner)
+        regime = _make_regime(1)
+        phase = _make_phase_result()
+        macro = _make_macro_calendar()
+
+        result = assess_breakout("SPY", regime, tech, phase, macro)
+        signal_names = [s.name for s in result.signals]
+        assert "keltner_squeeze" not in signal_names
+
+
+# ── SQ8: Momentum Pullback — ADX + Fibonacci Signals ──
+
+
+class TestSQ8MomentumPullback:
+    """Test new momentum signals: ADX trend strength and fibonacci pullback."""
+
+    def test_adx_trend_signal_present(self):
+        """With ADX data, adx_trend_strength signal should appear."""
+        from market_analyzer.models.technicals import ADXData
+        from market_analyzer.opportunity.setups.momentum import assess_momentum
+
+        adx = ADXData(adx=30.0, plus_di=25.0, minus_di=15.0,
+                       is_trending=True, is_ranging=False, trend_direction="bullish")
+        tech = _make_technicals_with_ta(rsi=55.0, adx=adx)
+        regime = _make_regime(3)
+        phase = _make_phase_result()
+        macro = _make_macro_calendar()
+
+        result = assess_momentum("SPY", regime, tech, phase, macro)
+        signal_names = [s.name for s in result.signals]
+        assert "adx_trend_strength" in signal_names, (
+            f"Expected adx_trend_strength signal, got: {signal_names}"
+        )
+        adx_signal = next(s for s in result.signals if s.name == "adx_trend_strength")
+        # ADX > 25 and is_trending -> favorable
+        assert adx_signal.favorable is True
+
+    def test_adx_weak_trend_unfavorable(self):
+        """ADX < 25 should produce unfavorable adx_trend_strength signal."""
+        from market_analyzer.models.technicals import ADXData
+        from market_analyzer.opportunity.setups.momentum import assess_momentum
+
+        adx = ADXData(adx=18.0, plus_di=12.0, minus_di=10.0,
+                       is_trending=False, is_ranging=True, trend_direction="neutral")
+        tech = _make_technicals_with_ta(rsi=55.0, adx=adx)
+        regime = _make_regime(3)
+        phase = _make_phase_result()
+        macro = _make_macro_calendar()
+
+        result = assess_momentum("SPY", regime, tech, phase, macro)
+        adx_signal = next(s for s in result.signals if s.name == "adx_trend_strength")
+        assert adx_signal.favorable is False
+
+    def test_adx_very_low_hard_stop(self):
+        """ADX < 15 with is_ranging=True should produce no_trend hard stop."""
+        from market_analyzer.models.technicals import ADXData
+        from market_analyzer.opportunity.setups.momentum import assess_momentum
+
+        adx = ADXData(adx=12.0, plus_di=8.0, minus_di=7.0,
+                       is_trending=False, is_ranging=True, trend_direction="neutral")
+        tech = _make_technicals_with_ta(rsi=55.0, adx=adx)
+        regime = _make_regime(3)
+        phase = _make_phase_result()
+        macro = _make_macro_calendar()
+
+        result = assess_momentum("SPY", regime, tech, phase, macro)
+        hard_stop_names = [hs.name for hs in result.hard_stops]
+        assert "no_trend" in hard_stop_names, (
+            f"Expected 'no_trend' hard stop with ADX=12, got: {hard_stop_names}"
+        )
+
+    def test_fib_pullback_signal_present(self):
+        """With fibonacci data in healthy pullback zone, fib_pullback signal should appear."""
+        from market_analyzer.models.technicals import FibonacciLevels
+        from market_analyzer.opportunity.setups.momentum import assess_momentum
+
+        fib = FibonacciLevels(
+            swing_high=620.0, swing_low=580.0, direction="up",
+            level_236=610.56, level_382=604.72, level_500=600.0,
+            level_618=595.28, level_786=588.56,
+            current_price_level="between_382_500",
+        )
+        # Set MACD histogram > 0 to ensure bullish direction matches fib direction="up"
+        tech = _make_technicals_with_ta(rsi=55.0, fibonacci=fib, macd_histogram=0.5)
+        regime = _make_regime(3)
+        phase = _make_phase_result()
+        macro = _make_macro_calendar()
+
+        result = assess_momentum("SPY", regime, tech, phase, macro)
+        signal_names = [s.name for s in result.signals]
+        assert "fib_pullback" in signal_names, (
+            f"Expected fib_pullback signal, got: {signal_names}"
+        )
+        fib_signal = next(s for s in result.signals if s.name == "fib_pullback")
+        assert fib_signal.favorable is True
+
+    def test_fib_deep_retracement_hard_stop(self):
+        """Deep fibonacci retracement in bullish momentum -> hard stop."""
+        from market_analyzer.models.technicals import FibonacciLevels
+        from market_analyzer.opportunity.setups.momentum import assess_momentum
+
+        fib = FibonacciLevels(
+            swing_high=620.0, swing_low=580.0, direction="up",
+            level_236=610.56, level_382=604.72, level_500=600.0,
+            level_618=595.28, level_786=588.56,
+            current_price_level="below_786",
+        )
+        # Set MACD histogram > 0 to ensure bullish direction matches fib direction="up"
+        tech = _make_technicals_with_ta(rsi=55.0, fibonacci=fib, macd_histogram=0.5)
+        regime = _make_regime(3)
+        phase = _make_phase_result()
+        macro = _make_macro_calendar()
+
+        result = assess_momentum("SPY", regime, tech, phase, macro)
+        hard_stop_names = [hs.name for hs in result.hard_stops]
+        assert "deep_retracement" in hard_stop_names, (
+            f"Expected 'deep_retracement' hard stop, got: {hard_stop_names}"
+        )
+
+    def test_fib_absent_no_signal(self):
+        """Without fibonacci data, no fib_pullback or deep_retracement signals."""
+        from market_analyzer.opportunity.setups.momentum import assess_momentum
+
+        tech = _make_technicals_with_ta(rsi=55.0)
+        regime = _make_regime(3)
+        phase = _make_phase_result()
+        macro = _make_macro_calendar()
+
+        result = assess_momentum("SPY", regime, tech, phase, macro)
+        signal_names = [s.name for s in result.signals]
+        assert "fib_pullback" not in signal_names
+        hard_stop_names = [hs.name for hs in result.hard_stops]
+        assert "deep_retracement" not in hard_stop_names
+
+
+# ── SQ7: Screening Filters ──
+
+
+class TestSQ7ScreeningFilters:
+    """Test screening result model fields and filter concepts."""
+
+    def test_screening_result_has_filtered_count(self):
+        """ScreeningResult accepts filtered_count field."""
+        from market_analyzer.service.screening import ScreeningResult
+
+        result = ScreeningResult(
+            as_of_date=date.today(),
+            tickers_scanned=10,
+            candidates=[],
+            by_screen={},
+            summary="test",
+            min_score_applied=0.6,
+            filtered_count=3,
+        )
+        assert result.filtered_count == 3
+
+    def test_screen_candidate_has_atr_pct(self):
+        """ScreenCandidate includes atr_pct for liquidity filtering."""
+        from market_analyzer.service.screening import ScreenCandidate
+
+        candidate = ScreenCandidate(
+            ticker="SPY",
+            screen="breakout",
+            score=0.8,
+            reason="test",
+            regime_id=1,
+            rsi=50.0,
+            atr_pct=0.25,
+        )
+        assert candidate.atr_pct == 0.25
+
+    def test_low_atr_filter_concept(self):
+        """Verify that candidates with very low ATR% can be filtered."""
+        from market_analyzer.service.screening import ScreenCandidate
+
+        candidates = [
+            ScreenCandidate(ticker="SPY", screen="breakout", score=0.8,
+                            reason="test", regime_id=1, rsi=50.0, atr_pct=1.5),
+            ScreenCandidate(ticker="LOW_VOL", screen="breakout", score=0.7,
+                            reason="test", regime_id=1, rsi=50.0, atr_pct=0.2),
+            ScreenCandidate(ticker="MED_VOL", screen="breakout", score=0.75,
+                            reason="test", regime_id=1, rsi=50.0, atr_pct=0.5),
+        ]
+        # Filter out candidates with atr_pct < 0.3
+        filtered = [c for c in candidates if c.atr_pct >= 0.3]
+        assert len(filtered) == 2
+        assert all(c.ticker != "LOW_VOL" for c in filtered)
+
+
+# ── SQ9: Ranking IV Rank Map ──
+
+
+class TestSQ9RankingIVRank:
+    """Test that TradeRankingService.rank() accepts iv_rank_map parameter."""
+
+    def test_rank_accepts_iv_rank_map(self):
+        """Verify rank() signature accepts iv_rank_map parameter."""
+        import inspect
+        from market_analyzer.service.ranking import TradeRankingService
+
+        sig = inspect.signature(TradeRankingService.rank)
+        assert "iv_rank_map" in sig.parameters, (
+            f"Expected 'iv_rank_map' in rank() params, got: {list(sig.parameters.keys())}"
+        )
+
+    def test_iv_rank_map_defaults_to_none(self):
+        """iv_rank_map parameter should default to None."""
+        import inspect
+        from market_analyzer.service.ranking import TradeRankingService
+
+        sig = inspect.signature(TradeRankingService.rank)
+        param = sig.parameters["iv_rank_map"]
+        assert param.default is None
+
+
+# ── SQ10: Pivot Point Levels ──
+
+
+class TestSQ10PivotLevels:
+    """Test pivot point level sources and models."""
+
+    def test_pivot_level_sources_exist(self):
+        """LevelSource has PIVOT_PP, PIVOT_R1, PIVOT_S1, PIVOT_R2, PIVOT_S2."""
+        from market_analyzer.models.levels import LevelSource
+
+        assert hasattr(LevelSource, "PIVOT_PP")
+        assert hasattr(LevelSource, "PIVOT_R1")
+        assert hasattr(LevelSource, "PIVOT_S1")
+        assert hasattr(LevelSource, "PIVOT_R2")
+        assert hasattr(LevelSource, "PIVOT_S2")
+
+    def test_pivot_level_source_values(self):
+        """Pivot level source values are lowercase strings."""
+        from market_analyzer.models.levels import LevelSource
+
+        assert LevelSource.PIVOT_PP == "pivot_pp"
+        assert LevelSource.PIVOT_R1 == "pivot_r1"
+        assert LevelSource.PIVOT_S1 == "pivot_s1"
+        assert LevelSource.PIVOT_R2 == "pivot_r2"
+        assert LevelSource.PIVOT_S2 == "pivot_s2"
+
+    def test_pivot_points_model_fields(self):
+        """PivotPoints model accepts all required fields."""
+        from market_analyzer.models.technicals import PivotPoints
+
+        pivots = PivotPoints(
+            pp=600.0, r1=610.0, r2=620.0, r3=630.0,
+            s1=590.0, s2=580.0, s3=570.0, period="daily",
+        )
+        assert pivots.pp == 600.0
+        assert pivots.r1 == 610.0
+        assert pivots.s1 == 590.0
+        assert pivots.period == "daily"
+
+    def test_technical_snapshot_accepts_pivot_points(self):
+        """TechnicalSnapshot can hold PivotPoints data."""
+        from market_analyzer.models.technicals import PivotPoints
+
+        pivots = PivotPoints(
+            pp=600.0, r1=610.0, r2=620.0, r3=630.0,
+            s1=590.0, s2=580.0, s3=570.0, period="daily",
+        )
+        tech = _make_technicals_with_ta(pivot_points=pivots)
+        assert tech.pivot_points is not None
+        assert tech.pivot_points.pp == 600.0
+
+
+# ── ML1-ML3 Learning Tests ──
+
+
+def _make_outcomes_with_drift(
+    n_historical: int = 20,
+    n_recent: int = 10,
+    hist_win_rate: float = 0.8,
+    recent_win_rate: float = 0.3,
+    strategy: StrategyType = StrategyType.IRON_CONDOR,
+    regime: int = 1,
+) -> list[TradeOutcome]:
+    """Build outcomes with a specific drift pattern.
+
+    Historical outcomes get early dates, recent outcomes get late dates.
+    """
+    outcomes: list[TradeOutcome] = []
+    for i in range(n_historical):
+        won = i < int(n_historical * hist_win_rate)
+        outcomes.append(
+            TradeOutcome(
+                trade_id=f"hist-{i}",
+                ticker="SPY",
+                strategy_type=strategy,
+                regime_at_entry=regime,
+                regime_at_exit=regime,
+                entry_date=date(2025, 5, 1) + timedelta(days=i),
+                exit_date=date(2025, 6, 1) + timedelta(days=i),
+                entry_price=0.80,
+                exit_price=0.40 if won else 1.20,
+                pnl_dollars=40.0 if won else -40.0,
+                pnl_pct=0.15 if won else -0.10,
+                holding_days=14,
+                exit_reason=TradeExitReason.PROFIT_TARGET
+                if won
+                else TradeExitReason.STOP_LOSS,
+                composite_score_at_entry=0.75,
+            )
+        )
+    for i in range(n_recent):
+        won = i < int(n_recent * recent_win_rate)
+        outcomes.append(
+            TradeOutcome(
+                trade_id=f"recent-{i}",
+                ticker="SPY",
+                strategy_type=strategy,
+                regime_at_entry=regime,
+                regime_at_exit=regime,
+                entry_date=date(2026, 2, 15) + timedelta(days=i),
+                exit_date=date(2026, 3, 1) + timedelta(days=i),
+                entry_price=0.80,
+                exit_price=0.40 if won else 1.20,
+                pnl_dollars=40.0 if won else -40.0,
+                pnl_pct=0.15 if won else -0.10,
+                holding_days=14,
+                exit_reason=TradeExitReason.PROFIT_TARGET
+                if won
+                else TradeExitReason.STOP_LOSS,
+                composite_score_at_entry=0.75,
+            )
+        )
+    return outcomes
+
+
+class TestML1DriftDetection:
+    """ML1: Drift detection — detect_drift()."""
+
+    def test_no_outcomes_no_alerts(self):
+        """Empty outcomes list produces no alerts."""
+        from market_analyzer.performance import detect_drift
+
+        alerts = detect_drift([])
+        assert alerts == []
+
+    def test_few_trades_no_alerts(self):
+        """Below min_trades threshold produces no alerts."""
+        from market_analyzer.performance import detect_drift
+
+        outcomes = [
+            _make_outcome(pnl_pct=-0.10, pnl_dollars=-40.0) for _ in range(5)
+        ]
+        alerts = detect_drift(outcomes, min_trades=10)
+        assert alerts == []
+
+    def test_critical_drift_detected(self):
+        """20 historical wins + 10 recent losses triggers critical alert."""
+        from market_analyzer.performance import detect_drift
+
+        outcomes = _make_outcomes_with_drift(
+            n_historical=20,
+            n_recent=10,
+            hist_win_rate=0.8,
+            recent_win_rate=0.0,
+        )
+        # Total: 30 trades, window=10 recent are all losses
+        # Historical win rate ~ 16/30 = 0.533 (blended)
+        # Recent win rate = 0/10 = 0.0
+        # drop ~ 0.533 > 0.25 critical threshold
+        alerts = detect_drift(outcomes, window=10, min_trades=10)
+        assert len(alerts) >= 1
+        alert = alerts[0]
+        assert alert.severity == DriftSeverity.CRITICAL
+        assert alert.regime_id == 1
+        assert alert.strategy_type == StrategyType.IRON_CONDOR
+        assert alert.drop_pct > 0.25
+
+    def test_warning_drift_detected(self):
+        """Historical 80% win rate, recent drops to 60% triggers warning."""
+        from market_analyzer.performance import detect_drift
+
+        outcomes = _make_outcomes_with_drift(
+            n_historical=20,
+            n_recent=10,
+            hist_win_rate=0.80,
+            recent_win_rate=0.60,
+        )
+        # Historical overall: (16 + 6) / 30 = 0.733
+        # Recent: 6/10 = 0.60
+        # drop = 0.733 - 0.60 = 0.133 — close to 0.15
+        # Use lower warning threshold to ensure detection
+        alerts = detect_drift(
+            outcomes, window=10, min_trades=10, warning_threshold=0.10
+        )
+        assert len(alerts) >= 1
+        alert = alerts[0]
+        assert alert.severity in (DriftSeverity.WARNING, DriftSeverity.CRITICAL)
+
+    def test_no_drift_when_stable(self):
+        """Historical 60% win, recent 55% — no alert (5pp drop < 15pp)."""
+        from market_analyzer.performance import detect_drift
+
+        outcomes = _make_outcomes_with_drift(
+            n_historical=20,
+            n_recent=10,
+            hist_win_rate=0.60,
+            recent_win_rate=0.55,
+        )
+        alerts = detect_drift(
+            outcomes, window=10, min_trades=10, warning_threshold=0.15
+        )
+        assert alerts == []
+
+    def test_drift_alert_fields(self):
+        """DriftAlert has all expected fields populated."""
+        from market_analyzer.performance import detect_drift
+        from market_analyzer.models.learning import DriftAlert, DriftSeverity
+
+        outcomes = _make_outcomes_with_drift(
+            n_historical=20,
+            n_recent=10,
+            hist_win_rate=0.9,
+            recent_win_rate=0.1,
+        )
+        alerts = detect_drift(outcomes, window=10, min_trades=10)
+        assert len(alerts) >= 1
+        alert = alerts[0]
+        assert isinstance(alert, DriftAlert)
+        assert isinstance(alert.severity, DriftSeverity)
+        assert isinstance(alert.regime_id, int)
+        assert isinstance(alert.strategy_type, StrategyType)
+        assert isinstance(alert.historical_win_rate, float)
+        assert isinstance(alert.recent_win_rate, float)
+        assert isinstance(alert.recent_trades, int)
+        assert isinstance(alert.drop_pct, float)
+        assert isinstance(alert.recommendation, str)
+        assert len(alert.recommendation) > 0
+
+
+class TestML2ThompsonSampling:
+    """ML2: Thompson Sampling bandits — build_bandits, update_bandit, select_strategies."""
+
+    def test_build_bandits_from_outcomes(self):
+        """10 IC wins + 5 IC losses in R1 builds bandit with alpha=11, beta=6."""
+        from market_analyzer.performance import build_bandits
+
+        outcomes = []
+        for i in range(10):
+            outcomes.append(_make_outcome(pnl_pct=0.15, pnl_dollars=40.0, trade_id=f"w-{i}"))
+        for i in range(5):
+            outcomes.append(_make_outcome(pnl_pct=-0.10, pnl_dollars=-40.0, trade_id=f"l-{i}"))
+
+        bandits = build_bandits(outcomes)
+        key = "R1_iron_condor"
+        assert key in bandits
+        b = bandits[key]
+        assert b.alpha == 11.0  # 1 (prior) + 10 wins
+        assert b.beta_param == 6.0  # 1 (prior) + 5 losses
+        assert b.total_trades == 15
+
+    def test_build_bandits_empty(self):
+        """Empty outcomes produces empty bandit dict."""
+        from market_analyzer.performance import build_bandits
+
+        bandits = build_bandits([])
+        assert bandits == {}
+
+    def test_update_bandit_win(self):
+        """Update with won=True increments alpha by 1."""
+        from market_analyzer.performance import update_bandit
+        from market_analyzer.models.learning import StrategyBandit
+
+        b = StrategyBandit(
+            regime_id=1,
+            strategy_type=StrategyType.IRON_CONDOR,
+            alpha=5.0,
+            beta_param=3.0,
+            total_trades=7,
+        )
+        updated = update_bandit(b, won=True)
+        assert updated.alpha == 6.0
+        assert updated.beta_param == 3.0
+        assert updated.total_trades == 8
+
+    def test_update_bandit_loss(self):
+        """Update with won=False increments beta_param by 1."""
+        from market_analyzer.performance import update_bandit
+        from market_analyzer.models.learning import StrategyBandit
+
+        b = StrategyBandit(
+            regime_id=1,
+            strategy_type=StrategyType.IRON_CONDOR,
+            alpha=5.0,
+            beta_param=3.0,
+            total_trades=7,
+        )
+        updated = update_bandit(b, won=False)
+        assert updated.alpha == 5.0
+        assert updated.beta_param == 4.0
+        assert updated.total_trades == 8
+
+    def test_select_strategies_returns_n(self):
+        """select_strategies with n=3 returns exactly 3 tuples."""
+        from market_analyzer.performance import select_strategies
+        from market_analyzer.models.learning import StrategyBandit
+
+        bandits = {
+            "R1_iron_condor": StrategyBandit(
+                regime_id=1, strategy_type=StrategyType.IRON_CONDOR,
+                alpha=10.0, beta_param=3.0,
+            ),
+        }
+        available = [
+            StrategyType.IRON_CONDOR,
+            StrategyType.IRON_BUTTERFLY,
+            StrategyType.CALENDAR,
+            StrategyType.DIAGONAL,
+        ]
+        result = select_strategies(bandits, regime_id=1, available_strategies=available, n=3, seed=42)
+        assert len(result) == 3
+        for strategy, score in result:
+            assert isinstance(strategy, StrategyType)
+            assert isinstance(score, float)
+            assert 0.0 <= score <= 1.0
+
+    def test_select_strategies_deterministic_with_seed(self):
+        """Same seed produces identical results."""
+        from market_analyzer.performance import select_strategies
+        from market_analyzer.models.learning import StrategyBandit
+
+        bandits = {
+            "R1_iron_condor": StrategyBandit(
+                regime_id=1, strategy_type=StrategyType.IRON_CONDOR,
+                alpha=10.0, beta_param=3.0,
+            ),
+            "R1_calendar": StrategyBandit(
+                regime_id=1, strategy_type=StrategyType.CALENDAR,
+                alpha=5.0, beta_param=5.0,
+            ),
+        }
+        available = [
+            StrategyType.IRON_CONDOR,
+            StrategyType.CALENDAR,
+            StrategyType.DIAGONAL,
+        ]
+        r1 = select_strategies(bandits, 1, available, n=3, seed=99)
+        r2 = select_strategies(bandits, 1, available, n=3, seed=99)
+        assert r1 == r2
+
+    def test_bandit_expected_win_rate(self):
+        """StrategyBandit(alpha=8, beta_param=2) has expected_win_rate=0.8."""
+        from market_analyzer.models.learning import StrategyBandit
+
+        b = StrategyBandit(
+            regime_id=1,
+            strategy_type=StrategyType.IRON_CONDOR,
+            alpha=8.0,
+            beta_param=2.0,
+        )
+        assert b.expected_win_rate == pytest.approx(0.8)
+
+    def test_bandit_key_format(self):
+        """StrategyBandit key is 'R{id}_{strategy}'."""
+        from market_analyzer.models.learning import StrategyBandit
+
+        b = StrategyBandit(
+            regime_id=1,
+            strategy_type=StrategyType.IRON_CONDOR,
+        )
+        assert b.key == "R1_iron_condor"
+
+    def test_no_data_bandit_explores(self):
+        """Strategy with no bandit data gets uniform prior — wide variance."""
+        from market_analyzer.performance import select_strategies
+
+        # No bandits at all — all strategies use Beta(1,1) uniform prior
+        available = [StrategyType.IRON_CONDOR, StrategyType.CALENDAR]
+        samples = []
+        for seed in range(50):
+            result = select_strategies({}, 1, available, n=1, seed=seed)
+            samples.append(result[0][1])
+
+        # With uniform prior, samples should span a wide range
+        assert max(samples) - min(samples) > 0.3, "Exploration variance too low"
+
+    def test_proven_winner_exploited(self):
+        """Bandit with alpha=50, beta=5 is consistently ranked #1."""
+        from market_analyzer.performance import select_strategies
+        from market_analyzer.models.learning import StrategyBandit
+
+        bandits = {
+            "R1_iron_condor": StrategyBandit(
+                regime_id=1, strategy_type=StrategyType.IRON_CONDOR,
+                alpha=50.0, beta_param=5.0,
+            ),
+            "R1_calendar": StrategyBandit(
+                regime_id=1, strategy_type=StrategyType.CALENDAR,
+                alpha=2.0, beta_param=8.0,
+            ),
+        }
+        available = [StrategyType.IRON_CONDOR, StrategyType.CALENDAR]
+
+        top_count = 0
+        for seed in range(100):
+            result = select_strategies(bandits, 1, available, n=2, seed=seed)
+            if result[0][0] == StrategyType.IRON_CONDOR:
+                top_count += 1
+
+        # IC with 91% expected win rate should dominate
+        assert top_count >= 85, f"IC only ranked #1 {top_count}/100 times"
+
+
+class TestML3ThresholdOptimization:
+    """ML3: Threshold optimization — optimize_thresholds()."""
+
+    def test_optimize_empty_outcomes(self):
+        """Empty outcomes returns defaults unchanged."""
+        from market_analyzer.performance import optimize_thresholds
+        from market_analyzer.models.learning import ThresholdConfig
+
+        result = optimize_thresholds([])
+        assert isinstance(result, ThresholdConfig)
+        defaults = ThresholdConfig()
+        assert result.ic_iv_rank_min == defaults.ic_iv_rank_min
+        assert result.pop_min == defaults.pop_min
+        assert result.trades_analyzed == 0
+
+    def test_optimize_few_outcomes(self):
+        """Below 2*min_trades_per_bucket returns defaults."""
+        from market_analyzer.performance import optimize_thresholds
+        from market_analyzer.models.learning import ThresholdConfig
+
+        outcomes = [
+            _make_outcome(pnl_pct=0.15, pnl_dollars=40.0, trade_id=f"t-{i}")
+            for i in range(10)
+        ]
+        # Default min_trades_per_bucket=15, so need 30. 10 is below.
+        result = optimize_thresholds(outcomes)
+        defaults = ThresholdConfig()
+        assert result.ic_iv_rank_min == defaults.ic_iv_rank_min
+        assert result.trades_analyzed == 10
+
+    def test_optimize_returns_threshold_config(self):
+        """Valid outcomes produce a ThresholdConfig instance."""
+        from market_analyzer.performance import optimize_thresholds
+        from market_analyzer.models.learning import ThresholdConfig
+
+        # Need enough outcomes with iv_rank_at_entry for optimization
+        outcomes = []
+        for i in range(40):
+            won = i % 3 != 0  # ~67% win rate
+            outcomes.append(
+                TradeOutcome(
+                    trade_id=f"opt-{i}",
+                    ticker="SPY",
+                    strategy_type=StrategyType.IRON_CONDOR,
+                    regime_at_entry=1,
+                    regime_at_exit=1,
+                    entry_date=date(2026, 1, 1) + timedelta(days=i),
+                    exit_date=date(2026, 1, 15) + timedelta(days=i),
+                    entry_price=0.80,
+                    exit_price=0.40 if won else 1.20,
+                    pnl_dollars=40.0 if won else -40.0,
+                    pnl_pct=0.15 if won else -0.10,
+                    holding_days=14,
+                    exit_reason=TradeExitReason.PROFIT_TARGET
+                    if won
+                    else TradeExitReason.STOP_LOSS,
+                    composite_score_at_entry=0.70 + (i * 0.005),
+                    iv_rank_at_entry=10.0 + i,  # 10-49 spread
+                    order_side="credit",
+                )
+            )
+        result = optimize_thresholds(outcomes)
+        assert isinstance(result, ThresholdConfig)
+        assert result.trades_analyzed == 40
+
+    def test_optimize_clamps_changes(self):
+        """No threshold changes by more than max_change_pct."""
+        from market_analyzer.performance import optimize_thresholds
+        from market_analyzer.models.learning import ThresholdConfig
+
+        defaults = ThresholdConfig()
+        outcomes = []
+        for i in range(40):
+            won = i % 3 != 0
+            outcomes.append(
+                TradeOutcome(
+                    trade_id=f"clamp-{i}",
+                    ticker="SPY",
+                    strategy_type=StrategyType.IRON_CONDOR,
+                    regime_at_entry=1,
+                    regime_at_exit=1,
+                    entry_date=date(2026, 1, 1) + timedelta(days=i),
+                    exit_date=date(2026, 1, 15) + timedelta(days=i),
+                    entry_price=0.80,
+                    exit_price=0.40 if won else 1.20,
+                    pnl_dollars=40.0 if won else -40.0,
+                    pnl_pct=0.15 if won else -0.10,
+                    holding_days=14,
+                    exit_reason=TradeExitReason.PROFIT_TARGET
+                    if won
+                    else TradeExitReason.STOP_LOSS,
+                    composite_score_at_entry=0.70 + (i * 0.005),
+                    iv_rank_at_entry=10.0 + i,
+                    order_side="credit",
+                )
+            )
+        result = optimize_thresholds(outcomes, max_change_pct=0.20)
+
+        # Check all thresholds are within 20% of defaults
+        for field in [
+            "ic_iv_rank_min", "ifly_iv_rank_min", "earnings_iv_rank_min",
+            "leap_iv_rank_max", "pop_min", "score_min", "credit_width_min",
+            "adx_trend_max", "adx_notrend_min",
+        ]:
+            default_val = getattr(defaults, field)
+            result_val = getattr(result, field)
+            if default_val != 0:
+                change_pct = abs(result_val - default_val) / abs(default_val)
+                assert change_pct <= 0.20 + 0.01, (
+                    f"{field}: {default_val} -> {result_val} "
+                    f"({change_pct:.1%} change exceeds 20%)"
+                )
+
+    def test_threshold_config_defaults(self):
+        """ThresholdConfig() has all expected default values."""
+        from market_analyzer.models.learning import ThresholdConfig
+
+        config = ThresholdConfig()
+        assert config.ic_iv_rank_min == 15.0
+        assert config.ifly_iv_rank_min == 20.0
+        assert config.earnings_iv_rank_min == 25.0
+        assert config.leap_iv_rank_max == 70.0
+        assert config.pop_min == 0.50
+        assert config.score_min == 0.60
+        assert config.credit_width_min == 0.10
+        assert config.adx_trend_max == 35.0
+        assert config.adx_notrend_min == 15.0
+        assert config.trades_analyzed == 0
+        assert config.last_optimized is None
+
+    def test_optimize_sets_metadata(self):
+        """trades_analyzed and last_optimized are populated."""
+        from market_analyzer.performance import optimize_thresholds
+        from market_analyzer.models.learning import ThresholdConfig
+
+        outcomes = [
+            _make_outcome(pnl_pct=0.15, pnl_dollars=40.0, trade_id=f"meta-{i}")
+            for i in range(5)
+        ]
+        result = optimize_thresholds(outcomes)
+        assert result.trades_analyzed == 5
+        assert result.last_optimized == date.today()

@@ -342,6 +342,11 @@ class LevelsSettings(BaseModel):
         "vwma_20": 0.5,
         "ema_9": 0.4,
         "orb_level": 0.6,
+        "pivot_pp": 0.8,
+        "pivot_r1": 0.7,
+        "pivot_s1": 0.7,
+        "pivot_r2": 0.5,
+        "pivot_s2": 0.5,
     })
 
 

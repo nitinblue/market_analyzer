@@ -343,6 +343,33 @@ def _check_hard_stops(
             description="Lower lows with declining volume — exhaustion divergence.",
         ))
 
+    # Deep Fibonacci retracement
+    if technicals.fibonacci is not None:
+        fib = technicals.fibonacci
+        if is_bullish and fib.direction == "up":
+            too_deep = fib.current_price_level in ("between_618_786", "below_786")
+            if too_deep:
+                stops.append(HardStop(
+                    name="deep_retracement",
+                    description=f"Price at {fib.current_price_level} — retracement too deep for momentum continuation",
+                ))
+        elif not is_bullish and fib.direction == "down":
+            too_deep = fib.current_price_level in ("between_618_786", "above_786")
+            if too_deep:
+                stops.append(HardStop(
+                    name="deep_retracement",
+                    description=f"Price at {fib.current_price_level} — retracement too deep for momentum continuation",
+                ))
+
+    # No trend (ADX too low)
+    if technicals.adx is not None:
+        adx = technicals.adx
+        if adx.is_ranging and adx.adx < 15:
+            stops.append(HardStop(
+                name="no_trend",
+                description=f"ADX {adx.adx:.0f} — no trend detected, momentum setup invalid",
+            ))
+
     return stops
 
 
@@ -513,6 +540,49 @@ def _score_signals(
             else f"ATR {atr:.2f}% — too low for momentum"
         ),
     ))
+
+    # 11. Fibonacci pullback quality (0.12)
+    if technicals.fibonacci is not None:
+        fib = technicals.fibonacci
+        direction = "bullish" if is_bullish else "bearish"
+        if is_bullish and fib.direction == "up":
+            healthy_pullback = fib.current_price_level in ("between_382_500", "between_500_618")
+            too_deep = fib.current_price_level in ("between_618_786", "below_786")
+            signals.append(OpportunitySignal(
+                name="fib_pullback",
+                favorable=healthy_pullback,
+                weight=0.12,
+                description=(
+                    f"Pullback at {fib.current_price_level} "
+                    f"({'healthy 38-62% zone' if healthy_pullback else 'too deep — possible reversal' if too_deep else 'shallow or extended'})"
+                ),
+            ))
+        elif not is_bullish and fib.direction == "down":
+            healthy_pullback = fib.current_price_level in ("between_382_500", "between_500_618")
+            too_deep = fib.current_price_level in ("between_618_786", "above_786")
+            signals.append(OpportunitySignal(
+                name="fib_pullback",
+                favorable=healthy_pullback,
+                weight=0.12,
+                description=(
+                    f"Bounce at {fib.current_price_level} "
+                    f"({'healthy 38-62% zone' if healthy_pullback else 'too high — possible reversal' if too_deep else 'shallow or extended'})"
+                ),
+            ))
+
+    # 12. ADX trend strength (0.12)
+    if technicals.adx is not None:
+        adx = technicals.adx
+        strong_trend = adx.is_trending and adx.adx > 25
+        signals.append(OpportunitySignal(
+            name="adx_trend_strength",
+            favorable=strong_trend,
+            weight=0.12,
+            description=(
+                f"ADX {adx.adx:.0f} — "
+                f"{'strong trend — momentum confirmed' if strong_trend else 'weak trend — momentum may fizzle'}"
+            ),
+        ))
 
     return signals
 

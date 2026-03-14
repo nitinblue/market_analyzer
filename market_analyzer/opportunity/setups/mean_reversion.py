@@ -171,6 +171,84 @@ def assess_mean_reversion(
         ))
         score += 0.1
 
+    # Fibonacci reversion target
+    if technicals.fibonacci is not None:
+        fib = technicals.fibonacci
+        fib_deep = (
+            fib.direction == "up"
+            and fib.current_price_level in ("between_618_786", "below_786")
+        )
+        fib_deep_bear = (
+            fib.direction == "down"
+            and fib.current_price_level in ("between_618_786", "above_786")
+        )
+        fib_favorable = fib_deep or fib_deep_bear
+        signals.append(OpportunitySignal(
+            name="fibonacci_reversion",
+            favorable=fib_favorable,
+            weight=0.15,
+            description=(
+                f"Fibonacci {fib.current_price_level} "
+                f"({'deep retracement — strong MR setup' if fib_favorable else 'shallow — weak MR'})"
+            ),
+        ))
+        if fib_favorable:
+            score += 0.15
+
+    # ADX ranging confirmation
+    if technicals.adx is not None:
+        adx_favorable = technicals.adx.is_ranging  # ADX < 20
+        signals.append(OpportunitySignal(
+            name="adx_ranging",
+            favorable=adx_favorable,
+            weight=0.12,
+            description=(
+                f"ADX {technicals.adx.adx:.0f} "
+                f"({'ranging — MR favorable' if adx_favorable else 'trending — MR risky'})"
+            ),
+        ))
+        if adx_favorable:
+            score += 0.12
+        # Hard stop: strong trend kills MR
+        if technicals.adx.adx > 35:
+            hard_stops.append(HardStop(
+                name="strong_trend",
+                description=f"ADX {technicals.adx.adx:.0f} — strong trend invalidates mean reversion",
+            ))
+
+    # VWAP reversion
+    if technicals.daily_vwap is not None:
+        vwap_dist = technicals.daily_vwap.price_vs_vwap_pct
+        vwap_extreme = abs(vwap_dist) > 2.0
+        signals.append(OpportunitySignal(
+            name="vwap_deviation",
+            favorable=vwap_extreme,
+            weight=0.10,
+            description=(
+                f"Price {vwap_dist:+.1f}% from VWAP "
+                f"({'extended — reversion expected' if vwap_extreme else 'near VWAP — no edge'})"
+            ),
+        ))
+        if vwap_extreme:
+            score += 0.10
+
+    # Divergence approximation (RSI vs MACD)
+    macd_hist = technicals.macd.histogram
+    bullish_divergence = rsi < 35 and macd_hist > 0
+    bearish_divergence = rsi > 65 and macd_hist < 0
+    divergence_present = bullish_divergence or bearish_divergence
+    signals.append(OpportunitySignal(
+        name="divergence",
+        favorable=divergence_present,
+        weight=0.15,
+        description=(
+            f"{'Bullish' if bullish_divergence else 'Bearish' if bearish_divergence else 'No'} "
+            f"divergence (RSI {rsi:.0f} vs MACD {macd_hist:+.4f})"
+        ),
+    ))
+    if divergence_present:
+        score += 0.15
+
     # Determine direction and strategy
     if rsi <= 40 or bb_pct_b <= 0.2:
         direction = "bullish"
@@ -185,7 +263,10 @@ def assess_mean_reversion(
     # Clamp score
     confidence = max(0.0, min(1.0, score))
 
-    if confidence >= 0.55:
+    if hard_stops:
+        verdict = Verdict.NO_GO
+        confidence = 0.0
+    elif confidence >= 0.55:
         verdict = Verdict.GO
     elif confidence >= 0.35:
         verdict = Verdict.CAUTION

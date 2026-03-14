@@ -51,6 +51,11 @@ _DEFAULT_WEIGHTS: dict[str, float] = {
     "vwma_20": 0.5,
     "ema_9": 0.4,
     "orb_level": 0.6,
+    "pivot_pp": 0.8,     # Pivot point — widely watched
+    "pivot_r1": 0.7,     # R1 resistance
+    "pivot_s1": 0.7,     # S1 support
+    "pivot_r2": 0.5,     # R2 — less significant
+    "pivot_s2": 0.5,     # S2 — less significant
 }
 
 
@@ -123,6 +128,15 @@ def _extract_raw_levels(
     if orb:
         for orb_level in orb.levels:
             levels.append((orb_level.price, LevelSource.ORB_LEVEL))
+
+    # Pivot points
+    if snap.pivot_points is not None:
+        pp = snap.pivot_points
+        levels.append((pp.pp, LevelSource.PIVOT_PP))
+        levels.append((pp.r1, LevelSource.PIVOT_R1))
+        levels.append((pp.s1, LevelSource.PIVOT_S1))
+        levels.append((pp.r2, LevelSource.PIVOT_R2))
+        levels.append((pp.s2, LevelSource.PIVOT_S2))
 
     return levels
 

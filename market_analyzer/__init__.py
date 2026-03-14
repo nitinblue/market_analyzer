@@ -234,11 +234,22 @@ from market_analyzer.models.feedback import (
     TradeOutcome,
     WeightAdjustment,
 )
+from market_analyzer.models.learning import (
+    DriftAlert,
+    DriftSeverity,
+    StrategyBandit,
+    ThresholdConfig,
+)
 from market_analyzer.performance import (
+    build_bandits,
     calibrate_pop_factors,
     calibrate_weights,
     compute_performance_report,
     compute_strategy_performance,
+    detect_drift,
+    optimize_thresholds,
+    select_strategies,
+    update_bandit,
 )
 
 # Features
@@ -557,4 +568,16 @@ __all__ = [
     "compute_performance_report",
     "calibrate_weights",
     "calibrate_pop_factors",
+    # Drift detection
+    "DriftAlert",
+    "DriftSeverity",
+    "detect_drift",
+    # Thompson Sampling bandits
+    "StrategyBandit",
+    "build_bandits",
+    "update_bandit",
+    "select_strategies",
+    # Threshold optimization
+    "ThresholdConfig",
+    "optimize_thresholds",
 ]

@@ -26,6 +26,11 @@ class LevelSource(StrEnum):
     FVG_HIGH = "fvg_high"
     FVG_LOW = "fvg_low"
     ORB_LEVEL = "orb_level"
+    PIVOT_PP = "pivot_pp"
+    PIVOT_R1 = "pivot_r1"
+    PIVOT_S1 = "pivot_s1"
+    PIVOT_R2 = "pivot_r2"
+    PIVOT_S2 = "pivot_s2"
 
 
 class LevelRole(StrEnum):

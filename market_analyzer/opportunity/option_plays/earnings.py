@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import date, time
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -176,13 +177,46 @@ def assess_earnings_play(
             ))
             score += 0.1
 
+    # --- Implied move from vol surface ---
+    if vol_surface is not None and vol_surface.front_iv > 0:
+        # Implied 1-day move = front-month ATM IV * sqrt(1/365)
+        atm_iv = vol_surface.front_iv
+        implied_move_pct = atm_iv * math.sqrt(1 / 365) * 100  # 1-day implied move %
+
+        # Compare to historical ATR-based move
+        historical_move_pct = technicals.atr_pct
+        if historical_move_pct > 0:
+            iv_vs_realized = implied_move_pct / historical_move_pct
+            sell_premium = iv_vs_realized > 1.3
+            signals.append(OpportunitySignal(
+                name="implied_vs_realized",
+                favorable=sell_premium,
+                weight=0.20,
+                description=(
+                    f"Implied move {implied_move_pct:.1f}% vs historical {historical_move_pct:.1f}% "
+                    f"(ratio {iv_vs_realized:.1f}x — "
+                    f"{'rich premium, sell' if sell_premium else 'fair or cheap, skip'})"
+                ),
+            ))
+            if sell_premium:
+                score += 0.1
+            if iv_vs_realized < 0.7:
+                hard_stops.append(HardStop(
+                    name="underpriced_iv",
+                    description=f"Implied/realized ratio {iv_vs_realized:.1f}x — market underpricing the event",
+                ))
+
     # Direction
     direction = "neutral"  # Most earnings plays are non-directional
 
     # Clamp
     confidence = max(0.0, min(1.0, score))
 
-    if confidence >= 0.55:
+    # Late hard stops force NO_GO
+    if hard_stops:
+        verdict = Verdict.NO_GO
+        confidence = 0.0
+    elif confidence >= 0.55:
         verdict = Verdict.GO
     elif confidence >= 0.35:
         verdict = Verdict.CAUTION
@@ -209,6 +243,8 @@ def assess_earnings_play(
         gaps.append(DataGap(field="max_entry_price", reason="broker not connected", impact="high", affects="entry pricing and POP"))
     if iv_rank is None:
         gaps.append(DataGap(field="iv_rank", reason="market metrics unavailable", impact="medium", affects="premium assessment"))
+    if vol_surface is None:
+        gaps.append(DataGap(field="implied_move", reason="vol surface unavailable — cannot compute implied vs realized move", impact="high", affects="earnings play edge assessment"))
 
     return EarningsOpportunity(
         ticker=ticker,
