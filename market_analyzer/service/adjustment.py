@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from market_analyzer.models.adjustment import (
     AdjustmentAnalysis,
+    AdjustmentDecision,
     AdjustmentOption,
     AdjustmentType,
     PositionStatus,
@@ -127,6 +128,141 @@ class AdjustmentService:
             recommendation=recommendation,
             summary=summary,
         )
+
+    def recommend_action(
+        self,
+        trade_spec: TradeSpec,
+        regime: RegimeResult,
+        technicals: TechnicalSnapshot,
+        vol_surface: VolatilitySurface | None = None,
+    ) -> AdjustmentDecision:
+        """Return a single deterministic adjustment action for systematic trading.
+
+        Unlike analyze() which returns a ranked menu of options for human review,
+        this method applies a fixed decision tree based on position status and
+        regime to select exactly ONE action. Designed for automated/systematic
+        trading where a human is not picking from a list.
+
+        Decision tree:
+            MAX_LOSS → CLOSE_FULL (always)
+            BREACHED + R4/R3 → CLOSE_FULL
+            BREACHED + R2/R1 → ROLL_AWAY
+            TESTED + R4 → CLOSE_FULL
+            TESTED + R3 → ROLL_AWAY
+            TESTED + R2/R1 → DO_NOTHING
+            SAFE → DO_NOTHING (always)
+
+        Args:
+            trade_spec: The original trade as entered.
+            regime: Current regime detection result.
+            technicals: Current technical snapshot (provides price, ATR).
+            vol_surface: Optional vol surface for roll pricing.
+
+        Returns:
+            AdjustmentDecision with exactly one action and its rationale.
+        """
+        # Run full analysis to get status assessment and generated adjustments
+        analysis = self.analyze(trade_spec, regime, technicals, vol_surface)
+
+        status = analysis.position_status
+        regime_id = regime.regime
+        urgency = _REGIME_URGENCY.get(regime_id, "monitor")
+
+        # --- Decision tree ---
+        if status == PositionStatus.MAX_LOSS:
+            return AdjustmentDecision(
+                action=AdjustmentType.CLOSE_FULL,
+                urgency="immediate",
+                rationale="Position at max loss — close immediately, no exceptions",
+                detail=self._find_adjustment(analysis.adjustments, AdjustmentType.CLOSE_FULL),
+                position_status=status,
+                regime_id=regime_id,
+            )
+
+        if status == PositionStatus.BREACHED:
+            if regime_id >= 3:  # R3 trending or R4 explosive
+                reason = (
+                    "Breached in R4 explosive regime — don't adjust in a crash"
+                    if regime_id == 4
+                    else "Breached in R3 trending regime — trend will continue past strike"
+                )
+                return AdjustmentDecision(
+                    action=AdjustmentType.CLOSE_FULL,
+                    urgency="immediate",
+                    rationale=reason,
+                    detail=self._find_adjustment(analysis.adjustments, AdjustmentType.CLOSE_FULL),
+                    position_status=status,
+                    regime_id=regime_id,
+                )
+            # R1 or R2: mean-reverting — breach likely temporary, roll away
+            reason = (
+                "Breached in R2 high-vol mean-reverting — likely to revert, give it room"
+                if regime_id == 2
+                else "Breached in R1 low-vol mean-reverting — breach likely temporary"
+            )
+            return AdjustmentDecision(
+                action=AdjustmentType.ROLL_AWAY,
+                urgency="soon",
+                rationale=reason,
+                detail=self._find_adjustment(analysis.adjustments, AdjustmentType.ROLL_AWAY),
+                position_status=status,
+                regime_id=regime_id,
+            )
+
+        if status == PositionStatus.TESTED:
+            if regime_id == 4:
+                return AdjustmentDecision(
+                    action=AdjustmentType.CLOSE_FULL,
+                    urgency="immediate",
+                    rationale="Tested in R4 explosive regime — don't wait for breach",
+                    detail=self._find_adjustment(analysis.adjustments, AdjustmentType.CLOSE_FULL),
+                    position_status=status,
+                    regime_id=regime_id,
+                )
+            if regime_id == 3:
+                return AdjustmentDecision(
+                    action=AdjustmentType.ROLL_AWAY,
+                    urgency="soon",
+                    rationale="Tested in R3 trending regime — trending toward strike, roll away",
+                    detail=self._find_adjustment(analysis.adjustments, AdjustmentType.ROLL_AWAY),
+                    position_status=status,
+                    regime_id=regime_id,
+                )
+            # R1 or R2: mean-reverting — hold
+            reason = (
+                "Tested in R2 high-vol mean-reverting — swings test but revert"
+                if regime_id == 2
+                else "Tested in R1 low-vol mean-reverting — probably safe"
+            )
+            return AdjustmentDecision(
+                action=AdjustmentType.DO_NOTHING,
+                urgency=urgency,
+                rationale=reason,
+                detail=None,
+                position_status=status,
+                regime_id=regime_id,
+            )
+
+        # SAFE — always do nothing
+        return AdjustmentDecision(
+            action=AdjustmentType.DO_NOTHING,
+            urgency="none",
+            rationale="Position safe — no adjustment needed",
+            detail=None,
+            position_status=status,
+            regime_id=regime_id,
+        )
+
+    @staticmethod
+    def _find_adjustment(
+        adjustments: list[AdjustmentOption],
+        action_type: AdjustmentType,
+    ) -> AdjustmentOption | None:
+        """Find the first adjustment matching the given type from the analysis."""
+        for adj in adjustments:
+            if adj.adjustment_type == action_type:
+                return adj
+        return None
 
     # ------------------------------------------------------------------
     # Status assessment

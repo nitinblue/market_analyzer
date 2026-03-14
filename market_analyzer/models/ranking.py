@@ -8,6 +8,7 @@ from enum import StrEnum
 from pydantic import BaseModel
 
 from market_analyzer.models.opportunity import TradeSpec, Verdict
+from market_analyzer.models.transparency import DataGap
 
 
 class StrategyType(StrEnum):
@@ -55,6 +56,8 @@ class RankedEntry(BaseModel):
     rationale: str                 # from StrategyRecommendation
     risk_notes: list[str]
     trade_spec: TradeSpec | None = None
+    commentary: list[str] = []      # Step-by-step calculation trace (populated when debug=True)
+    data_gaps: list[DataGap] = []   # Known gaps in this analysis
 
 
 class TradeRankingResult(BaseModel):
@@ -70,6 +73,8 @@ class TradeRankingResult(BaseModel):
     total_assessed: int
     total_actionable: int                                 # verdict != NO_GO
     summary: str
+    commentary: list[str] = []      # Step-by-step calculation trace (populated when debug=True)
+    data_gaps: list[DataGap] = []   # Known gaps in this analysis
 
 
 class RankingFeedback(BaseModel):

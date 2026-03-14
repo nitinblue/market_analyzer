@@ -42,7 +42,7 @@ class MarketContextService:
         self.black_swan_service = black_swan_service
         self._market = market or get_settings().markets.default_market
 
-    def assess(self, as_of: date | None = None) -> MarketContext:
+    def assess(self, as_of: date | None = None, debug: bool = False) -> MarketContext:
         """Produce a complete market environment assessment.
 
         Raises ValueError if required services are not configured.
@@ -89,7 +89,7 @@ class MarketContextService:
         if intermarket.divergence:
             summary_parts.append("Intermarket divergence detected")
 
-        return MarketContext(
+        result = MarketContext(
             as_of_date=today,
             market=self._market,
             macro=macro,
@@ -100,6 +100,17 @@ class MarketContextService:
             position_size_factor=size_factor,
             summary=" | ".join(summary_parts),
         )
+
+        if debug:
+            result.commentary.extend([
+                f"Market context assessment as of {result.as_of_date}",
+                f"Environment: {result.environment_label}",
+                f"Black swan: {result.black_swan.alert_level} (score {result.black_swan.composite_score:.2f})",
+                f"Trading allowed: {result.trading_allowed}",
+                f"Position size factor: {result.position_size_factor}",
+            ])
+
+        return result
 
     def intermarket(self) -> IntermarketDashboard:
         """Read regimes of market reference tickers.

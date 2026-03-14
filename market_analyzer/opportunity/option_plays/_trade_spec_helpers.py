@@ -5,7 +5,7 @@ Pure functions — no data fetching, no side effects.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, time
 
 from market_analyzer.models.opportunity import LegAction, LegSpec, OrderSide, StructureType, TradeSpec
 from market_analyzer.models.vol_surface import TermStructurePoint, VolatilitySurface
@@ -471,6 +471,8 @@ def build_single_expiry_trade_spec(
             exit_notes=["Close at 50% of credit received",
                         "Close if short strike tested on either side",
                         "Close at 21 DTE to avoid gamma risk"],
+            entry_window_start=time(10, 0),
+            entry_window_end=time(15, 0),
         )
 
     if structure_type == "iron_butterfly":
@@ -495,6 +497,8 @@ def build_single_expiry_trade_spec(
             exit_notes=["Close at 25% of credit received",
                         "Close if underlying moves beyond ATM strike significantly",
                         "Close at 14 DTE to avoid pin risk"],
+            entry_window_start=time(10, 0),
+            entry_window_end=time(15, 0),
         )
 
     if structure_type == "ratio_spread":
@@ -518,6 +522,8 @@ def build_single_expiry_trade_spec(
             exit_notes=["NAKED LEG RISK: unlimited loss beyond short strikes",
                         "Close at 50% of credit or if short strike tested",
                         "Close at 21 DTE — gamma risk on naked leg"],
+            entry_window_start=time(10, 0),
+            entry_window_end=time(15, 0),
         )
 
     return None
@@ -620,6 +626,8 @@ def build_dual_expiry_trade_spec(
         max_profit_desc="Front leg decay minus back leg decay",
         max_loss_desc="Net debit paid",
         exit_notes=exit_notes,
+        entry_window_start=time(10, 0),
+        entry_window_end=time(15, 0),
     )
 
 

@@ -183,6 +183,7 @@ class TradeRankingService:
         strategies: list[StrategyType] | None = None,
         as_of: date | None = None,
         skip_intraday: bool = False,
+        debug: bool = False,
     ) -> TradeRankingResult:
         """Run all assessments, score, and rank.
 
@@ -230,6 +231,7 @@ class TradeRankingService:
 
         # 2. For each ticker x strategy, run assessment
         entries: list[RankedEntry] = []
+        opp_results: dict[int, OpportunityResult] = {}  # keyed by id(entry) for debug
         total_assessed = 0
 
         for ticker in tickers:
@@ -295,21 +297,26 @@ class TradeRankingService:
                     )
                     composite = composite_from_breakdown(breakdown, weights)
 
-                    entries.append(
-                        RankedEntry(
-                            rank=0,  # assigned after sorting
-                            ticker=ticker,
-                            strategy_type=strategy,
-                            verdict=result.verdict,
-                            composite_score=round(composite, 4),
-                            breakdown=breakdown,
-                            strategy_name=_extract_strategy_name(result),
-                            direction=_extract_direction(result),
-                            rationale=_extract_rationale(result),
-                            risk_notes=_extract_risk_notes(result),
-                            trade_spec=_extract_trade_spec(result),
-                        )
+                    entry = RankedEntry(
+                        rank=0,  # assigned after sorting
+                        ticker=ticker,
+                        strategy_type=strategy,
+                        verdict=result.verdict,
+                        composite_score=round(composite, 4),
+                        breakdown=breakdown,
+                        strategy_name=_extract_strategy_name(result),
+                        direction=_extract_direction(result),
+                        rationale=_extract_rationale(result),
+                        risk_notes=_extract_risk_notes(result),
+                        trade_spec=_extract_trade_spec(result),
                     )
+
+                    # Propagate data_gaps from assessor result
+                    if hasattr(result, "data_gaps") and result.data_gaps:
+                        entry.data_gaps.extend(result.data_gaps)
+
+                    entries.append(entry)
+                    opp_results[id(entry)] = result
                 except Exception:
                     logger.warning(
                         "Assessment failed for %s/%s", ticker, strategy, exc_info=True
@@ -320,6 +327,31 @@ class TradeRankingService:
         entries.sort(key=lambda e: e.composite_score, reverse=True)
         for i, entry in enumerate(entries):
             entry.rank = i + 1
+
+        # Populate debug commentary after scoring
+        if debug:
+            for entry in entries:
+                opp_result = opp_results.get(id(entry))
+                if opp_result is None:
+                    continue
+                regime_id = _extract_regime_id(opp_result)
+                entry.commentary.extend([
+                    f"{entry.ticker} {entry.strategy_type}: verdict={opp_result.verdict} confidence={opp_result.confidence:.0%}",
+                    f"  Regime R{regime_id} alignment={entry.breakdown.regime_alignment:.2f}",
+                    f"Score {entry.composite_score:.2f} = verdict({entry.breakdown.verdict_score:.2f}) x confidence({entry.breakdown.confidence_score:.2f})",
+                    f"  + regime_align({entry.breakdown.regime_alignment:.2f}) + phase_align({entry.breakdown.phase_alignment:.2f})",
+                    f"  + income_boost({entry.breakdown.income_bias_boost:.2f}) - BS_penalty({entry.breakdown.black_swan_penalty:.2f})",
+                    f"  - macro({entry.breakdown.macro_penalty:.2f}) - earnings({entry.breakdown.earnings_penalty:.2f})",
+                ])
+                # Add hard_stops if present
+                if hasattr(opp_result, "hard_stops") and opp_result.hard_stops:
+                    entry.commentary.append(
+                        f"  Hard stops: {', '.join(h.name for h in opp_result.hard_stops)}"
+                    )
+                # Note data_gaps in commentary
+                if entry.data_gaps:
+                    gap_names = ", ".join(g.field for g in entry.data_gaps)
+                    entry.commentary.append(f"  Data gaps: {gap_names}")
 
         # 4. Group by ticker and by strategy
         by_ticker: dict[str, list[RankedEntry]] = defaultdict(list)

@@ -111,6 +111,7 @@ class OpportunityService:
         ticker: str,
         ohlcv: pd.DataFrame | None = None,
         as_of: date | None = None,
+        iv_rank: float | None = None,
     ) -> LEAPOpportunity:
         """Assess LEAP opportunity for a single instrument."""
         from market_analyzer.opportunity.option_plays.leap import assess_leap as _assess
@@ -137,6 +138,7 @@ class OpportunityService:
             fundamentals=fundamentals,
             vol_surface=vol_surface,
             as_of=as_of,
+            iv_rank=iv_rank,
         )
 
     def assess_breakout(
@@ -254,6 +256,7 @@ class OpportunityService:
         ticker: str,
         ohlcv: pd.DataFrame | None = None,
         as_of: date | None = None,
+        iv_rank: float | None = None,
     ):
         """Assess earnings play opportunity."""
         from market_analyzer.opportunity.option_plays.earnings import assess_earnings_play as _assess
@@ -270,6 +273,7 @@ class OpportunityService:
         return _assess(
             ticker=ticker, regime=regime, technicals=technicals,
             fundamentals=fundamentals, vol_surface=vol_surface, as_of=as_of,
+            iv_rank=iv_rank,
         )
 
     def assess_mean_reversion(
@@ -314,6 +318,7 @@ class OpportunityService:
         ticker: str,
         ohlcv: pd.DataFrame | None = None,
         as_of: date | None = None,
+        iv_rank: float | None = None,
     ):
         """Assess calendar spread opportunity."""
         from market_analyzer.opportunity.option_plays.calendar import assess_calendar as _assess
@@ -330,6 +335,7 @@ class OpportunityService:
         return _assess(
             ticker=ticker, regime=regime, technicals=technicals,
             vol_surface=vol_surface, fundamentals=fundamentals, as_of=as_of,
+            iv_rank=iv_rank,
         )
 
     def assess_diagonal(
@@ -361,6 +367,7 @@ class OpportunityService:
         ticker: str,
         ohlcv: pd.DataFrame | None = None,
         as_of: date | None = None,
+        iv_rank: float | None = None,
     ):
         """Assess iron condor opportunity — the #1 income strategy."""
         from market_analyzer.opportunity.option_plays.iron_condor import assess_iron_condor as _assess
@@ -377,6 +384,7 @@ class OpportunityService:
         return _assess(
             ticker=ticker, regime=regime, technicals=technicals,
             vol_surface=vol_surface, fundamentals=fundamentals, as_of=as_of,
+            iv_rank=iv_rank,
         )
 
     def assess_iron_butterfly(
@@ -384,6 +392,7 @@ class OpportunityService:
         ticker: str,
         ohlcv: pd.DataFrame | None = None,
         as_of: date | None = None,
+        iv_rank: float | None = None,
     ):
         """Assess iron butterfly opportunity."""
         from market_analyzer.opportunity.option_plays.iron_butterfly import assess_iron_butterfly as _assess
@@ -400,6 +409,7 @@ class OpportunityService:
         return _assess(
             ticker=ticker, regime=regime, technicals=technicals,
             vol_surface=vol_surface, fundamentals=fundamentals, as_of=as_of,
+            iv_rank=iv_rank,
         )
 
     def assess_ratio_spread(

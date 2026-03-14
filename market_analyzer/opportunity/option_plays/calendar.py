@@ -21,6 +21,7 @@ from market_analyzer.models.opportunity import (
     Verdict,
 )
 from market_analyzer.models.regime import RegimeID
+from market_analyzer.models.transparency import DataGap
 
 if TYPE_CHECKING:
     from market_analyzer.models.fundamentals import FundamentalsSnapshot
@@ -64,6 +65,7 @@ class CalendarOpportunity(BaseModel):
     days_to_earnings: int | None
     trade_spec: TradeSpec | None = None
     summary: str
+    data_gaps: list[DataGap] = []
 
 
 # --- Public API ---
@@ -76,6 +78,7 @@ def assess_calendar(
     vol_surface: VolatilitySurface | None = None,
     fundamentals: FundamentalsSnapshot | None = None,
     as_of: date | None = None,
+    iv_rank: float | None = None,
 ) -> CalendarOpportunity:
     """Assess calendar spread opportunity for a single instrument.
 
@@ -122,6 +125,16 @@ def assess_calendar(
     # --- Signals ---
     signals = _score_signals(regime, technicals, vol_surface, days_to_earnings, cfg)
 
+    # IV rank signal
+    if iv_rank is not None:
+        iv_favorable = iv_rank > 30
+        signals.append(OpportunitySignal(
+            name="IV rank",
+            favorable=iv_favorable,
+            weight=0.10,
+            description=f"IV rank {iv_rank:.0f}% — {'elevated IV supports calendar' if iv_favorable else 'low IV reduces calendar edge'}",
+        ))
+
     # --- Confidence ---
     raw = sum(s.weight for s in signals if s.favorable)
     regime_mult = cfg.regime_multipliers.get(int(regime.regime), 0.5)
@@ -143,6 +156,15 @@ def assess_calendar(
 
     summary = _build_summary(ticker, verdict, confidence, cal_strat, front_iv, back_iv, term_slope)
 
+    # --- Data gaps ---
+    gaps: list[DataGap] = []
+    if vol_surface is None:
+        gaps.append(DataGap(field="term_structure", reason="vol surface not computed", impact="high", affects="IV differential and calendar edge scoring"))
+    if trade_spec is not None and trade_spec.max_entry_price is None:
+        gaps.append(DataGap(field="max_entry_price", reason="broker not connected", impact="high", affects="entry pricing and POP"))
+    if iv_rank is None:
+        gaps.append(DataGap(field="iv_rank", reason="market metrics unavailable", impact="medium", affects="premium assessment"))
+
     return CalendarOpportunity(
         ticker=ticker,
         as_of_date=today,
@@ -161,6 +183,7 @@ def assess_calendar(
         days_to_earnings=days_to_earnings,
         trade_spec=trade_spec,
         summary=summary,
+        data_gaps=gaps,
     )
 
 

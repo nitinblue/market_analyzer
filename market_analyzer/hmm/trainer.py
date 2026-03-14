@@ -35,6 +35,12 @@ class HMMTrainer:
         return self._model is not None and self._label_map is not None
 
     @property
+    def training_end_date(self) -> date | None:
+        if self._training_date_range is not None:
+            return self._training_date_range[1]
+        return None
+
+    @property
     def model(self) -> GaussianHMM:
         if self._model is None:
             raise RuntimeError("HMMTrainer has not been fitted yet")

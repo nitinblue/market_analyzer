@@ -53,6 +53,7 @@ from market_analyzer.models.strategy import (
 )
 from market_analyzer.models.adjustment import (
     AdjustmentAnalysis,
+    AdjustmentDecision,
     AdjustmentOption,
     AdjustmentType,
     PositionStatus,
@@ -162,6 +163,7 @@ from market_analyzer.models.intraday import (
     IntradaySnapshot,
     IntradayUrgency,
 )
+from market_analyzer.models.transparency import DataGap
 from market_analyzer.models.opportunity import (
     BreakoutOpportunity,
     LEAPOpportunity,
@@ -223,9 +225,33 @@ from market_analyzer.models.ranking import (
 )
 from market_analyzer.features.black_swan import compute_black_swan_alert
 
+# Performance feedback
+from market_analyzer.models.feedback import (
+    CalibrationResult,
+    PerformanceReport,
+    StrategyPerformance,
+    TradeExitReason,
+    TradeOutcome,
+    WeightAdjustment,
+)
+from market_analyzer.performance import (
+    calibrate_pop_factors,
+    calibrate_weights,
+    compute_performance_report,
+    compute_strategy_performance,
+)
+
 # Features
 from market_analyzer.features.pipeline import compute_features
 from market_analyzer.features.technicals import compute_technicals
+
+# Execution quality validation
+from market_analyzer.execution_quality import (
+    ExecutionQuality,
+    ExecutionVerdict,
+    LegQuality,
+    validate_execution_quality,
+)
 
 # TradeSpec factory (public API for eTrading)
 from market_analyzer.trade_spec_factory import (
@@ -261,6 +287,9 @@ from market_analyzer.trade_lifecycle import (
     filter_trades_by_account,
     get_adjustment_recommendation,
     monitor_exit_conditions,
+    OvernightRisk,
+    OvernightRiskLevel,
+    assess_overnight_risk,
 )
 
 __all__ = [
@@ -344,6 +373,7 @@ __all__ = [
     "PositionSize",
     # Adjustment models (new)
     "AdjustmentAnalysis",
+    "AdjustmentDecision",
     "AdjustmentOption",
     "AdjustmentType",
     "PositionStatus",
@@ -506,4 +536,25 @@ __all__ = [
     "TradeHealthCheck",
     "check_trade_health",
     "get_adjustment_recommendation",
+    "OvernightRisk",
+    "OvernightRiskLevel",
+    "assess_overnight_risk",
+    # Execution quality validation
+    "ExecutionQuality",
+    "ExecutionVerdict",
+    "LegQuality",
+    "validate_execution_quality",
+    # Transparency
+    "DataGap",
+    # Performance feedback
+    "TradeOutcome",
+    "TradeExitReason",
+    "StrategyPerformance",
+    "PerformanceReport",
+    "WeightAdjustment",
+    "CalibrationResult",
+    "compute_strategy_performance",
+    "compute_performance_report",
+    "calibrate_weights",
+    "calibrate_pop_factors",
 ]

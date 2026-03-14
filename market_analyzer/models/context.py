@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from market_analyzer.models.black_swan import AlertLevel, BlackSwanAlert
 from market_analyzer.models.macro import MacroCalendar
 from market_analyzer.models.regime import RegimeID, TrendDirection
+from market_analyzer.models.transparency import DataGap
 
 
 class IntermarketEntry(BaseModel):
@@ -43,3 +44,5 @@ class MarketContext(BaseModel):
     trading_allowed: bool
     position_size_factor: float = 1.0       # 0.0–1.0 scale-down in stressed environments
     summary: str = ""
+    commentary: list[str] = []      # Step-by-step calculation trace (populated when debug=True)
+    data_gaps: list[DataGap] = []   # Known gaps in this analysis

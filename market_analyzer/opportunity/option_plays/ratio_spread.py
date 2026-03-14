@@ -23,6 +23,7 @@ from market_analyzer.models.opportunity import (
     Verdict,
 )
 from market_analyzer.models.regime import RegimeID
+from market_analyzer.models.transparency import DataGap
 
 if TYPE_CHECKING:
     from market_analyzer.models.fundamentals import FundamentalsSnapshot
@@ -66,6 +67,7 @@ class RatioSpreadOpportunity(BaseModel):
     days_to_earnings: int | None
     trade_spec: TradeSpec | None = None
     summary: str
+    data_gaps: list[DataGap] = []
 
 
 # --- Public API ---
@@ -153,6 +155,15 @@ def assess_ratio_spread(
 
     summary = _build_summary(ticker, verdict, confidence, ratio_strat, direction, has_naked)
 
+    # --- Data gaps ---
+    gaps: list[DataGap] = []
+    if vol_surface is None:
+        gaps.append(DataGap(field="skew", reason="vol surface not computed", impact="high", affects="skew assessment and strike selection"))
+    if trade_spec is not None and trade_spec.max_entry_price is None:
+        gaps.append(DataGap(field="max_entry_price", reason="broker not connected", impact="high", affects="entry pricing and POP"))
+    if has_naked:
+        gaps.append(DataGap(field="margin", reason="undefined risk on naked leg", impact="high", affects="margin requirement and max loss"))
+
     return RatioSpreadOpportunity(
         ticker=ticker,
         as_of_date=today,
@@ -173,6 +184,7 @@ def assess_ratio_spread(
         days_to_earnings=days_to_earnings,
         trade_spec=trade_spec,
         summary=summary,
+        data_gaps=gaps,
     )
 
 

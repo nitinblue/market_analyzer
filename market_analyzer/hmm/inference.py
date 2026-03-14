@@ -80,6 +80,17 @@ class RegimeInference:
         if "trend_strength" in feature_matrix.columns:
             trend_val = float(feature_matrix["trend_strength"].iloc[-1])
 
+        # Count regime flips in last 20 observations for stability metric
+        mapped_states = [lmap[s] for s in raw_states]
+        recent_states = mapped_states[-20:] if len(mapped_states) >= 20 else mapped_states
+        flips = sum(1 for i in range(1, len(recent_states)) if recent_states[i] != recent_states[i - 1])
+
+        # Model staleness tracking
+        model_fit_date = self._trainer.training_end_date
+        model_age_days: int | None = None
+        if model_fit_date is not None:
+            model_age_days = (date.today() - model_fit_date).days
+
         return RegimeResult(
             ticker=ticker,
             regime=regime_id,
@@ -88,6 +99,9 @@ class RegimeInference:
             trend_direction=self._trend_direction(regime_id, trend_val),
             as_of_date=as_of,
             model_version=MODEL_VERSION,
+            model_fit_date=model_fit_date,
+            model_age_days=model_age_days,
+            regime_stability=flips,
         )
 
     def predict_series(

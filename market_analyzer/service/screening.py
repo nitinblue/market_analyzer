@@ -44,6 +44,8 @@ class ScreeningResult(BaseModel):
     candidates: list[ScreenCandidate]
     by_screen: dict[str, list[ScreenCandidate]]
     summary: str
+    min_score_applied: float = 0.0
+    filtered_count: int = 0
 
 
 # Available screens
@@ -73,12 +75,17 @@ class ScreeningService:
         self,
         tickers: list[str],
         screens: list[str] | None = None,
+        min_score: float = 0.6,
+        top_n: int | None = None,
     ) -> ScreeningResult:
         """Run screens across tickers, return candidates.
 
         Args:
             tickers: Universe to scan.
             screens: Which screens to run. None = all.
+            min_score: Minimum score threshold. Candidates below this are
+                excluded. Set to 0 to include all passing candidates.
+            top_n: Limit to top N candidates by score. None = all passing.
         """
         if self.regime_service is None or self.technical_service is None:
             raise ValueError("ScreeningService requires regime and technical services")
@@ -125,6 +132,16 @@ class ScreeningService:
         # Sort by score descending
         candidates.sort(key=lambda c: c.score, reverse=True)
 
+        # Filter by minimum score
+        unfiltered_count = len(candidates)
+        if min_score > 0:
+            candidates = [c for c in candidates if c.score >= min_score]
+        filtered_count = unfiltered_count - len(candidates)
+
+        # Limit to top N
+        if top_n is not None:
+            candidates = candidates[:top_n]
+
         # Group by screen
         by_screen: dict[str, list[ScreenCandidate]] = {}
         for c in candidates:
@@ -132,6 +149,8 @@ class ScreeningService:
 
         total = len(candidates)
         summary_parts = [f"Scanned {len(tickers)} tickers", f"{total} candidates found"]
+        if filtered_count > 0:
+            summary_parts.append(f"{filtered_count} below min_score {min_score}")
         for s in active_screens:
             count = len(by_screen.get(s, []))
             if count:
@@ -143,4 +162,6 @@ class ScreeningService:
             candidates=candidates,
             by_screen=by_screen,
             summary=" | ".join(summary_parts),
+            min_score_applied=min_score,
+            filtered_count=filtered_count,
         )

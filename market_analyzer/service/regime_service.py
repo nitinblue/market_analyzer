@@ -34,6 +34,7 @@ from market_analyzer.models.regime import (
     TickerResearch,
     TransitionRow,
 )
+from market_analyzer.models.transparency import DataGap
 from market_analyzer.phases.detector import PhaseDetector
 
 from market_analyzer.models.opportunity import (
@@ -134,7 +135,7 @@ class RegimeService:
         self._trainers[ticker] = trainer
 
     def detect(
-        self, ticker: str, ohlcv: pd.DataFrame | None = None
+        self, ticker: str, ohlcv: pd.DataFrame | None = None, debug: bool = False
     ) -> RegimeResult:
         """Detect current regime for a single instrument.
 
@@ -151,7 +152,49 @@ class RegimeService:
 
         features = compute_features(df, self.feature_config)
         inference = RegimeInference(trainer)
-        return inference.predict(features, ticker)
+        result = inference.predict(features, ticker)
+
+        # Model staleness warning
+        if result.model_age_days is not None and result.model_age_days > self.config.refit_frequency_days:
+            result.data_gaps.append(DataGap(
+                field="regime",
+                reason=f"HMM model is {result.model_age_days} days old (refit threshold: {self.config.refit_frequency_days})",
+                impact="high",
+                affects="regime classification may not reflect current market structure",
+            ))
+
+        # Low confidence warning
+        if result.confidence < 0.30:
+            result.data_gaps.append(DataGap(
+                field="regime",
+                reason=f"Low confidence ({result.confidence:.0%}) — model uncertain between states",
+                impact="high",
+                affects="regime-dependent strategy selection unreliable",
+            ))
+
+        # Regime churn warning
+        if result.regime_stability is not None and result.regime_stability > 4:
+            result.data_gaps.append(DataGap(
+                field="regime_stability",
+                reason=f"{result.regime_stability} regime flips in last 20 days — possible model churn",
+                impact="medium",
+                affects="regime label may be unstable — avoid regime-sensitive strategies",
+            ))
+
+        if debug:
+            result.commentary.extend([
+                f"Regime detection for {ticker} as of {result.as_of_date}",
+                f"HMM model version: {result.model_version}",
+                f"State probabilities: {', '.join(f'R{k}={v:.2f}' for k, v in sorted(result.regime_probabilities.items()))}",
+                f"Selected: R{result.regime} (confidence {result.confidence:.0%})",
+                f"Trend direction: {result.trend_direction or 'none'}",
+            ])
+            if result.model_fit_date:
+                result.commentary.append(f"Model trained on data ending {result.model_fit_date} ({result.model_age_days} days ago)")
+            if result.regime_stability is not None:
+                result.commentary.append(f"Regime stability: {result.regime_stability} flips in last 20 days")
+
+        return result
 
     def detect_batch(
         self,

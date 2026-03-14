@@ -15,6 +15,7 @@ from market_analyzer.models.opportunity import (
     StrategyRecommendation,
     Verdict,
 )
+from market_analyzer.models.transparency import DataGap
 
 if TYPE_CHECKING:
     from market_analyzer.models.fundamentals import FundamentalsSnapshot
@@ -34,6 +35,7 @@ def assess_leap(
     fundamentals: FundamentalsSnapshot | None = None,
     vol_surface: VolatilitySurface | None = None,
     as_of: date | None = None,
+    iv_rank: float | None = None,
 ) -> LEAPOpportunity:
     """Assess LEAP opportunity for a single instrument.
 
@@ -59,10 +61,27 @@ def assess_leap(
         regime, phase, days_to_earnings, fund_score, cfg,
     )
 
+    # IV rank hard stop — LEAPs are long options, overpaying for IV is costly
+    if iv_rank is not None and iv_rank > 70:
+        hard_stops.append(HardStop(
+            name="iv_rank_too_high",
+            description=f"IV rank {iv_rank:.0f}% — LEAPs overpriced, wait for IV compression",
+        ))
+
     # --- Scoring signals ---
     signals = _score_signals(
         regime, technicals, phase, macro, fundamentals, fund_score, cfg,
     )
+
+    # IV rank signal — low IV rank is favorable for buying LEAPs
+    if iv_rank is not None:
+        iv_favorable = iv_rank < 30
+        signals.append(OpportunitySignal(
+            name="iv_rank",
+            favorable=iv_favorable,
+            weight=0.10,
+            description=f"IV rank {iv_rank:.0f}% — {'cheap entry for LEAPs' if iv_favorable else 'elevated IV increases LEAP cost'}",
+        ))
 
     # --- Confidence ---
     raw_confidence = sum(s.weight for s in signals if s.favorable)
@@ -96,6 +115,15 @@ def assess_leap(
         regime, phase, iv_env, fund_score,
     )
 
+    # --- Data gaps ---
+    gaps: list[DataGap] = []
+    if fundamentals is None:
+        gaps.append(DataGap(field="fundamentals", reason="no fundamental data available", impact="medium", affects="fundamental score and LEAP conviction"))
+    if trade_spec is not None and trade_spec.max_entry_price is None:
+        gaps.append(DataGap(field="max_entry_price", reason="broker not connected", impact="high", affects="entry pricing and POP"))
+    if iv_rank is None:
+        gaps.append(DataGap(field="iv_rank", reason="market metrics unavailable", impact="medium", affects="premium assessment"))
+
     return LEAPOpportunity(
         ticker=ticker,
         as_of_date=today,
@@ -116,6 +144,7 @@ def assess_leap(
         macro_events_next_30_days=len(macro.events_next_30_days),
         trade_spec=trade_spec,
         summary=summary,
+        data_gaps=gaps,
     )
 
 

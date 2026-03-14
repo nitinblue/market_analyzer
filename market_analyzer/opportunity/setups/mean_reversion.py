@@ -17,6 +17,7 @@ from market_analyzer.models.opportunity import (
     Verdict,
 )
 from market_analyzer.models.regime import RegimeID
+from market_analyzer.models.transparency import DataGap
 
 if TYPE_CHECKING:
     from market_analyzer.models.fundamentals import FundamentalsSnapshot
@@ -52,6 +53,7 @@ class MeanReversionOpportunity(BaseModel):
     regime_id: int
     trade_spec: TradeSpec | None = None
     summary: str
+    data_gaps: list[DataGap] = []
 
 
 def assess_mean_reversion(

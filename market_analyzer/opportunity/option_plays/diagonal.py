@@ -21,6 +21,7 @@ from market_analyzer.models.opportunity import (
     Verdict,
 )
 from market_analyzer.models.regime import RegimeID
+from market_analyzer.models.transparency import DataGap
 
 if TYPE_CHECKING:
     from market_analyzer.models.fundamentals import FundamentalsSnapshot
@@ -63,6 +64,7 @@ class DiagonalOpportunity(BaseModel):
     days_to_earnings: int | None
     trade_spec: TradeSpec | None = None
     summary: str
+    data_gaps: list[DataGap] = []
 
 
 # --- Public API ---
@@ -149,6 +151,13 @@ def assess_diagonal(
 
     summary = _build_summary(ticker, verdict, confidence, diag_strat, trend_dir, front_iv, back_iv)
 
+    # --- Data gaps ---
+    gaps: list[DataGap] = []
+    if vol_surface is None:
+        gaps.append(DataGap(field="term_structure", reason="vol surface not computed", impact="high", affects="IV differential and expiry selection"))
+    if trade_spec is not None and trade_spec.max_entry_price is None:
+        gaps.append(DataGap(field="max_entry_price", reason="broker not connected", impact="high", affects="entry pricing and POP"))
+
     return DiagonalOpportunity(
         ticker=ticker,
         as_of_date=today,
@@ -169,6 +178,7 @@ def assess_diagonal(
         days_to_earnings=days_to_earnings,
         trade_spec=trade_spec,
         summary=summary,
+        data_gaps=gaps,
     )
 
 

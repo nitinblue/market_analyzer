@@ -22,13 +22,16 @@ no data fetching. eTrading provides the data, market_analyzer computes the answe
 from __future__ import annotations
 
 import math
-from datetime import date
+from datetime import date, time as dt_time
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
+from market_analyzer.models.transparency import DataGap
+
 if TYPE_CHECKING:
-    from market_analyzer.models.adjustment import AdjustmentAnalysis
+    from market_analyzer.models.adjustment import AdjustmentAnalysis, AdjustmentDecision
     from market_analyzer.models.levels import LevelsAnalysis
     from market_analyzer.models.opportunity import TradeSpec
     from market_analyzer.models.quotes import OptionQuote
@@ -430,6 +433,7 @@ class POPEstimate(BaseModel):
     method: str  # "regime_historical" or "simple_distance"
     regime_id: int
     notes: str
+    data_gaps: list[DataGap] = []
 
 
 def estimate_pop(
@@ -439,6 +443,7 @@ def estimate_pop(
     atr_pct: float,
     current_price: float,
     contracts: int = 1,
+    iv_rank: float | None = None,
 ) -> POPEstimate | None:
     """Estimate probability of profit using regime-aware distance analysis.
 
@@ -452,6 +457,8 @@ def estimate_pop(
         atr_pct: Current ATR as % of price.
         current_price: Current underlying price.
         contracts: Number of contracts.
+        iv_rank: IV rank (0-100). When provided, adjusts expected move
+            based on IV environment. Higher IV rank widens expected moves.
 
     Returns:
         POPEstimate. None if structure not supported.
@@ -465,6 +472,11 @@ def estimate_pop(
         # Credit trade: profit if price stays between breakevens
         # ATR% is daily. Convert to 1-sigma via ATR/1.25 (ATR ≈ 1.25σ for normal dist)
         daily_sigma = (atr_pct / 100.0) / 1.25
+        # IV rank adjustment: elevated IV (rank > 50) widens expected moves,
+        # compressed IV (rank < 50) narrows them
+        if iv_rank is not None:
+            iv_factor = 0.7 + (iv_rank / 100) * 0.6  # Range: 0.7 to 1.3
+            daily_sigma = daily_sigma * iv_factor
         expected_move = daily_sigma * math.sqrt(dte) * current_price
 
         # Regime adjustments: MR regimes compress effective vol, trending expands it
@@ -506,11 +518,21 @@ def estimate_pop(
         ev = pop * max_profit - (1 - pop) * max_loss
 
         regime_names = {1: "R1 Low-Vol MR", 2: "R2 High-Vol MR", 3: "R3 Low-Vol Trend", 4: "R4 High-Vol Trend"}
+        iv_note = f", IV rank {iv_rank:.0f}" if iv_rank is not None else ""
         notes = (
             f"Regime {regime_names.get(regime_id, f'R{regime_id}')}: "
             f"expected {dte}d move ±${adjusted_move:.1f} "
-            f"(ATR {atr_pct:.1f}%, regime factor {regime_factor:.2f})"
+            f"(ATR {atr_pct:.1f}%, regime factor {regime_factor:.2f}{iv_note})"
         )
+
+        gaps: list[DataGap] = []
+        if iv_rank is None:
+            gaps.append(DataGap(
+                field="pop",
+                reason="no IV rank — using ATR-only expected move",
+                impact="medium",
+                affects="POP estimate may be 10-15% off without IV calibration",
+            ))
 
         return POPEstimate(
             pop_pct=round(pop, 4),
@@ -518,6 +540,7 @@ def estimate_pop(
             method="regime_historical",
             regime_id=regime_id,
             notes=notes,
+            data_gaps=gaps,
         )
 
     if st in ("debit_spread", "long_option"):
@@ -528,6 +551,10 @@ def estimate_pop(
             return None
 
         daily_sigma = (atr_pct / 100.0) / 1.25
+        # IV rank adjustment (same as credit branch)
+        if iv_rank is not None:
+            iv_factor = 0.7 + (iv_rank / 100) * 0.6  # Range: 0.7 to 1.3
+            daily_sigma = daily_sigma * iv_factor
         expected_move = daily_sigma * math.sqrt(dte) * current_price
         regime_factor = {1: 0.40, 2: 0.70, 3: 1.10, 4: 1.50}.get(regime_id, 1.0)
         adjusted_move = expected_move * regime_factor
@@ -551,12 +578,22 @@ def estimate_pop(
         max_loss = entry_price * 100 * contracts
         ev = pop * max_profit - (1 - pop) * max_loss
 
+        gaps: list[DataGap] = []
+        if iv_rank is None:
+            gaps.append(DataGap(
+                field="pop",
+                reason="no IV rank — using ATR-only expected move",
+                impact="medium",
+                affects="POP estimate may be 10-15% off without IV calibration",
+            ))
+
         return POPEstimate(
             pop_pct=round(pop, 4),
             expected_value=round(ev, 2),
             method="regime_historical",
             regime_id=regime_id,
             notes=f"Directional: needs ${adjusted_move:.1f} move to profit",
+            data_gaps=gaps,
         )
 
     return None
@@ -741,6 +778,7 @@ class ExitMonitorResult(BaseModel):
     pnl_dollars: float  # Current P&L in dollars
     summary: str
     commentary: str  # Human-readable justification for the decision
+    data_gaps: list[DataGap] = []
 
 
 def monitor_exit_conditions(
@@ -757,6 +795,7 @@ def monitor_exit_conditions(
     profit_target_pct: float | None = None,
     stop_loss_pct: float | None = None,
     exit_dte: int | None = None,
+    time_of_day: dt_time | None = None,
 ) -> ExitMonitorResult:
     """Check all exit conditions for an open trade.
 
@@ -774,6 +813,7 @@ def monitor_exit_conditions(
         profit_target_pct: Close at X% of max profit.
         stop_loss_pct: Credit: X× credit; Debit: X fraction loss.
         exit_dte: Close when DTE drops to this.
+        time_of_day: Current time for end-of-day urgency escalation.
 
     Returns:
         ExitMonitorResult with all triggered signals.
@@ -886,6 +926,35 @@ def monitor_exit_conditions(
                    f"{'Income structures are invalidated in trending regime — close or hedge.' if severe else 'Minor shift — monitor but no immediate action needed.'}",
         ))
 
+    # End-of-day urgency escalation
+    if time_of_day is not None:
+        # 0DTE: force close after 15:00
+        if structure_type in ("iron_condor", "iron_man", "credit_spread", "straddle", "strangle") and dte_remaining == 0:
+            if time_of_day >= dt_time(15, 0):
+                signals.append(ExitSignal(
+                    rule="eod_0dte",
+                    triggered=True,
+                    current_value=f"{time_of_day.strftime('%H:%M')}",
+                    threshold="15:00",
+                    urgency="immediate",
+                    action="Close 0DTE position — market closing",
+                    detail=f"0DTE position at {time_of_day.strftime('%H:%M')} — must close before 16:00. Gamma risk is extreme.",
+                ))
+        # Non-0DTE: escalate TESTED positions after 15:30
+        elif dte_remaining > 0 and time_of_day >= dt_time(15, 30):
+            # Check if any existing signal has "tested" status
+            any_tested = any(s.rule == "stop_loss" and s.urgency == "soon" for s in signals)
+            if any_tested:
+                signals.append(ExitSignal(
+                    rule="eod_tested",
+                    triggered=True,
+                    current_value=f"{time_of_day.strftime('%H:%M')}",
+                    threshold="15:30",
+                    urgency="immediate",
+                    action="Close tested position before overnight gap",
+                    detail=f"Position tested at {time_of_day.strftime('%H:%M')} — close before overnight gap risk.",
+                ))
+
     triggered_signals = [s for s in signals if s.triggered]
     should_close = len(triggered_signals) > 0
     most_urgent = None
@@ -960,6 +1029,8 @@ class TradeHealthCheck(BaseModel):
     overall_action: str  # "hold", "close", "adjust", "roll"
     summary: str
     commentary: str  # Human-readable decision justification for trading platform
+    overnight_risk: OvernightRisk | None = None  # Late-day overnight gap risk assessment
+    data_gaps: list[DataGap] = []
 
 
 def check_trade_health(
@@ -974,6 +1045,7 @@ def check_trade_health(
     entry_regime_id: int | None = None,
     vol_surface: VolatilitySurface | None = None,
     quote_service: object | None = None,
+    time_of_day: dt_time | None = None,
 ) -> TradeHealthCheck:
     """Complete health check for an open trade — the daily monitoring API.
 
@@ -993,6 +1065,7 @@ def check_trade_health(
         entry_regime_id: Regime when trade was opened.
         vol_surface: Optional vol surface for roll pricing.
         quote_service: Optional OptionQuoteService for adjustment pricing.
+        time_of_day: Current time for end-of-day urgency escalation and overnight risk.
 
     Returns:
         TradeHealthCheck with combined exit + adjustment analysis.
@@ -1016,6 +1089,7 @@ def check_trade_health(
         profit_target_pct=trade_spec.profit_target_pct,
         stop_loss_pct=trade_spec.stop_loss_pct,
         exit_dte=trade_spec.exit_dte,
+        time_of_day=time_of_day,
     )
 
     # 2. Adjustment analysis
@@ -1061,6 +1135,22 @@ def check_trade_health(
         overall_action = "hold"
         status = "healthy"
 
+    # 3. Overnight risk assessment (late-day only)
+    overnight_result: OvernightRisk | None = None
+    if time_of_day is not None and time_of_day >= dt_time(15, 0):
+        overnight_result = assess_overnight_risk(
+            trade_id=trade_id,
+            ticker=ticker,
+            structure_type=trade_spec.structure_type or "",
+            order_side=trade_spec.order_side or "credit",
+            dte_remaining=dte_remaining,
+            regime_id=int(regime.regime),
+            position_status=position_status,
+        )
+        if overnight_result.risk_level == OvernightRiskLevel.CLOSE_BEFORE_CLOSE:
+            overall_action = "close"
+            status = "exit_triggered"
+
     # Summary
     parts = [f"{ticker}: {status.upper()}"]
     if exit_result.should_close:
@@ -1102,6 +1192,17 @@ def check_trade_health(
         commentary_parts.append(exit_result.commentary)
         commentary_parts.append(f"Regime: {regime_name} ({regime.confidence:.0%}).")
 
+    # Add overnight risk to commentary if assessed
+    if overnight_result is not None:
+        if overnight_result.risk_level == OvernightRiskLevel.CLOSE_BEFORE_CLOSE:
+            commentary_parts.append(
+                f"OVERNIGHT: {overnight_result.summary} — close before market close."
+            )
+        elif overnight_result.risk_level == OvernightRiskLevel.HIGH:
+            commentary_parts.append(
+                f"OVERNIGHT WARNING: {overnight_result.summary}"
+            )
+
     return TradeHealthCheck(
         trade_id=trade_id,
         ticker=ticker,
@@ -1113,6 +1214,7 @@ def check_trade_health(
         overall_action=overall_action,
         summary=" | ".join(parts),
         commentary=" ".join(commentary_parts),
+        overnight_risk=overnight_result,
     )
 
 
@@ -1141,6 +1243,170 @@ def get_adjustment_recommendation(
 
     adj_svc = AdjustmentService(quote_service=quote_service)
     return adj_svc.analyze(
+        trade_spec=trade_spec,
+        regime=regime,
+        technicals=technicals,
+        vol_surface=vol_surface,
+    )
+
+
+# ── Overnight Risk Assessment ──
+
+
+class OvernightRiskLevel(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CLOSE_BEFORE_CLOSE = "close_before_close"
+
+
+class OvernightRisk(BaseModel):
+    """Assessment of overnight gap risk for an open position."""
+
+    trade_id: str
+    ticker: str
+    risk_level: OvernightRiskLevel
+    reasons: list[str]
+    summary: str
+
+
+# Ordering for max() comparison — higher index = worse risk.
+_RISK_ORDER: list[OvernightRiskLevel] = [
+    OvernightRiskLevel.LOW,
+    OvernightRiskLevel.MEDIUM,
+    OvernightRiskLevel.HIGH,
+    OvernightRiskLevel.CLOSE_BEFORE_CLOSE,
+]
+
+
+def _worst_risk(a: OvernightRiskLevel, b: OvernightRiskLevel) -> OvernightRiskLevel:
+    """Return the worse of two risk levels."""
+    return a if _RISK_ORDER.index(a) >= _RISK_ORDER.index(b) else b
+
+
+def assess_overnight_risk(
+    trade_id: str,
+    ticker: str,
+    structure_type: str,
+    order_side: str,
+    dte_remaining: int,
+    regime_id: int,
+    position_status: str,  # "safe", "tested", "breached"
+    has_earnings_tomorrow: bool = False,
+    has_macro_event_tomorrow: bool = False,
+) -> OvernightRisk:
+    """Assess overnight gap risk for a position. Call at ~15:30.
+
+    Rules:
+    - 0DTE: always CLOSE_BEFORE_CLOSE (expires today)
+    - BREACHED + R4: CLOSE_BEFORE_CLOSE
+    - BREACHED + any regime: HIGH
+    - TESTED + R4: CLOSE_BEFORE_CLOSE
+    - TESTED + R3: HIGH
+    - Earnings tomorrow: HIGH (min)
+    - Macro event tomorrow (FOMC/CPI/NFP): MEDIUM (min)
+    - SAFE + R1/R2: LOW
+    - Everything else: MEDIUM
+    """
+    risk = OvernightRiskLevel.LOW
+    reasons: list[str] = []
+
+    # 0DTE — must close, expires today
+    if dte_remaining == 0:
+        risk = _worst_risk(risk, OvernightRiskLevel.CLOSE_BEFORE_CLOSE)
+        reasons.append("0DTE — position expires today, cannot hold overnight")
+        return OvernightRisk(
+            trade_id=trade_id,
+            ticker=ticker,
+            risk_level=risk,
+            reasons=reasons,
+            summary=f"{ticker}: CLOSE BEFORE CLOSE — 0DTE expires today",
+        )
+
+    # Position status + regime interactions
+    if position_status == "breached":
+        if regime_id == 4:
+            risk = _worst_risk(risk, OvernightRiskLevel.CLOSE_BEFORE_CLOSE)
+            reasons.append("Breached position in R4 (high-vol trending) — extreme overnight gap risk")
+        else:
+            risk = _worst_risk(risk, OvernightRiskLevel.HIGH)
+            reasons.append(f"Breached position in R{regime_id} — high overnight gap risk")
+    elif position_status == "tested":
+        if regime_id == 4:
+            risk = _worst_risk(risk, OvernightRiskLevel.CLOSE_BEFORE_CLOSE)
+            reasons.append("Tested position in R4 (high-vol trending) — likely to breach overnight")
+        elif regime_id == 3:
+            risk = _worst_risk(risk, OvernightRiskLevel.HIGH)
+            reasons.append("Tested position in R3 (low-vol trending) — trend may continue overnight")
+        else:
+            risk = _worst_risk(risk, OvernightRiskLevel.MEDIUM)
+            reasons.append(f"Tested position in R{regime_id} — monitor overnight")
+    else:
+        # Safe position
+        if regime_id in (1, 2):
+            # LOW stays as default
+            reasons.append(f"Safe position in R{regime_id} (mean-reverting) — low overnight risk")
+        else:
+            risk = _worst_risk(risk, OvernightRiskLevel.MEDIUM)
+            reasons.append(f"Safe position in R{regime_id} (trending) — moderate overnight risk")
+
+    # Earnings tomorrow — at least HIGH
+    if has_earnings_tomorrow:
+        risk = _worst_risk(risk, OvernightRiskLevel.HIGH)
+        reasons.append("Earnings tomorrow — expect gap risk")
+
+    # Macro event tomorrow — at least MEDIUM
+    if has_macro_event_tomorrow:
+        risk = _worst_risk(risk, OvernightRiskLevel.MEDIUM)
+        reasons.append("Macro event tomorrow (FOMC/CPI/NFP) — volatility expected")
+
+    # Build summary
+    level_labels = {
+        OvernightRiskLevel.LOW: "LOW",
+        OvernightRiskLevel.MEDIUM: "MEDIUM",
+        OvernightRiskLevel.HIGH: "HIGH",
+        OvernightRiskLevel.CLOSE_BEFORE_CLOSE: "CLOSE BEFORE CLOSE",
+    }
+    label = level_labels[risk]
+    summary = f"{ticker}: {label} — {reasons[0]}" if reasons else f"{ticker}: {label}"
+
+    return OvernightRisk(
+        trade_id=trade_id,
+        ticker=ticker,
+        risk_level=risk,
+        reasons=reasons,
+        summary=summary,
+    )
+
+
+def recommend_adjustment_action(
+    trade_spec: TradeSpec,
+    regime: RegimeResult,
+    technicals: TechnicalSnapshot,
+    vol_surface: VolatilitySurface | None = None,
+    quote_service: object | None = None,
+) -> AdjustmentDecision:
+    """Get a single deterministic adjustment action for systematic trading.
+
+    Thin wrapper around AdjustmentService.recommend_action() for eTrading API
+    consistency. Unlike get_adjustment_recommendation() which returns a ranked
+    menu, this returns exactly ONE action chosen by a deterministic decision
+    tree based on position status and regime.
+
+    Args:
+        trade_spec: The original TradeSpec.
+        regime: Current RegimeResult.
+        technicals: Current TechnicalSnapshot.
+        vol_surface: Optional vol surface for roll pricing.
+        quote_service: Optional OptionQuoteService for real prices.
+
+    Returns:
+        AdjustmentDecision with exactly one action.
+    """
+    from market_analyzer.service.adjustment import AdjustmentService
+
+    adj_svc = AdjustmentService(quote_service=quote_service)
+    return adj_svc.recommend_action(
         trade_spec=trade_spec,
         regime=regime,
         technicals=technicals,

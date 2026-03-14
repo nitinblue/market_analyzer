@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -12,6 +13,8 @@ from market_analyzer.data.exceptions import DataFetchError
 from market_analyzer.data.providers.yfinance import YFinanceProvider
 from market_analyzer.data.registry import ProviderRegistry
 from market_analyzer.models.data import CacheMeta, DataRequest, DataResult, DataType, ProviderType
+
+logger = logging.getLogger(__name__)
 
 
 class DataService:
@@ -82,10 +85,27 @@ class DataService:
 
         # Need to fetch
         if not is_snapshot:
-            # Time-series: try delta-fetch
+            # Time-series: try delta-fetch (only if cache covers requested range)
             delta = self._cache.delta_dates(request.ticker, request.data_type, end_date)
 
-            if cached_df is not None and delta is not None:
+            # Check if cached data starts AFTER the requested start_date.
+            # If so, the cache is missing historical data — do a full re-fetch
+            # instead of a delta-fetch that only appends new dates.
+            cache_covers_start = True
+            if cached_df is not None and request.start_date is not None:
+                cache_first = cached_df.index.min()
+                requested_start = pd.Timestamp(request.start_date)
+                # Allow 5-day tolerance (weekends/holidays)
+                if cache_first > requested_start + pd.Timedelta(days=5):
+                    logger.info(
+                        "Cache for %s starts at %s but need %s — full re-fetch",
+                        request.ticker,
+                        cache_first.date(),
+                        request.start_date,
+                    )
+                    cache_covers_start = False
+
+            if cached_df is not None and delta is not None and cache_covers_start:
                 fetch_request = DataRequest(
                     ticker=request.ticker,
                     data_type=request.data_type,

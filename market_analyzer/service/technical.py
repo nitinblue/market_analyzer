@@ -34,13 +34,28 @@ class TechnicalService:
         return self.data_service.get_ohlcv(ticker)
 
     def snapshot(
-        self, ticker: str, ohlcv: pd.DataFrame | None = None
+        self, ticker: str, ohlcv: pd.DataFrame | None = None, debug: bool = False
     ) -> TechnicalSnapshot:
         """Compute technical indicators for a single instrument."""
         df = self._get_ohlcv(ticker, ohlcv)
         from market_analyzer.features.technicals import compute_technicals
 
-        return compute_technicals(df, ticker)
+        result = compute_technicals(df, ticker)
+
+        if debug:
+            rsi_zone = "overbought" if result.rsi.is_overbought else ("oversold" if result.rsi.is_oversold else "neutral")
+            macd_desc = "bullish crossover" if result.macd.is_bullish_crossover else ("bearish crossover" if result.macd.is_bearish_crossover else "neutral")
+            bb_position = "above upper" if result.current_price > result.bollinger.upper else ("below lower" if result.current_price < result.bollinger.lower else "within bands")
+            result.commentary.extend([
+                f"Technical snapshot for {ticker} at ${result.current_price:.2f}",
+                f"RSI: {result.rsi.value:.1f} ({rsi_zone})",
+                f"ATR: {result.atr:.2f} ({result.atr_pct:.2f}%)",
+                f"MACD histogram: {result.macd.histogram:.4f} ({macd_desc})",
+                f"Bollinger: {bb_position} (bandwidth {result.bollinger.bandwidth:.2f}%)",
+                f"Signals: {', '.join(s.name + '=' + s.direction for s in result.signals[:5])}",
+            ])
+
+        return result
 
     def orb(
         self,

@@ -572,10 +572,11 @@ Requires --broker connection."""
             print(f"{_styled('ERROR:', 'red')} {exc}")
 
     def do_rank(self, arg: str) -> None:
-        """Rank trades across tickers.\nUsage: rank SPY GLD QQQ TLT [--account 30000]\n       rank --watchlist MA-Income --account 30000"""
-        # Extract --account before _resolve_tickers
+        """Rank trades across tickers.\nUsage: rank SPY GLD QQQ TLT [--account 30000] [--debug]\n       rank --watchlist MA-Income --account 30000"""
+        # Extract --account and --debug before _resolve_tickers
         parts = arg.strip().split()
         account_bp: float | None = None
+        debug: bool = False
         filtered_parts = []
         i = 0
         while i < len(parts):
@@ -586,6 +587,9 @@ Requires --broker connection."""
                     print(f"Invalid account size: {parts[i + 1]}")
                     return
                 i += 2
+            elif parts[i] == "--debug":
+                debug = True
+                i += 1
             else:
                 filtered_parts.append(parts[i])
                 i += 1
@@ -603,7 +607,7 @@ Requires --broker connection."""
                     "Ranking uses historical data only (no live quotes/Greeks).\n"
                     "For full data: analyzer-cli --broker\n", "yellow",
                 ))
-            result = ma.ranking.rank(tickers)
+            result = ma.ranking.rank(tickers, debug=debug)
             source = ma.quotes.source
             _print_header(f"Trade Ranking ({result.as_of_date})  [data: {source}]")
 
@@ -653,6 +657,19 @@ Requires --broker connection."""
                 print(tabulate(rows, headers="keys", tablefmt="simple", stralign="right"))
 
             print(f"\n  {_styled(result.summary, 'dim')}")
+
+            # Debug: show commentary for top 3 trades
+            if debug and trades_to_show:
+                print(f"\n  {_styled('Debug Commentary:', 'bold')}")
+                for e in trades_to_show[:3]:
+                    if e.commentary:
+                        print(f"\n    {_styled(f'#{e.rank} {e.ticker} {e.strategy_type}', 'bold')}")
+                        for line in e.commentary:
+                            print(f"      {line}")
+                if result.commentary:
+                    print(f"\n    {_styled('Overall:', 'bold')}")
+                    for line in result.commentary:
+                        print(f"      {line}")
 
         except Exception as exc:
             print(f"{_styled('ERROR:', 'red')} {exc}")
@@ -1201,6 +1218,11 @@ Requires --broker connection."""
                         if ts.exit_notes:
                             for note in ts.exit_notes[:3]:
                                 print(f"      - {note}")
+
+                        # Entry window
+                        if ts.entry_window_start is not None:
+                            end_str = ts.entry_window_end.strftime("%H:%M") if ts.entry_window_end else "close"
+                            print(f"    Entry window: {ts.entry_window_start.strftime('%H:%M')} - {end_str}")
 
                         # Trade lifecycle analytics on the trade_spec
                         self._show_trade_analytics(ts, ticker)
@@ -2333,6 +2355,185 @@ Requires --broker connection."""
             print(f"  Pricing:       {_styled('UNAVAILABLE', 'yellow')} — cannot compute fill prices")
             print(f"\n  {_styled('To connect:', 'bold')} analyzer-cli --broker")
             print(f"  Requires:      TASTYTRADE_***_DATA env vars in eTrading/.env")
+
+    def do_overnight(self, arg: str) -> None:
+        """Assess overnight gap risk for a position.\nUsage: overnight TICKER [--dte N] [--status safe|tested|breached]\n  Example: overnight GLD --dte 14 --status tested"""
+        parts = arg.strip().split()
+        if not parts:
+            print("Usage: overnight TICKER [--dte N] [--status safe|tested|breached]")
+            print("  --dte N:      days to expiration (default: 30)")
+            print("  --status S:   position status: safe, tested, breached (default: safe)")
+            return
+
+        ticker = parts[0].upper()
+        dte = 30
+        position_status = "safe"
+        i = 1
+        while i < len(parts):
+            if parts[i] == "--dte" and i + 1 < len(parts):
+                try:
+                    dte = int(parts[i + 1])
+                except ValueError:
+                    print(f"Invalid DTE: {parts[i + 1]}")
+                    return
+                i += 2
+            elif parts[i] == "--status" and i + 1 < len(parts):
+                position_status = parts[i + 1].lower()
+                if position_status not in ("safe", "tested", "breached"):
+                    print(f"Invalid status: '{position_status}'. Use: safe, tested, breached")
+                    return
+                i += 2
+            else:
+                i += 1
+
+        try:
+            from market_analyzer.trade_lifecycle import assess_overnight_risk
+
+            ma = self._get_ma()
+            regime = ma.regime.detect(ticker)
+
+            result = assess_overnight_risk(
+                trade_id=f"{ticker}-CLI",
+                ticker=ticker,
+                structure_type="iron_condor",
+                order_side="credit",
+                dte_remaining=dte,
+                regime_id=int(regime.regime),
+                position_status=position_status,
+            )
+
+            _print_header(f"{ticker} — Overnight Risk ({dte} DTE, {position_status})")
+
+            level_colors = {
+                "low": "green",
+                "medium": "yellow",
+                "high": "red",
+                "close_before_close": "red",
+            }
+            level_color = level_colors.get(result.risk_level.value, "")
+            level_label = result.risk_level.value.upper().replace("_", " ")
+            print(f"\n  Risk Level: {_styled(level_label, level_color)}")
+            print(f"  Regime:     R{regime.regime} ({regime.confidence:.0%})")
+
+            if result.reasons:
+                print(f"\n  Reasons:")
+                for reason in result.reasons:
+                    print(f"    - {reason}")
+
+            print(f"\n  {_styled('Summary:', 'bold')} {result.summary}")
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+
+    def do_quality(self, arg: str) -> None:
+        """Check execution quality for a trade.\nUsage: quality TICKER [STRATEGY]\n  STRATEGY: ic, ifly, calendar, diagonal, ratio (default: ic)\n  Requires --broker for live quotes."""
+        parts = arg.strip().split()
+        if not parts:
+            print("Usage: quality TICKER [STRATEGY]")
+            print("  STRATEGY: ic, ifly, calendar, diagonal, ratio (default: ic)")
+            print("  Requires --broker for live quotes.")
+            return
+
+        ticker = parts[0].upper()
+        strategy = parts[1].lower() if len(parts) > 1 else "ic"
+
+        strategy_map = {
+            "ic": "iron_condor",
+            "iron_condor": "iron_condor",
+            "ifly": "iron_butterfly",
+            "iron_butterfly": "iron_butterfly",
+            "calendar": "calendar",
+            "cal": "calendar",
+            "diagonal": "diagonal",
+            "diag": "diagonal",
+            "ratio": "ratio_spread",
+            "ratio_spread": "ratio_spread",
+        }
+        play = strategy_map.get(strategy)
+        if play is None:
+            print(f"Unknown strategy: '{strategy}'. Use: ic, ifly, calendar, diagonal, ratio")
+            return
+
+        try:
+            ma = self._get_ma()
+            if not ma.quotes.has_broker:
+                print(_styled(
+                    "WARNING: No broker connected — execution quality requires live quotes.\n"
+                    "For full data: analyzer-cli --broker\n", "yellow",
+                ))
+                return
+
+            # Get opportunity assessment to obtain trade_spec
+            method = getattr(ma.opportunity, f"assess_{play}")
+            result = method(ticker)
+
+            if not hasattr(result, "trade_spec") or result.trade_spec is None:
+                print(f"No trade spec generated for {play.replace('_', ' ')} "
+                      f"(verdict: {result.verdict.value})")
+                return
+
+            ts = result.trade_spec
+
+            # Get quotes for all legs
+            leg_quotes = ma.quotes.get_leg_quotes(ts.legs)
+
+            from market_analyzer.execution_quality import validate_execution_quality
+
+            eq = validate_execution_quality(ts, leg_quotes)
+
+            _print_header(f"{ticker} — Execution Quality ({play.replace('_', ' ').title()})")
+
+            verdict_colors = {"go": "green", "wide_spread": "yellow", "illiquid": "yellow", "no_quote": "red"}
+            v_color = verdict_colors.get(eq.overall_verdict.value, "")
+            tradeable_str = _styled("TRADEABLE", "green") if eq.tradeable else _styled("NOT TRADEABLE", "red")
+            print(f"\n  Verdict:    {_styled(eq.overall_verdict.value.upper(), v_color)} — {tradeable_str}")
+
+            if eq.total_spread_cost_pct is not None:
+                print(f"  Spread cost: {eq.total_spread_cost_pct:.2f}% of underlying")
+
+            if eq.legs:
+                print(f"\n  Legs:")
+                for lq in eq.legs:
+                    leg_verdict_color = verdict_colors.get(lq.verdict.value, "")
+                    bid_str = f"${lq.bid:.2f}" if lq.bid is not None else "N/A"
+                    ask_str = f"${lq.ask:.2f}" if lq.ask is not None else "N/A"
+                    spread_str = f"{lq.spread_pct:.1f}%" if lq.spread_pct is not None else "N/A"
+                    oi_str = f"{lq.open_interest}" if lq.open_interest is not None else "N/A"
+                    print(f"    {lq.strike:.0f} {lq.option_type}: "
+                          f"bid {bid_str} / ask {ask_str} "
+                          f"(spread {spread_str}, OI {oi_str}) "
+                          f"[{_styled(lq.verdict.value.upper(), leg_verdict_color)}]")
+                    if lq.issue:
+                        print(f"      {_styled(lq.issue, 'yellow')}")
+
+            print(f"\n  {_styled('Summary:', 'bold')} {eq.summary}")
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+
+    def do_performance(self, arg: str) -> None:
+        """Analyze trade performance from historical outcomes.\nUsage: performance\n\nThis command requires TradeOutcome records from eTrading.\nmarket_analyzer provides the analysis functions; eTrading stores the data."""
+        _print_header("Performance Analysis")
+        print(f"\n  {_styled('Not available in standalone CLI.', 'yellow')}")
+        print()
+        print("  Performance analysis requires TradeOutcome records from eTrading.")
+        print("  market_analyzer provides two pure functions for this:")
+        print()
+        print(f"  {_styled('compute_performance_report(outcomes) -> PerformanceReport', 'bold')}")
+        print("    Accepts a list of TradeOutcome records, returns per-strategy stats,")
+        print("    per-regime breakdowns, win rates, profit factors, and score correlation.")
+        print()
+        print(f"  {_styled('calibrate_weights(outcomes) -> CalibrationResult', 'bold')}")
+        print("    Suggests regime-strategy weight adjustments based on actual results.")
+        print()
+        print("  Usage in eTrading:")
+        print()
+        print(f"    {_styled('from market_analyzer.performance import compute_performance_report, calibrate_weights', 'dim')}")
+        print(f"    {_styled('from market_analyzer.models.feedback import TradeOutcome', 'dim')}")
+        print()
+        print(f"    {_styled('outcomes: list[TradeOutcome] = load_from_database()', 'dim')}")
+        print(f"    {_styled('report = compute_performance_report(outcomes)', 'dim')}")
+        print(f"    {_styled('calibration = calibrate_weights(outcomes)', 'dim')}")
 
     def do_quit(self, arg: str) -> bool:
         """Exit the REPL."""

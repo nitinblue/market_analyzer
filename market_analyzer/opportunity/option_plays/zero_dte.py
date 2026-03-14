@@ -10,7 +10,7 @@ Integrates ORB levels into every strategy for ORB-aware strike placement:
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, time
 from typing import TYPE_CHECKING
 
 from market_analyzer.config import get_settings
@@ -23,6 +23,7 @@ from market_analyzer.models.opportunity import (
     ZeroDTEOpportunity,
     ZeroDTEStrategy,
 )
+from market_analyzer.models.transparency import DataGap
 
 if TYPE_CHECKING:
     from market_analyzer.models.fundamentals import FundamentalsSnapshot
@@ -103,6 +104,13 @@ def assess_zero_dte(
         ticker, verdict, confidence, zero_dte_strategy, hard_stops, regime, orb,
     )
 
+    # --- Data gaps ---
+    gaps: list[DataGap] = []
+    if orb is None:
+        gaps.append(DataGap(field="orb", reason="no intraday data available", impact="medium", affects="ORB-based strategy selection and strike placement"))
+    if trade_spec is not None and trade_spec.max_entry_price is None:
+        gaps.append(DataGap(field="max_entry_price", reason="broker not connected", impact="high", affects="entry pricing and POP"))
+
     return ZeroDTEOpportunity(
         ticker=ticker,
         as_of_date=today,
@@ -121,6 +129,7 @@ def assess_zero_dte(
         days_to_earnings=days_to_earnings,
         trade_spec=trade_spec,
         summary=summary,
+        data_gaps=gaps,
     )
 
 
@@ -720,6 +729,8 @@ def _build_trade_spec(
                 exit_notes=["0DTE: close by 3PM ET if no breakout",
                             "Profit when underlying moves past long strikes",
                             "Max loss = net debit if price stays within range"],
+                entry_window_start=time(9, 45),
+                entry_window_end=time(14, 0),
             )
 
         elif zero_dte_strategy == ZeroDTEStrategy.IRON_CONDOR:
@@ -777,6 +788,8 @@ def _build_trade_spec(
                     exit_notes=["0DTE: close by 3PM ET or at 50% profit",
                                 "Close if price breaks ORB range on either side",
                                 "Short strikes at ORB edges — range break = stop"],
+                    entry_window_start=time(9, 45),
+                    entry_window_end=time(14, 0),
                 )
             else:
                 legs, wing_width = build_iron_condor_legs(
@@ -796,6 +809,8 @@ def _build_trade_spec(
                     max_loss_desc=f"Wing width (${wing_width:.0f}) minus credit",
                     exit_notes=["0DTE: close by 3PM ET or at 50% profit",
                                 "Close if short strike tested on either side"],
+                    entry_window_start=time(9, 45),
+                    entry_window_end=time(14, 0),
                 )
 
         elif zero_dte_strategy == ZeroDTEStrategy.CREDIT_SPREAD:
@@ -836,6 +851,8 @@ def _build_trade_spec(
                 max_loss_desc=f"Wing width (${wing_pts:.0f}) minus credit",
                 exit_notes=["0DTE: close by 3PM ET or at 50% profit",
                             "Close if short strike tested"],
+                entry_window_start=time(9, 45),
+                entry_window_end=time(14, 0),
             )
 
         elif zero_dte_strategy == ZeroDTEStrategy.STRADDLE_STRANGLE:
@@ -866,6 +883,8 @@ def _build_trade_spec(
                 exit_notes=["0DTE: close by 3PM ET or at 50% profit",
                             "Close immediately if short strike tested",
                             "UNDEFINED RISK: consider adding wings for defined risk"],
+                entry_window_start=time(9, 45),
+                entry_window_end=time(14, 0),
             )
 
         elif zero_dte_strategy == ZeroDTEStrategy.DIRECTIONAL_SPREAD:
@@ -894,6 +913,8 @@ def _build_trade_spec(
                 exit_notes=["0DTE: close by 3PM ET",
                             "Target 50% of max profit or ORB extension levels",
                             "Close at 50% loss of debit paid"],
+                entry_window_start=time(9, 45),
+                entry_window_end=time(14, 0),
             )
     except Exception:
         return None

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, time
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
@@ -16,6 +16,7 @@ from market_analyzer.models.opportunity import (
     Verdict,
 )
 from market_analyzer.models.regime import RegimeID
+from market_analyzer.models.transparency import DataGap
 
 if TYPE_CHECKING:
     from market_analyzer.models.fundamentals import FundamentalsSnapshot
@@ -48,6 +49,7 @@ class EarningsOpportunity(BaseModel):
     regime_id: int
     trade_spec: TradeSpec | None = None
     summary: str
+    data_gaps: list[DataGap] = []
 
 
 def assess_earnings_play(
@@ -57,6 +59,7 @@ def assess_earnings_play(
     fundamentals: FundamentalsSnapshot | None = None,
     vol_surface: VolatilitySurface | None = None,
     as_of: date | None = None,
+    iv_rank: float | None = None,
 ) -> EarningsOpportunity:
     """Assess earnings play opportunity for a single instrument.
 
@@ -76,6 +79,13 @@ def assess_earnings_play(
         hard_stops.append(HardStop(
             name="No earnings date",
             description="No upcoming earnings date found — cannot assess earnings play",
+        ))
+
+    # IV rank hard stop
+    if iv_rank is not None and iv_rank < 25:
+        hard_stops.append(HardStop(
+            name="IV rank too low",
+            description=f"IV rank {iv_rank:.0f}% — no crush to capture for earnings play",
         ))
 
     if hard_stops:
@@ -146,6 +156,16 @@ def assess_earnings_play(
         ))
         score += 0.1
 
+    # --- IV rank signal ---
+    if iv_rank is not None:
+        iv_favorable = iv_rank > 60
+        signals.append(OpportunitySignal(
+            name="IV rank", favorable=iv_favorable, weight=0.15,
+            description=f"IV rank {iv_rank:.0f}% — {'significant crush expected' if iv_favorable else 'moderate crush potential'}",
+        ))
+        if iv_favorable:
+            score += 0.1
+
     # --- Historical earnings surprise ---
     if fundamentals is not None and fundamentals.recent_earnings:
         last_surprise = fundamentals.recent_earnings[0]
@@ -181,6 +201,15 @@ def assess_earnings_play(
         summary_parts.append(f"Earnings in {days_to_earnings}d")
     summary_parts.append(f"Score: {confidence:.0%}")
 
+    # --- Data gaps ---
+    gaps: list[DataGap] = []
+    if days_to_earnings is None:
+        gaps.append(DataGap(field="days_to_earnings", reason="no earnings date available", impact="high", affects="DTE selection and strategy timing"))
+    if trade_spec is not None and trade_spec.max_entry_price is None:
+        gaps.append(DataGap(field="max_entry_price", reason="broker not connected", impact="high", affects="entry pricing and POP"))
+    if iv_rank is None:
+        gaps.append(DataGap(field="iv_rank", reason="market metrics unavailable", impact="medium", affects="premium assessment"))
+
     return EarningsOpportunity(
         ticker=ticker,
         as_of_date=today,
@@ -194,6 +223,7 @@ def assess_earnings_play(
         regime_id=int(regime.regime),
         trade_spec=trade_spec,
         summary=" | ".join(summary_parts),
+        data_gaps=gaps,
     )
 
 
@@ -244,6 +274,8 @@ def _build_earnings_trade_spec(
                 exit_notes=["Close morning after earnings release",
                             "IV crush will reduce value — need big move to overcome",
                             "Close at 50% loss if move doesn't materialize pre-earnings"],
+                entry_window_start=time(10, 0),
+                entry_window_end=time(14, 30),
             )
 
         elif strategy == EarningsPlayStrategy.IV_CRUSH_SELL:
@@ -264,6 +296,8 @@ def _build_earnings_trade_spec(
                 exit_notes=["Close morning after earnings release",
                             "IV crush is your edge — close quickly to capture",
                             "Close if underlying gaps beyond wing strikes"],
+                entry_window_start=time(10, 0),
+                entry_window_end=time(14, 30),
             )
     except Exception:
         return None

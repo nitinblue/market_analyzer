@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import re as _re
-from datetime import date
+from datetime import date, time
 from enum import StrEnum
 from pydantic import BaseModel
 
 from market_analyzer.models.exit_plan import ExitPlan
+from market_analyzer.models.transparency import DataGap
 
 
 class LegAction(StrEnum):
@@ -230,6 +231,8 @@ class ZeroDTEOpportunity(BaseModel):
     days_to_earnings: int | None
     trade_spec: TradeSpec | None = None
     summary: str
+    commentary: list[str] = []      # Step-by-step calculation trace (populated when debug=True)
+    data_gaps: list[DataGap] = []   # Known gaps in this analysis
 
 
 # --- LEAP ---
@@ -278,6 +281,8 @@ class LEAPOpportunity(BaseModel):
     macro_events_next_30_days: int
     trade_spec: TradeSpec | None = None
     summary: str
+    commentary: list[str] = []      # Step-by-step calculation trace (populated when debug=True)
+    data_gaps: list[DataGap] = []   # Known gaps in this analysis
 
 
 # --- Breakout ---
@@ -335,6 +340,8 @@ class BreakoutOpportunity(BaseModel):
     days_to_earnings: int | None
     trade_spec: TradeSpec | None = None
     summary: str
+    commentary: list[str] = []      # Step-by-step calculation trace (populated when debug=True)
+    data_gaps: list[DataGap] = []   # Known gaps in this analysis
 
 
 # --- Momentum ---
@@ -389,6 +396,8 @@ class MomentumOpportunity(BaseModel):
     days_to_earnings: int | None
     trade_spec: TradeSpec | None = None
     summary: str
+    commentary: list[str] = []      # Step-by-step calculation trace (populated when debug=True)
+    data_gaps: list[DataGap] = []   # Known gaps in this analysis
 
 
 # --- TradeSpec (actionable trade parameters) ---
@@ -472,6 +481,8 @@ class TradeSpec(BaseModel):
     max_loss_desc: str | None = None  # "Wing width - credit" / "UNLIMITED"
     exit_notes: list[str] = []  # Structure-specific guidance
     max_entry_price: float | None = None  # Don't chase beyond this price
+    entry_window_start: time | None = None  # Earliest time to submit order (e.g., 09:45)
+    entry_window_end: time | None = None  # Latest time to submit order (e.g., 14:00)
     exit_plan: ExitPlan | None = None  # First-class exit plan (REQ-3)
 
     @property

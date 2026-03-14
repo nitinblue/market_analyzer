@@ -54,6 +54,22 @@ class AdjustmentOption(BaseModel):
     rationale: str
 
 
+class AdjustmentDecision(BaseModel):
+    """Single deterministic adjustment action for systematic trading.
+
+    Unlike AdjustmentAnalysis (which provides a ranked menu of options for
+    human review), this model returns exactly ONE action chosen by a
+    deterministic decision tree based on position status and regime.
+    """
+
+    action: AdjustmentType  # DO_NOTHING, CLOSE_FULL, ROLL_AWAY, etc.
+    urgency: str  # "none", "monitor", "soon", "immediate"
+    rationale: str  # Why this specific action
+    detail: AdjustmentOption | None  # Full adjustment option if action != DO_NOTHING/CLOSE_FULL
+    position_status: PositionStatus
+    regime_id: int
+
+
 class AdjustmentAnalysis(BaseModel):
     """Complete adjustment analysis for an open trade."""
 

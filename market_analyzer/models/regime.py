@@ -10,6 +10,7 @@ from pydantic import BaseModel, model_validator
 
 from market_analyzer.models.features import FeatureInspection
 from market_analyzer.models.phase import PhaseID, PhaseResult
+from market_analyzer.models.transparency import DataGap
 
 
 class TrendDirection(StrEnum):
@@ -48,6 +49,11 @@ class RegimeResult(BaseModel):
     trend_direction: TrendDirection | None = None
     as_of_date: date
     model_version: str
+    model_fit_date: date | None = None      # When the HMM model was trained
+    model_age_days: int | None = None       # Days since model was fitted
+    regime_stability: int | None = None     # Regime flips in recent window (lower = more stable)
+    commentary: list[str] = []      # Step-by-step calculation trace (populated when debug=True)
+    data_gaps: list[DataGap] = []   # Known gaps in this analysis
 
 
 class RegimeConfig(BaseModel):

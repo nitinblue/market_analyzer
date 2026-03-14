@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from market_analyzer.macro.expiry import ExpiryEvent
 from market_analyzer.models.opportunity import TradeSpec, Verdict
 from market_analyzer.models.ranking import StrategyType
+from market_analyzer.models.transparency import DataGap
 
 
 class DayVerdict(StrEnum):
@@ -64,3 +65,5 @@ class DailyTradingPlan(BaseModel):
     total_trades: int
     summary: str
     data_warnings: list[str] = []  # Broker failures, data gaps, stale cache
+    commentary: list[str] = []      # Step-by-step calculation trace (populated when debug=True)
+    data_gaps: list[DataGap] = []   # Known gaps in this analysis

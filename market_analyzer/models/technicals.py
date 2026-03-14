@@ -7,6 +7,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel
 
+from market_analyzer.models.transparency import DataGap
+
 
 class SignalDirection(StrEnum):
     BULLISH = "bullish"
@@ -233,3 +235,5 @@ class TechnicalSnapshot(BaseModel):
     vcp: VCPData | None = None
     smart_money: SmartMoneyData | None = None
     signals: list[TechnicalSignal]
+    commentary: list[str] = []      # Step-by-step calculation trace (populated when debug=True)
+    data_gaps: list[DataGap] = []   # Known gaps in this analysis

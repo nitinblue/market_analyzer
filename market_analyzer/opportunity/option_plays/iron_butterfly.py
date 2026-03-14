@@ -22,6 +22,7 @@ from market_analyzer.models.opportunity import (
     Verdict,
 )
 from market_analyzer.models.regime import RegimeID
+from market_analyzer.models.transparency import DataGap
 
 if TYPE_CHECKING:
     from market_analyzer.models.fundamentals import FundamentalsSnapshot
@@ -59,6 +60,7 @@ class IronButterflyOpportunity(BaseModel):
     days_to_earnings: int | None
     trade_spec: TradeSpec | None = None
     summary: str
+    data_gaps: list[DataGap] = []
 
 
 # --- Public API ---
@@ -71,6 +73,7 @@ def assess_iron_butterfly(
     vol_surface: VolatilitySurface | None = None,
     fundamentals: FundamentalsSnapshot | None = None,
     as_of: date | None = None,
+    iv_rank: float | None = None,
 ) -> IronButterflyOpportunity:
     """Assess iron butterfly opportunity for a single instrument.
 
@@ -88,6 +91,13 @@ def assess_iron_butterfly(
 
     # --- Hard stops ---
     hard_stops = _check_hard_stops(regime, vol_surface, days_to_earnings, front_iv, cfg)
+
+    # IV rank hard stop
+    if iv_rank is not None and iv_rank < 20:
+        hard_stops.append(HardStop(
+            name="IV rank too low",
+            description=f"IV rank {iv_rank:.0f}% — insufficient premium for iron butterfly",
+        ))
 
     if hard_stops:
         return IronButterflyOpportunity(
@@ -112,6 +122,16 @@ def assess_iron_butterfly(
     # --- Signals ---
     signals = _score_signals(regime, technicals, vol_surface, days_to_earnings, cfg)
 
+    # IV rank signal
+    if iv_rank is not None:
+        iv_favorable = iv_rank > 50
+        signals.append(OpportunitySignal(
+            name="IV rank",
+            favorable=iv_favorable,
+            weight=0.15,
+            description=f"IV rank {iv_rank:.0f}% — {'high IV rank benefits ATM straddle' if iv_favorable else 'low IV rank reduces premium'}",
+        ))
+
     # --- Confidence ---
     raw = sum(s.weight for s in signals if s.favorable)
     regime_mult = cfg.regime_multipliers.get(int(regime.regime), 0.5)
@@ -133,6 +153,15 @@ def assess_iron_butterfly(
 
     summary = _build_summary(ticker, verdict, confidence, ifly_strat, atm_iv)
 
+    # --- Data gaps ---
+    gaps: list[DataGap] = []
+    if vol_surface is None:
+        gaps.append(DataGap(field="skew", reason="vol surface not computed", impact="medium", affects="strike selection and IV assessment"))
+    if trade_spec is not None and trade_spec.max_entry_price is None:
+        gaps.append(DataGap(field="max_entry_price", reason="broker not connected", impact="high", affects="entry pricing and POP"))
+    if iv_rank is None:
+        gaps.append(DataGap(field="iv_rank", reason="market metrics unavailable", impact="medium", affects="premium assessment"))
+
     return IronButterflyOpportunity(
         ticker=ticker,
         as_of_date=today,
@@ -149,6 +178,7 @@ def assess_iron_butterfly(
         days_to_earnings=days_to_earnings,
         trade_spec=trade_spec,
         summary=summary,
+        data_gaps=gaps,
     )
 
 
