@@ -10,36 +10,27 @@
 
 ## Master Status
 
-| # | Category | Gap | Status | Detail |
-|---|----------|-----|--------|--------|
-| G01 | Infrastructure | Deterministic adjustment decisions | **DONE** | `recommend_action()` → single action. Wired into health check + CLI. |
-| G02 | Infrastructure | Execution quality validation | **DONE** | `validate_execution_quality()` checks spread/OI/volume. CLI `do_quality`. |
-| G03 | Infrastructure | Entry time windows on TradeSpec | **DONE** | Assessors set windows: 0DTE=(09:45,14:00), income=(10:00,15:00), earnings=(10:00,14:30). |
-| G04 | Infrastructure | Time-of-day urgency in exit monitoring | **DONE** | `time_of_day` param. 0DTE force-close after 15:00, tested escalation after 15:30. |
-| G05 | Infrastructure | Overnight risk assessment | **DONE** | `assess_overnight_risk()`. Auto-invoked in `check_trade_health()` after 15:00. CLI `do_overnight`. |
-| G06 | Infrastructure | Auto-select screening | **DONE** | `min_score=0.6` + `top_n` on `scan()`. `filtered_count` in output. |
-| G07 | Intelligence | Performance feedback loop | **DONE** | `TradeOutcome` + `compute_performance_report()` + `calibrate_weights()`. CLI `do_performance`. |
-| G08 | Intelligence | Debug/commentary mode | **DONE** | `debug=True` on `detect()`, `snapshot()`, `assess()`, `rank()`. Threads to assessors via ranking. |
-| G09 | Intelligence | Data gap self-identification | **DONE** | `data_gaps` populated by 8 assessors + regime service. Propagated through ranking. |
-| SQ1 | Signal Quality | IV rank integration in assessors | **DONE** | `iv_rank` param on IC (<15 stop), IFly (<20), earnings (<25), LEAP (>70). Data gaps when None. |
-| SQ2 | Signal Quality | HMM model staleness & validation | **DONE** | `model_fit_date`, `model_age_days`, `regime_stability` on RegimeResult. Data gaps for stale/uncertain/churn. |
-| SQ3 | Signal Quality | POP calibration from outcomes + IV | **DONE** | `iv_rank` on `estimate_pop()`. `calibrate_pop_factors()` from real win rates. `pop_accuracy` on report. |
-| TA1 | Technicals | Fibonacci retracements/extensions | **DONE** | `FibonacciLevels` on TechnicalSnapshot. 5 levels, direction, current_price_level. |
-| TA2 | Technicals | ADX (Average Directional Index) | **DONE** | `ADXData` on TechnicalSnapshot. ADX, +DI/-DI, is_trending/is_ranging. |
-| TA3 | Technicals | Donchian channels | **DONE** | `DonchianChannels` on TechnicalSnapshot. 20-day high/low, proximity flags. |
-| TA4 | Technicals | Keltner channels | **DONE** | `KeltnerChannels` on TechnicalSnapshot. EMA ± 2×ATR, squeeze detection. |
-| TA5 | Technicals | Daily/weekly Pivot Points | **DONE** | `PivotPoints` on TechnicalSnapshot. PP, R1-R3, S1-S3. |
-| TA6 | Technicals | Daily VWAP | **DONE** | `VWAPData` on TechnicalSnapshot. 20-day rolling VWAP, price_vs_vwap_pct. |
-| SQ4 | Signal Quality | Mean reversion assessor overhaul | **DONE** | Fibonacci reversion target, ADX ranging/hard stop (>35), VWAP deviation, RSI-MACD divergence. 9 tests. |
-| SQ5 | Signal Quality | Breakout volume confirmation | **DONE** | Donchian breakout confirmation, Keltner squeeze signal. 5 tests. |
-| SQ6 | Signal Quality | Earnings implied move | **DONE** | Implied move from vol_surface front_iv vs historical ATR. Hard stop if ratio < 0.7x. |
-| SQ7 | Signal Quality | Screening liquidity & correlation | **DONE** | ATR < 0.3% liquidity filter, regime+RSI correlation dedup. 3 tests. |
-| SQ8 | Signal Quality | Momentum pullback quality | **DONE** | Fibonacci pullback depth, ADX trend strength, ADX < 15 hard stop. 6 tests. |
-| SQ9 | Signal Quality | IV rank threaded through ranking | **DONE** | `iv_rank_map` param on `rank()`. Dispatches to 5 assessors. 2 tests. |
-| SQ10 | Technicals | Pivot points wired into levels.py | **DONE** | 5 new LevelSource values. Weights: PP=0.8, R1/S1=0.7, R2/S2=0.5. 4 tests. |
-| ML1 | Learning | Drift detection | **DONE** | `detect_drift(outcomes)` → `list[DriftAlert]`. WARNING at >15pp drop, CRITICAL at >25pp. 6 tests. |
-| ML2 | Learning | Thompson Sampling strategy selection | **DONE** | `StrategyBandit` model, `build_bandits()`, `update_bandit()`, `select_strategies()`. Beta distribution per cell. 10 tests. |
-| ML3 | Learning | Threshold optimization from outcomes | **DONE** | `optimize_thresholds(outcomes)` → `ThresholdConfig` with learned cutoffs. Sweeps unique values, maximizes win rate separation. 6 tests. |
+| # | Category | Gap | MA Status | eTrading Integration |
+|---|----------|-----|-----------|---------------------|
+| G01 | Infrastructure | Deterministic adjustment | **DONE** | Call `recommend_action()` or `check_trade_health()` — returns single action, no menu. |
+| G02 | Infrastructure | Execution quality validation | **DONE** | Call `validate_execution_quality(spec, quotes)` before order submission. Block if not GO. |
+| G03 | Infrastructure | Entry time windows | **DONE** | Read `spec.entry_window_start/end`. Only submit orders within window. |
+| G04 | Infrastructure | Time-of-day urgency | **DONE** | Pass `time_of_day=datetime.now().time()` to `monitor_exit_conditions()` and `check_trade_health()`. |
+| G05 | Infrastructure | Overnight risk | **DONE** | Auto-invoked in `check_trade_health()` after 15:00. Read `health.overnight_risk`. |
+| G06 | Infrastructure | Auto-select screening | **DONE** | `scan(tickers, min_score=0.6, top_n=10)` — low-quality candidates auto-filtered. |
+| G07 | Intelligence | Performance feedback | **DONE** | **Build pipeline:** closed trades → `TradeOutcome` → `compute_performance_report()`. Store outcomes in DB. Run weekly. |
+| G08 | Intelligence | Debug/commentary | **DONE** | Pass `debug=True` to `detect()`, `snapshot()`, `assess()`, `rank()`. Store `result.commentary` in `decision_lineage` JSON. |
+| G09 | Intelligence | Data gap identification | **DONE** | Read `result.data_gaps` on every RankedEntry/PlanTrade. Discount confidence for high-impact gaps. Surface in UI. |
+| SQ1 | Signal Quality | IV rank in assessors | **DONE** | **Pass `iv_rank`** from `ma.quotes.get_metrics(ticker)` to `assess_iron_condor(iv_rank=)`, `assess_leap(iv_rank=)`, etc. Without it → DataGap flagged. |
+| SQ2 | Signal Quality | HMM staleness | **DONE** | Check `regime.model_age_days`. If > 60 → call `ma.regime.fit(ticker)` to retrain. Check `regime.data_gaps` for stale/uncertain warnings. |
+| SQ3 | Signal Quality | POP with IV + calibration | **DONE** | Pass `iv_rank=` to `estimate_pop()`. Run `calibrate_pop_factors(outcomes)` weekly → store calibrated factors. |
+| TA1-TA6 | Technicals | Fibonacci, ADX, Donchian, Keltner, Pivots, VWAP | **DONE** | No action — flows through existing `TechnicalSnapshot`. Available as `tech.fibonacci`, `tech.adx`, `tech.donchian`, `tech.keltner`, `tech.pivot_points`, `tech.daily_vwap`. |
+| SQ4-SQ8 | Signal Quality | MR overhaul, breakout, earnings, screening, momentum | **DONE** | No action — assessor improvements are internal. Better signals, same API. |
+| SQ9 | Signal Quality | IV rank in ranking | **DONE** | **Build `iv_rank_map`** from broker metrics per ticker. Pass to `rank(iv_rank_map={...})`. |
+| SQ10 | Technicals | Pivots in levels | **DONE** | No action — pivot points auto-included in `ma.levels.analyze()` as S/R sources. |
+| ML1 | Learning | Drift detection | **DONE** | **Schedule daily:** `detect_drift(outcomes)`. If CRITICAL → suspend strategy cell. If WARNING → halve position size. Store alerts. |
+| ML2 | Learning | Thompson Sampling | **DONE** | **Store `StrategyBandit` per cell.** On close: `update_bandit(bandit, won)`. Daily: `select_strategies(bandits, regime)` → use in `rank(strategies=)`. |
+| ML3 | Learning | Threshold optimization | **DONE** | **Schedule monthly:** `optimize_thresholds(outcomes)`. Store `ThresholdConfig`. Apply as Settings override to MA services. |
 
 ---
 
@@ -186,20 +177,131 @@ class ThresholdConfig(BaseModel):
 
 ---
 
-## eTrading Integration Notes
+## Platform Requirements (eTrading SaaS)
 
-| MA Feature | eTrading Action | When |
-|-----------|----------------|------|
-| SQ1 (IV rank on assessors) | Pass `iv_rank` from `ma.quotes.get_metrics()` to assessor calls | NOW |
-| SQ2 (regime staleness) | Check `regime.data_gaps`, retrain if `model_age_days > 60` | NOW |
-| SQ3 (POP calibration) | Pass `iv_rank` to `estimate_pop()`. Run `calibrate_pop_factors()` weekly | NOW |
-| SQ9 (IV rank in ranking) | Build `iv_rank_map` from broker metrics, pass to `rank(iv_rank_map=...)` | NOW |
-| G07 (performance) | Build pipeline: closed trades → `TradeOutcome` → `compute_performance_report()` | NOW |
-| G08 (commentary) | Pass `debug=True`, store commentary in `decision_lineage` | NOW |
-| G09 (data_gaps) | Read `data_gaps`, discount confidence for high-impact gaps | NOW |
-| ML1 (drift) | Call `detect_drift()` daily. If critical → suspend strategy cell. If warning → reduce size. | After ML1 built |
-| ML2 (bandits) | Store bandit params in DB. `update_bandit()` after every close. `select_strategies()` in daily plan. | After ML2 built |
-| ML3 (thresholds) | Run `optimize_thresholds()` monthly. Store result. Pass as config override. | After ML3 built |
+MA exposes all APIs. Platform provides infrastructure (DB, scheduling, UI). All MA CLI commands are already exposed in platform.
+
+### Data Pipeline: Platform Must Build
+
+| What to Store | DB Table/Model | Source | Used By |
+|--------------|----------------|--------|---------|
+| Trade outcomes | `TradeOutcomeORM` | Closed trades from broker fills | `detect_drift()`, `calibrate_weights()`, `calibrate_pop_factors()`, `optimize_thresholds()`, `build_bandits()`, `compute_performance_report()` |
+| Bandit params | `StrategyBanditORM` | `build_bandits()` initial, `update_bandit()` on each close | `select_strategies()` in daily plan |
+| Calibrated thresholds | `ThresholdConfigORM` | `optimize_thresholds()` output | Pass to MA as config override |
+| Drift alerts | `DriftAlertORM` (or just log) | `detect_drift()` output | Strategy suspension rules, UI warnings |
+| Calibrated weights | `WeightAdjustmentORM` | `calibrate_weights()` output | Override `REGIME_STRATEGY_ALIGNMENT` in ranking |
+| POP factors | `PopFactorsORM` | `calibrate_pop_factors()` output | Future: pass to `estimate_pop()` as custom factors |
+| Decision lineage | `TradeORM.decision_lineage` JSON | `debug=True` commentary from all MA services | "Explain this trade" API endpoint |
+
+### Scheduling: Platform Must Implement
+
+| Task | Frequency | MA API | Platform Action |
+|------|-----------|--------|-----------------|
+| **On every trade close** | Real-time | `update_bandit(bandit, won)` | Update bandit params in DB |
+| **On every trade close** | Real-time | Append to `TradeOutcome` table | Store outcome for batch analysis |
+| **Daily (pre-market)** | 1x/day | `detect_drift(outcomes)` | If CRITICAL → suspend strategy cell. If WARNING → halve position size. |
+| **Daily (pre-market)** | 1x/day | `ma.regime.detect(ticker)` | Check `model_age_days`. If > 60 → call `ma.regime.fit(ticker)` |
+| **Daily (plan generation)** | 1x/day | `select_strategies(bandits, regime)` | Use bandit-selected strategies instead of static list in `rank()` |
+| **Weekly** | 1x/week | `calibrate_weights(outcomes)` | Compare vs current matrix. Apply if improvement > 5% |
+| **Weekly** | 1x/week | `calibrate_pop_factors(outcomes)` | Store calibrated factors. Future: pass to `estimate_pop()` |
+| **Monthly** | 1x/month | `optimize_thresholds(outcomes)` | Store new ThresholdConfig. Apply as config override. |
+| **Monthly** | 1x/month | `compute_performance_report(outcomes)` | Dashboard display. Check `pop_accuracy` per regime. |
+
+### Data Flow: TradeOutcome Construction
+
+Platform builds `TradeOutcome` from its own DB when a trade closes:
+
+```python
+from market_analyzer import TradeOutcome, TradeExitReason
+
+outcome = TradeOutcome(
+    trade_id=trade_orm.id,
+    ticker=trade_orm.ticker,
+    strategy_type=trade_orm.structure_type,          # "iron_condor"
+    regime_at_entry=trade_orm.regime_at_entry,       # From regime.detect() at entry time
+    regime_at_exit=current_regime.regime,             # From regime.detect() at close time
+    entry_date=trade_orm.entry_date,
+    exit_date=date.today(),
+    entry_price=trade_orm.entry_price,
+    exit_price=fill_price,
+    pnl_dollars=realized_pnl,
+    pnl_pct=realized_pnl / (max_risk * 100),
+    holding_days=(date.today() - trade_orm.entry_date).days,
+    exit_reason=TradeExitReason(exit_reason),
+    composite_score_at_entry=trade_orm.composite_score,
+    contracts=trade_orm.contracts,
+    # Extended fields (SaaS)
+    structure_type=trade_orm.structure_type,
+    order_side=trade_orm.order_side,
+    iv_rank_at_entry=trade_orm.iv_rank_at_entry,     # Stored at entry time
+    dte_at_entry=trade_orm.dte_at_entry,
+    dte_at_exit=dte_remaining,
+)
+```
+
+**Platform must capture at entry time** (store in TradeORM for later outcome construction):
+- `regime_at_entry` — from `ma.regime.detect()`
+- `iv_rank_at_entry` — from `ma.quotes.get_metrics()`
+- `composite_score_at_entry` — from `RankedEntry.composite_score`
+- `dte_at_entry` — from `TradeSpec.target_dte`
+
+### Bandit Flow: Strategy Selection
+
+```python
+from market_analyzer import build_bandits, update_bandit, select_strategies
+
+# STARTUP: build from historical outcomes
+outcomes = load_all_outcomes_from_db()
+bandits = build_bandits(outcomes)
+save_bandits_to_db(bandits)
+
+# DAILY PLAN: use bandits for strategy selection
+bandits = load_bandits_from_db()
+regime = ma.regime.detect(ticker)
+selected = select_strategies(bandits, regime.regime, available_strategies, n=5)
+# selected = [(StrategyType.IRON_CONDOR, 0.82), (StrategyType.CALENDAR, 0.71), ...]
+# Pass selected strategies to rank():
+ranking = ma.ranking.rank(tickers, strategies=[s for s, _ in selected])
+
+# ON TRADE CLOSE: update bandit
+bandit = load_bandit(f"R{regime_at_entry}_{structure_type}")
+updated = update_bandit(bandit, won=(pnl > 0))
+save_bandit(updated)
+```
+
+### Drift Flow: Strategy Suspension
+
+```python
+from market_analyzer import detect_drift
+
+# DAILY PRE-MARKET
+outcomes = load_recent_outcomes(days=180)
+alerts = detect_drift(outcomes)
+
+for alert in alerts:
+    if alert.severity == "critical":
+        suspend_strategy(alert.regime_id, alert.strategy_type)
+        notify_user(f"Suspended {alert.strategy_type} in R{alert.regime_id}: "
+                    f"win rate dropped from {alert.historical_win_rate:.0%} to {alert.recent_win_rate:.0%}")
+    elif alert.severity == "warning":
+        reduce_allocation(alert.regime_id, alert.strategy_type, factor=0.5)
+```
+
+### Threshold Flow: Config Override
+
+```python
+from market_analyzer import optimize_thresholds, ThresholdConfig
+
+# MONTHLY
+outcomes = load_all_outcomes_from_db()
+current = load_threshold_config_from_db() or ThresholdConfig()
+optimized = optimize_thresholds(outcomes, current)
+save_threshold_config(optimized)
+
+# APPLY: pass to MA as Settings override
+# Platform constructs MarketAnalyzer with custom config that uses optimized thresholds
+# e.g., IronCondorSettings.iv_rank_min = optimized.ic_iv_rank_min
+```
 
 ---
 
