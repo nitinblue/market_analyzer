@@ -2475,6 +2475,215 @@ Requires --broker connection."""
             print(f"\n  {_styled('To connect:', 'bold')} analyzer-cli --broker")
             print(f"  Requires:      TASTYTRADE_***_DATA env vars in eTrading/.env")
 
+    def do_risk(self, arg: str) -> None:
+        """Show portfolio risk dashboard from demo positions.\nUsage: risk\n       risk --nlv 50000 --peak 52000\n\nBuilds a demo portfolio to show what the risk dashboard computes.\neTrading provides real positions; this command shows the computation."""
+        import traceback
+
+        parts = arg.strip().split()
+        nlv = 50000.0
+        peak = 52000.0
+
+        # Parse --nlv and --peak flags
+        i = 0
+        while i < len(parts):
+            if parts[i] == "--nlv" and i + 1 < len(parts):
+                try:
+                    nlv = float(parts[i + 1])
+                except ValueError:
+                    print(f"Invalid NLV: {parts[i + 1]}")
+                    return
+                i += 2
+            elif parts[i] == "--peak" and i + 1 < len(parts):
+                try:
+                    peak = float(parts[i + 1])
+                except ValueError:
+                    print(f"Invalid peak: {parts[i + 1]}")
+                    return
+                i += 2
+            else:
+                i += 1
+
+        try:
+            from market_analyzer.risk import (
+                PortfolioPosition,
+                GreeksLimits,
+                compute_portfolio_var,
+                check_portfolio_greeks,
+                check_strategy_concentration,
+                check_directional_concentration,
+                check_drawdown_circuit_breaker,
+                compute_risk_dashboard,
+            )
+
+            # Build demo positions to illustrate the risk engine
+            demo_positions = [
+                PortfolioPosition(
+                    ticker="SPY", structure_type="iron_condor", direction="neutral",
+                    sector="broad_market", max_loss=500, buying_power_used=500,
+                    notional_value=57000, delta=-0.02, gamma=-0.001, theta=0.15, vega=-0.30,
+                    regime_at_entry=1, dte_remaining=28, current_pnl_pct=0.25,
+                ),
+                PortfolioPosition(
+                    ticker="QQQ", structure_type="iron_condor", direction="neutral",
+                    sector="tech", max_loss=450, buying_power_used=450,
+                    notional_value=49000, delta=-0.03, gamma=-0.001, theta=0.12, vega=-0.25,
+                    regime_at_entry=1, dte_remaining=35, current_pnl_pct=0.10,
+                ),
+                PortfolioPosition(
+                    ticker="GLD", structure_type="credit_spread", direction="bullish",
+                    sector="commodities", max_loss=300, buying_power_used=300,
+                    notional_value=28000, delta=0.15, gamma=0.002, theta=0.08, vega=-0.10,
+                    regime_at_entry=3, dte_remaining=21, current_pnl_pct=0.40,
+                ),
+            ]
+
+            # Correlation data (SPY/QQQ highly correlated)
+            corr_data = {
+                ("SPY", "QQQ"): 0.92,
+                ("SPY", "GLD"): 0.05,
+                ("QQQ", "GLD"): -0.10,
+            }
+
+            # ATR and regime data
+            atr_data = {"SPY": 0.012, "QQQ": 0.015, "GLD": 0.010}
+            regime_data = {"SPY": 1, "QQQ": 1, "GLD": 3}
+
+            # Try to get real macro data
+            macro_regime = "unknown"
+            macro_factor = 1.0
+            try:
+                ma = self._get_ma()
+                from market_analyzer.macro_research import classify_macro_regime
+                from market_analyzer import DataService
+                ds = ma._data_service or DataService()
+                macro = classify_macro_regime(ds)
+                macro_regime = macro.regime.value
+                macro_factor = macro.position_size_factor
+            except Exception:
+                pass
+
+            dashboard = compute_risk_dashboard(
+                positions=demo_positions,
+                account_nlv=nlv,
+                account_peak=peak,
+                max_positions=5,
+                greeks_limits=GreeksLimits(),
+                circuit_breaker_pct=0.10,
+                atr_by_ticker=atr_data,
+                regime_by_ticker=regime_data,
+                correlation_data=corr_data,
+                avg_underlying_price=450,
+                macro_regime=macro_regime,
+                macro_position_factor=macro_factor,
+            )
+
+            _print_header(f"Portfolio Risk Dashboard — {dashboard.as_of_date}")
+
+            # Overall status
+            level_colors = {
+                "low": "green", "moderate": "green",
+                "elevated": "yellow", "high": "red", "critical": "red",
+            }
+            level_color = level_colors.get(dashboard.overall_risk_level, "")
+            gate_str = _styled("OPEN", "green") if dashboard.can_open_new_trades else _styled("BLOCKED", "red")
+            print(f"\n  Risk Level:  {_styled(dashboard.overall_risk_level.upper(), level_color)}")
+            print(f"  New Trades:  {gate_str}  (size factor: {dashboard.max_new_trade_size_pct:.0%})")
+            print(f"  NLV:         ${dashboard.account_nlv:,.0f}")
+
+            # Positions
+            print(f"\n  {_styled('Positions', 'bold')}")
+            print(f"    Open:       {dashboard.open_positions}/{dashboard.max_positions} "
+                  f"({dashboard.slots_remaining} slots remaining)")
+            print(f"    Total risk: {dashboard.portfolio_risk_pct:.1f}% of NLV "
+                  f"(${sum(p.max_loss for p in demo_positions):,.0f})")
+
+            # Drawdown
+            dd = dashboard.drawdown
+            dd_color = "red" if dd.is_triggered else ("yellow" if dd.drawdown_pct > 0.05 else "green")
+            print(f"\n  {_styled('Drawdown', 'bold')}")
+            print(f"    Peak:       ${dd.account_peak:,.0f}")
+            print(f"    Current:    ${dd.current_nlv:,.0f}")
+            print(f"    Drawdown:   {_styled(f'{dd.drawdown_pct:.1%}', dd_color)} "
+                  f"(${dd.drawdown_dollars:,.0f})")
+            print(f"    Breaker:    {dd.circuit_breaker_pct:.0%} "
+                  f"({'TRIGGERED' if dd.is_triggered else 'OK'})")
+
+            # VaR
+            if dashboard.var:
+                v = dashboard.var
+                var_color = "red" if v.var_pct_of_nlv > 5 else ("yellow" if v.var_pct_of_nlv > 2 else "green")
+                print(f"\n  {_styled('Value at Risk', 'bold')}")
+                print(f"    1-day 95%:  {_styled(f'${v.var_1d_95:,.0f}', var_color)} "
+                      f"({v.var_pct_of_nlv:.1f}% of NLV)")
+                print(f"    1-day 99%:  ${v.var_1d_99:,.0f}")
+                print(f"    5-day 95%:  ${v.var_5d_95:,.0f}")
+
+            # Greeks
+            if dashboard.greeks:
+                g = dashboard.greeks
+                gl_str = _styled("OK", "green") if dashboard.greeks_within_limits else _styled("BREACH", "red")
+                print(f"\n  {_styled('Portfolio Greeks', 'bold')} [{gl_str}]")
+                print(f"    Delta: {g.net_delta:+.4f}  (${g.delta_dollars:+,.0f})")
+                print(f"    Gamma: {g.net_gamma:+.6f}")
+                print(f"    Theta: {g.net_theta:+.4f}  (${g.theta_dollars_per_day:+,.2f}/day)")
+                print(f"    Vega:  {g.net_vega:+.4f}")
+
+            # Strategy concentration
+            sc = dashboard.strategy_concentration
+            sc_color = "yellow" if sc.is_concentrated else "green"
+            print(f"\n  {_styled('Strategy Mix', 'bold')} [{_styled('CONCENTRATED' if sc.is_concentrated else 'OK', sc_color)}]")
+            for strat, count in sorted(sc.by_strategy.items(), key=lambda x: -x[1]):
+                bar = "#" * count
+                print(f"    {strat:20s} {count}  {bar}")
+
+            # Directional exposure
+            de = dashboard.directional_exposure
+            de_color = "yellow" if de.is_concentrated else "green"
+            print(f"\n  {_styled('Directional Exposure', 'bold')} [{_styled(de.direction.upper(), de_color)}]")
+            print(f"    Score:    {de.net_delta_score:+.2f}  "
+                  f"(bull={de.bullish_positions} bear={de.bearish_positions} neutral={de.neutral_positions})")
+
+            # Correlation
+            if dashboard.correlation_risk:
+                cr = dashboard.correlation_risk
+                print(f"\n  {_styled('Correlation Risk', 'bold')}")
+                print(f"    Effective positions: {cr.effective_positions:.1f} "
+                      f"(diversification: {cr.diversification_score:.0%})")
+                if cr.highly_correlated_pairs:
+                    for a, b, c in cr.highly_correlated_pairs:
+                        print(f"    {_styled(f'{a}/{b}: {c:.2f}', 'yellow')}")
+
+            # Sector concentration
+            if dashboard.sector_concentration:
+                print(f"\n  {_styled('Sector Concentration', 'bold')}")
+                for sector, pct in sorted(dashboard.sector_concentration.items(), key=lambda x: -x[1]):
+                    bar = "#" * int(pct / 5)
+                    print(f"    {sector:20s} {pct:5.1f}%  {bar}")
+
+            # Macro
+            print(f"\n  {_styled('Macro', 'bold')}")
+            print(f"    Regime:   {dashboard.macro_regime}")
+            print(f"    Size factor: {dashboard.macro_position_factor:.0%}")
+
+            # Alerts
+            if dashboard.alerts:
+                print(f"\n  {_styled('Alerts', 'bold')}")
+                for alert in dashboard.alerts:
+                    print(f"    {_styled('!', 'red')} {alert}")
+
+            # Commentary
+            if dashboard.commentary:
+                print(f"\n  {_styled('Commentary', 'dim')}")
+                for line in dashboard.commentary:
+                    print(f"    {line}")
+
+            print(f"\n  {_styled('Note:', 'dim')} Using demo positions. "
+                  f"eTrading provides real positions for live risk assessment.")
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+            traceback.print_exc()
+
     def do_overnight(self, arg: str) -> None:
         """Assess overnight gap risk for a position.\nUsage: overnight TICKER [--dte N] [--status safe|tested|breached]\n  Example: overnight GLD --dte 14 --status tested"""
         parts = arg.strip().split()
@@ -3339,6 +3548,1144 @@ Requires --broker connection."""
             print(f"\n  Notes:")
             for note in plan.notes:
                 print(f"    - {note}")
+
+    def do_research(self, arg: str) -> None:
+        """Full macro research report — assets, sentiment, regime, economics.
+        Usage: research [daily|weekly|monthly] [--fred-key KEY]"""
+
+        ma = self._get_ma()
+        parts = arg.strip().split()
+        timeframe = "daily"
+        fred_key = None
+
+        i = 0
+        while i < len(parts):
+            if parts[i] == "--fred-key" and i + 1 < len(parts):
+                fred_key = parts[i + 1]
+                i += 2
+            elif parts[i] in ("daily", "weekly", "monthly"):
+                timeframe = parts[i]
+                i += 1
+            else:
+                i += 1
+
+        _print_header(f"Macro Research Report ({timeframe})")
+        print(f"\n  Fetching data for research assets...")
+
+        # Fetch all research tickers
+        from market_analyzer.macro_research import (
+            RESEARCH_ASSETS,
+            generate_research_report,
+        )
+
+        # Get DataService
+        ds = None
+        if ma.regime and hasattr(ma.regime, "data_service"):
+            ds = ma.regime.data_service
+        if ds is None:
+            from market_analyzer import DataService
+
+            ds = DataService()
+
+        data: dict = {}
+        for ticker in RESEARCH_ASSETS:
+            try:
+                data[ticker] = ds.get_ohlcv(ticker)
+            except Exception:
+                pass  # Graceful — skip missing tickers
+
+        print(f"  Fetched {len(data)}/{len(RESEARCH_ASSETS)} assets")
+
+        # Get SPY P/E
+        spy_pe = None
+        try:
+            import yfinance as yf
+
+            spy_pe = yf.Ticker("SPY").info.get("trailingPE")
+        except Exception:
+            pass
+
+        report = generate_research_report(data, timeframe, fred_key, spy_pe)
+
+        # Display
+        print(f"\n{report.research_note}")
+
+        # Regime
+        regime = report.regime
+        color_map = {
+            "risk_on": "green",
+            "risk_off": "red",
+            "stagflation": "red",
+            "reflation": "yellow",
+            "deflationary": "red",
+            "transition": "yellow",
+        }
+        print(
+            f"\n  Regime: {_styled(regime.regime.value.upper(), color_map.get(regime.regime.value, 'white'))}"
+            f" ({regime.confidence:.0%})"
+        )
+        for ev in regime.evidence:
+            print(f"    - {ev}")
+        print(f"  Position size: {regime.position_size_factor:.0%}")
+        if regime.favor_sectors:
+            print(f"  Favor: {', '.join(regime.favor_sectors)}")
+        if regime.avoid_sectors:
+            print(f"  Avoid: {', '.join(regime.avoid_sectors)}")
+
+        # Sentiment
+        s = report.sentiment
+        sent_color = {
+            "extreme_fear": "red",
+            "fear": "red",
+            "neutral": "yellow",
+            "greed": "green",
+            "extreme_greed": "green",
+        }
+        print(
+            f"\n  Sentiment: {_styled(s.overall_sentiment.upper(), sent_color.get(s.overall_sentiment, 'white'))}"
+            f" ({s.sentiment_score:+.2f})"
+        )
+        print(f"    VIX: {s.vix_level:.1f} ({s.vix_trend}, {s.vix_term_structure})")
+        if s.gold_silver_ratio:
+            print(f"    Gold/Silver ratio: {s.gold_silver_ratio:.1f}")
+        if s.equity_risk_premium is not None:
+            print(f"    Equity risk premium: {s.equity_risk_premium:.1f}%")
+
+        # Top/bottom assets
+        if report.asset_scores:
+            sorted_scores = sorted(
+                report.asset_scores, key=lambda sc: sc.period_return_pct, reverse=True
+            )
+            print(f"\n  Asset Performance ({timeframe}):")
+            for score in sorted_scores[:5]:
+                sig_color = "green" if score.signal_score > 0 else "red"
+                print(
+                    f"    {score.name:25s} {score.period_return_pct:+6.1f}%"
+                    f"  RSI={score.rsi:4.0f}"
+                    f"  {_styled(score.signal.upper(), sig_color)}"
+                )
+            if len(sorted_scores) > 10:
+                print(f"    ...")
+            for score in sorted_scores[-3:]:
+                sig_color = "green" if score.signal_score > 0 else "red"
+                print(
+                    f"    {score.name:25s} {score.period_return_pct:+6.1f}%"
+                    f"  RSI={score.rsi:4.0f}"
+                    f"  {_styled(score.signal.upper(), sig_color)}"
+                )
+
+        # Key signals
+        if report.key_signals:
+            print(f"\n  Key Signals:")
+            for sig in report.key_signals[:8]:
+                print(f"    - {sig}")
+
+        # India
+        print(f"\n  India Context:")
+        for c in report.india.commentary:
+            print(f"    {c}")
+
+        # Economics
+        if report.economics and report.economics.data_source == "fred":
+            print(f"\n  Economic Fundamentals (FRED):")
+            for c in report.economics.commentary:
+                print(f"    {c}")
+        elif report.economics:
+            print(f"\n  {_styled(report.economics.commentary[0], 'yellow')}")
+
+    def do_stress_test(self, arg: str) -> None:
+        """Run stress test scenarios against portfolio.
+        Usage: stress_test [SCENARIO]
+          Scenarios: market_down_1pct, market_down_3pct, market_down_5pct, market_down_10pct,
+                     market_up_3pct, vix_spike_50pct, vix_spike_100pct, flash_crash,
+                     black_monday, covid_march_2020, india_crash, fed_surprise
+          No args = run standard suite (7 scenarios)"""
+
+        from market_analyzer.stress_testing import (
+            run_stress_suite,
+            run_stress_test,
+            get_predefined_scenario,
+        )
+        from market_analyzer.risk import PortfolioPosition
+
+        # Demo positions (in real use, eTrading passes from portfolio DB)
+        demo_positions = [
+            PortfolioPosition(
+                ticker="SPY", structure_type="iron_condor", direction="neutral",
+                sector="index", max_loss=420, notional_value=66000,
+                delta=0.03, theta=0.04, vega=-0.10, dte_remaining=25,
+            ),
+            PortfolioPosition(
+                ticker="QQQ", structure_type="credit_spread", direction="bullish",
+                sector="tech", max_loss=300, notional_value=48000,
+                delta=-0.15, theta=0.02, vega=-0.05, dte_remaining=18,
+            ),
+            PortfolioPosition(
+                ticker="GLD", structure_type="equity_long", direction="bullish",
+                sector="commodity", max_loss=5000, notional_value=25000,
+                delta=1.0, theta=0, vega=0, dte_remaining=0,
+            ),
+        ]
+        account_nlv = 50000
+
+        _print_header("Portfolio Stress Test")
+        print(f"\n  Demo portfolio: {len(demo_positions)} positions, NLV=${account_nlv:,}")
+        for p in demo_positions:
+            print(f"    {p.ticker:6s} {p.structure_type:15s} max_loss=${p.max_loss:,.0f}")
+
+        parts = arg.strip().split()
+
+        if parts:
+            # Single scenario
+            scenario_name = parts[0].lower()
+            try:
+                params = get_predefined_scenario(scenario_name)
+                result = run_stress_test(demo_positions, params, account_nlv)
+
+                print(f"\n  Scenario: {result.scenario.name}")
+                print(f"  {result.scenario.description}")
+                color = (
+                    "red" if result.total_impact_pct < -3
+                    else "yellow" if result.total_impact_pct < -1
+                    else "green"
+                )
+                print(
+                    f"\n  Portfolio Impact: "
+                    f"{_styled(f'{result.total_impact_dollars:+,.0f} ({result.total_impact_pct:+.1f}%)', color)}"
+                )
+                print(
+                    f"  Survives: "
+                    f"{'YES' if result.portfolio_survives else _styled('NO', 'red')}"
+                )
+                print(f"\n  Position Details:")
+                for pi in result.position_impacts:
+                    ic = (
+                        "red" if pi.new_status in ("breached", "max_loss")
+                        else "yellow" if pi.new_status == "tested"
+                        else "green"
+                    )
+                    print(
+                        f"    {pi.ticker:6s} {pi.impact_dollars:+8,.0f}  "
+                        f"[{_styled(pi.new_status.upper(), ic)}] {pi.action_needed}"
+                    )
+                print(f"\n  Action: {result.recommended_action}")
+            except KeyError:
+                print(f"  Unknown scenario: '{scenario_name}'")
+                print(f"  Available: market_down_1pct, market_down_3pct, market_down_5pct,")
+                print(f"    vix_spike_50pct, flash_crash, black_monday, fed_surprise, india_crash")
+        else:
+            # Full suite
+            suite = run_stress_suite(demo_positions, account_nlv)
+            print(f"\n  {suite.summary}")
+            print()
+            for result in suite.results:
+                color = (
+                    "red" if result.total_impact_pct < -3
+                    else "yellow" if result.total_impact_pct < -1
+                    else "green"
+                )
+                survives = (
+                    "OK" if result.portfolio_survives
+                    else _styled("FAIL", "red")
+                )
+                print(
+                    f"  {result.scenario.name:25s} "
+                    f"{_styled(f'{result.total_impact_pct:+6.1f}%', color)} "
+                    f"({result.total_impact_dollars:+8,.0f})  {survives}"
+                )
+
+            print(f"\n  Worst: {suite.worst_scenario} ({suite.worst_impact_pct:+.1f}%)")
+            print(
+                f"  Survives all: "
+                f"{'YES' if suite.survives_all else _styled('NO — REDUCE RISK', 'red')}"
+            )
+
+    def do_stock(self, arg: str) -> None:
+        """Analyze a stock — fundamental + technical multi-strategy scoring.
+        Usage: stock TICKER [--horizon long|medium]
+        Example: stock RELIANCE --horizon long
+                 stock AAPL"""
+        parts = arg.strip().split()
+        if not parts:
+            print("Usage: stock TICKER [--horizon long|medium]")
+            return
+
+        ticker = parts[0].upper()
+        horizon_str = "long"
+        i = 1
+        while i < len(parts):
+            if parts[i] == "--horizon" and i + 1 < len(parts):
+                horizon_str = parts[i + 1].lower()
+                i += 2
+            else:
+                i += 1
+
+        from market_analyzer.equity_research import (
+            InvestmentHorizon,
+            analyze_stock,
+        )
+
+        horizon_map = {
+            "long": InvestmentHorizon.LONG_TERM,
+            "long_term": InvestmentHorizon.LONG_TERM,
+            "medium": InvestmentHorizon.MEDIUM_TERM,
+            "medium_term": InvestmentHorizon.MEDIUM_TERM,
+            "med": InvestmentHorizon.MEDIUM_TERM,
+        }
+        horizon = horizon_map.get(horizon_str, InvestmentHorizon.LONG_TERM)
+
+        try:
+            # Fetch OHLCV for technical signals
+            ma = self._get_ma()
+            ohlcv = None
+            try:
+                ohlcv = ma.data.get_ohlcv(ticker)
+            except Exception:
+                print(_styled("  (No OHLCV data — technicals unavailable)", "dim"))
+
+            rec = analyze_stock(
+                ticker, ohlcv=ohlcv, horizon=horizon, market=self._market,
+            )
+
+            _print_header(f"Stock Analysis: {rec.name} ({rec.ticker})")
+            print(f"\n  Sector:    {rec.sector}")
+            print(f"  Market:    {rec.market}")
+            print(f"  Horizon:   {rec.horizon.value}")
+            f = rec.fundamental
+            if f.market_cap is not None:
+                if f.market_cap >= 1e12:
+                    mcap_str = f"${f.market_cap / 1e12:.1f}T"
+                elif f.market_cap >= 1e9:
+                    mcap_str = f"${f.market_cap / 1e9:.1f}B"
+                else:
+                    mcap_str = f"${f.market_cap / 1e6:.0f}M"
+                print(f"  Market Cap: {mcap_str} ({f.market_cap_category})")
+
+            # Overall rating
+            rating_color = {
+                "strong_buy": "green", "buy": "green",
+                "hold": "yellow", "sell": "red", "strong_sell": "red",
+            }.get(rec.rating.value, "dim")
+            print(
+                f"\n  Composite: {rec.composite_score:.0f}/100 — "
+                f"{_styled(rec.rating.value.upper().replace('_', ' '), rating_color)}"
+            )
+            print(f"  Best fit:  {rec.primary_strategy.value}")
+
+            # Fundamentals snapshot
+            print(f"\n  {_styled('Fundamentals:', 'bold')}")
+            vals = []
+            if f.pe_trailing is not None:
+                vals.append(f"P/E {f.pe_trailing:.1f}")
+            if f.pe_forward is not None:
+                vals.append(f"Fwd P/E {f.pe_forward:.1f}")
+            if f.pb_ratio is not None:
+                vals.append(f"P/B {f.pb_ratio:.1f}")
+            if f.peg_ratio is not None:
+                vals.append(f"PEG {f.peg_ratio:.1f}")
+            if vals:
+                print(f"    Valuation: {' | '.join(vals)}")
+
+            prof = []
+            if f.roe is not None:
+                prof.append(f"ROE {f.roe:.0f}%")
+            if f.profit_margin is not None:
+                prof.append(f"Margin {f.profit_margin:.0f}%")
+            if f.revenue_growth_yoy is not None:
+                prof.append(f"Rev Growth {f.revenue_growth_yoy:.0f}%")
+            if prof:
+                print(f"    Profitability: {' | '.join(prof)}")
+
+            bal = []
+            if f.debt_to_equity is not None:
+                bal.append(f"D/E {f.debt_to_equity:.0f}")
+            if f.current_ratio is not None:
+                bal.append(f"Current {f.current_ratio:.1f}")
+            if f.dividend_yield is not None and f.dividend_yield > 0:
+                bal.append(f"Yield {f.dividend_yield:.1f}%")
+            if bal:
+                print(f"    Balance Sheet: {' | '.join(bal)}")
+
+            if f.from_52w_high_pct is not None:
+                print(f"    52-wk position: {f.from_52w_high_pct:.0f}% from high")
+
+            # Entry/Stop/Target
+            if rec.entry_price is not None:
+                print(f"\n  {_styled('Entry Plan:', 'bold')}")
+                print(f"    Entry:   ${rec.entry_price:.2f}")
+                if rec.stop_loss is not None:
+                    print(f"    Stop:    ${rec.stop_loss:.2f}")
+                if rec.target_price is not None:
+                    print(f"    Target:  ${rec.target_price:.2f}")
+                if rec.risk_reward is not None:
+                    print(f"    R:R      {rec.risk_reward:.1f}")
+
+            # Strategy scores
+            print(f"\n  {_styled('Strategy Scores:', 'bold')}")
+            for s in rec.strategy_scores:
+                bar_len = int(s.score / 5)
+                bar = "|" * bar_len
+                s_color = (
+                    "green" if s.score >= 60
+                    else "yellow" if s.score >= 45
+                    else "red"
+                )
+                print(
+                    f"    {s.strategy.value:20s} "
+                    f"{_styled(f'{s.score:5.0f}', s_color)} "
+                    f"{_styled(bar, s_color)} "
+                    f"({s.rating.value})"
+                )
+
+            # Thesis
+            print(f"\n  {_styled('Thesis:', 'bold')}")
+            print(f"    {rec.thesis}")
+
+            # Top strengths & risks
+            all_strengths = []
+            all_risks = []
+            for s in rec.strategy_scores:
+                all_strengths.extend(s.strengths[:1])
+                all_risks.extend(s.risks[:1])
+            if all_strengths:
+                print(f"\n  {_styled('Key Strengths:', 'bold')}")
+                for st in dict.fromkeys(all_strengths):  # dedupe, preserve order
+                    print(f"    {_styled('+', 'green')} {st}")
+            if all_risks:
+                print(f"\n  {_styled('Key Risks:', 'bold')}")
+                for rk in dict.fromkeys(all_risks):
+                    print(f"    {_styled('-', 'red')} {rk}")
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+            traceback.print_exc()
+
+    def do_stock_screen(self, arg: str) -> None:
+        """Screen stocks for a strategy.
+        Usage: stock_screen [--strategy value|growth|dividend|quality|turnaround] [--preset nifty50|us_mega|us_etf] [--market US|INDIA] [--horizon long|medium] [--top N] [TICKERS...]
+        Example: stock_screen --strategy value --preset nifty50
+                 stock_screen --strategy dividend --preset us_mega
+                 stock_screen AAPL MSFT GOOGL AMZN"""
+        parts = arg.strip().split()
+
+        strategy_str: str | None = None
+        preset: str | None = None
+        market_str: str | None = None
+        horizon_str = "long"
+        top_n = 10
+        explicit_tickers: list[str] = []
+
+        i = 0
+        while i < len(parts):
+            if parts[i] == "--strategy" and i + 1 < len(parts):
+                strategy_str = parts[i + 1].lower()
+                i += 2
+            elif parts[i] == "--preset" and i + 1 < len(parts):
+                preset = parts[i + 1].lower()
+                i += 2
+            elif parts[i] == "--market" and i + 1 < len(parts):
+                market_str = parts[i + 1].upper()
+                i += 2
+            elif parts[i] == "--horizon" and i + 1 < len(parts):
+                horizon_str = parts[i + 1].lower()
+                i += 2
+            elif parts[i] == "--top" and i + 1 < len(parts):
+                try:
+                    top_n = int(parts[i + 1])
+                except ValueError:
+                    pass
+                i += 2
+            elif not parts[i].startswith("--"):
+                explicit_tickers.append(parts[i].upper())
+                i += 1
+            else:
+                i += 1
+
+        from market_analyzer.equity_research import (
+            InvestmentHorizon,
+            InvestmentStrategy,
+            screen_stocks,
+        )
+        from market_analyzer.registry import MarketRegistry
+
+        # Resolve strategy
+        strategy_map = {
+            "value": InvestmentStrategy.VALUE,
+            "growth": InvestmentStrategy.GROWTH,
+            "dividend": InvestmentStrategy.DIVIDEND_INCOME,
+            "quality": InvestmentStrategy.QUALITY_MOMENTUM,
+            "quality_momentum": InvestmentStrategy.QUALITY_MOMENTUM,
+            "turnaround": InvestmentStrategy.TURNAROUND,
+            "sector": InvestmentStrategy.SECTOR_ROTATION,
+            "blend": InvestmentStrategy.BLEND,
+        }
+        strategy = strategy_map.get(strategy_str) if strategy_str else None
+
+        # Resolve horizon
+        horizon_map = {
+            "long": InvestmentHorizon.LONG_TERM,
+            "long_term": InvestmentHorizon.LONG_TERM,
+            "medium": InvestmentHorizon.MEDIUM_TERM,
+            "medium_term": InvestmentHorizon.MEDIUM_TERM,
+            "med": InvestmentHorizon.MEDIUM_TERM,
+        }
+        horizon = horizon_map.get(horizon_str, InvestmentHorizon.LONG_TERM)
+
+        # Resolve market
+        market = market_str or self._market
+
+        # Resolve tickers
+        if explicit_tickers:
+            tickers = explicit_tickers
+        elif preset:
+            reg = MarketRegistry()
+            tickers = reg.get_universe(preset=preset, market=market if not preset.startswith("india") else "INDIA")
+            if not tickers:
+                print(f"{_styled('No tickers found for preset:', 'yellow')} {preset}")
+                return
+        else:
+            # Default presets by market
+            reg = MarketRegistry()
+            if market.upper() == "INDIA":
+                tickers = reg.get_universe(preset="nifty50", market="INDIA")
+            else:
+                tickers = reg.get_universe(preset="us_mega", market="US")
+                if not tickers:
+                    tickers = reg.get_universe(preset="us_etf", market="US")
+
+        if not tickers:
+            print("No tickers to screen. Provide tickers or use --preset.")
+            return
+
+        print(f"  Screening {len(tickers)} tickers ({market}, {horizon.value})...")
+
+        try:
+            # Optionally fetch OHLCV for technical signals
+            ma = self._get_ma()
+            ohlcv_data: dict = {}
+            for t in tickers:
+                try:
+                    ohlcv_data[t] = ma.data.get_ohlcv(t)
+                except Exception:
+                    pass  # Skip tickers with no OHLCV
+
+            result = screen_stocks(
+                tickers,
+                ohlcv_data=ohlcv_data if ohlcv_data else None,
+                strategy=strategy,
+                horizon=horizon,
+                market=market,
+                top_n=top_n,
+            )
+
+            strat_label = strategy.value if strategy else "blend"
+            _print_header(f"Equity Screen: {strat_label} ({market}, {horizon.value})")
+            print(f"\n  {result.summary}")
+
+            if not result.top_picks:
+                print("\n  No stocks passed the minimum score threshold.")
+            else:
+                # Table of top picks
+                rows = []
+                for r in result.top_picks:
+                    best_strat = r.primary_strategy.value[:10]
+                    pe_str = f"{r.fundamental.pe_trailing:.1f}" if r.fundamental.pe_trailing else "—"
+                    roe_str = f"{r.fundamental.roe:.0f}%" if r.fundamental.roe else "—"
+                    div_str = f"{r.fundamental.dividend_yield:.1f}%" if r.fundamental.dividend_yield and r.fundamental.dividend_yield > 0 else "—"
+                    from52 = f"{r.fundamental.from_52w_high_pct:.0f}%" if r.fundamental.from_52w_high_pct is not None else "—"
+                    rating_color = {
+                        "strong_buy": "green", "buy": "green",
+                        "hold": "yellow", "sell": "red", "strong_sell": "red",
+                    }.get(r.rating.value, "dim")
+                    rows.append({
+                        "Ticker": r.ticker,
+                        "Name": r.name[:18],
+                        "Score": f"{r.composite_score:.0f}",
+                        "Rating": _styled(r.rating.value.replace("_", " ").upper(), rating_color),
+                        "Strategy": best_strat,
+                        "P/E": pe_str,
+                        "ROE": roe_str,
+                        "Div": div_str,
+                        "52wk": from52,
+                        "Sector": r.sector[:12],
+                    })
+
+                print()
+                print(tabulate(rows, headers="keys", tablefmt="simple", stralign="right"))
+
+            # Sector allocation
+            if result.sector_allocation:
+                print(f"\n  {_styled('Sector Allocation:', 'bold')}")
+                for sector, count in sorted(result.sector_allocation.items(), key=lambda x: -x[1]):
+                    print(f"    {sector}: {count}")
+
+            # Top pick thesis
+            if result.top_picks:
+                top = result.top_picks[0]
+                print(f"\n  {_styled('Top Pick:', 'bold')} {top.ticker}")
+                print(f"    {top.thesis}")
+
+            for c in result.commentary:
+                print(f"\n  {_styled(c, 'dim')}")
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+            traceback.print_exc()
+
+    # --- Capital Deployment Commands ---
+
+    def do_valuation(self, arg: str) -> None:
+        """Show market valuation assessment.\nUsage: valuation TICKER [--pe 22.5] [--div-yield 1.3] [--bond-yield 7.1]\n       valuation SPY\n       valuation NIFTY --pe 20.5 --bond-yield 7.1"""
+        parts = arg.strip().split()
+        if not parts:
+            print("Usage: valuation TICKER [--pe PE] [--div-yield YIELD] [--bond-yield YIELD]")
+            return
+
+        ticker = parts[0].upper()
+        current_pe: float | None = None
+        div_yield: float | None = None
+        bond_yield: float | None = None
+
+        i = 1
+        while i < len(parts):
+            if parts[i] == "--pe" and i + 1 < len(parts):
+                current_pe = float(parts[i + 1])
+                i += 2
+            elif parts[i] == "--div-yield" and i + 1 < len(parts):
+                div_yield = float(parts[i + 1])
+                i += 2
+            elif parts[i] == "--bond-yield" and i + 1 < len(parts):
+                bond_yield = float(parts[i + 1])
+                i += 2
+            else:
+                i += 1
+
+        try:
+            ma = self._get_ma()
+            ohlcv = ma.data_service.get_ohlcv(ticker)
+            from market_analyzer.capital_deployment import compute_market_valuation
+
+            val = compute_market_valuation(
+                ticker=ticker,
+                ohlcv=ohlcv,
+                current_pe=current_pe,
+                dividend_yield=div_yield,
+                bond_yield=bond_yield,
+            )
+
+            _print_header(f"Valuation — {val.name} ({val.ticker})")
+            zone_colors = {
+                "deep_value": "green", "value": "green",
+                "fair": "cyan", "expensive": "yellow", "bubble": "red",
+            }
+            color = zone_colors.get(val.zone, "white")
+            print(f"\n  Zone:           {_styled(val.zone.upper(), color)} (score: {val.zone_score:+.2f})")
+
+            if val.current_pe is not None:
+                print(f"  P/E:            {val.current_pe:.1f}")
+            if val.pe_5y_avg is not None:
+                print(f"  P/E (5y avg):   {val.pe_5y_avg:.1f}")
+            if val.pe_percentile is not None:
+                print(f"  PE percentile:  {val.pe_percentile:.0f}th")
+            if val.earnings_yield is not None:
+                print(f"  Earnings yield: {val.earnings_yield:.2f}%")
+            if val.dividend_yield is not None:
+                print(f"  Dividend yield: {val.dividend_yield:.1f}%")
+            print(f"  From 52w high:  {val.from_52w_high_pct:+.1f}%")
+            print(f"  From 52w low:   {val.from_52w_low_pct:+.1f}%")
+
+            if val.historical_return_at_this_pe:
+                print(f"\n  {_styled(val.historical_return_at_this_pe, 'dim')}")
+
+            if val.commentary:
+                print()
+                for c in val.commentary:
+                    print(f"  {c}")
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+
+    def do_deploy(self, arg: str) -> None:
+        """Create a systematic capital deployment plan.\nUsage: deploy AMOUNT [--months 12] [--market INDIA] [--risk moderate]\n       deploy 5000000 --months 12 --market INDIA --risk moderate\n       deploy 200000 --months 6 --market US --risk aggressive"""
+        parts = arg.strip().split()
+        if not parts:
+            print("Usage: deploy AMOUNT [--months N] [--market INDIA|US] [--risk conservative|moderate|aggressive]")
+            return
+
+        try:
+            total_capital = float(parts[0].replace(",", ""))
+        except ValueError:
+            print("First argument must be a number (total capital).")
+            return
+
+        months = 12
+        market = self._market.upper()
+        risk = "moderate"
+        regime_id = 2
+        val_zone = "fair"
+
+        i = 1
+        while i < len(parts):
+            if parts[i] == "--months" and i + 1 < len(parts):
+                months = int(parts[i + 1])
+                i += 2
+            elif parts[i] == "--market" and i + 1 < len(parts):
+                market = parts[i + 1].upper()
+                i += 2
+            elif parts[i] == "--risk" and i + 1 < len(parts):
+                risk = parts[i + 1].lower()
+                i += 2
+            elif parts[i] == "--regime" and i + 1 < len(parts):
+                regime_id = int(parts[i + 1])
+                i += 2
+            elif parts[i] == "--valuation" and i + 1 < len(parts):
+                val_zone = parts[i + 1].lower()
+                i += 2
+            else:
+                i += 1
+
+        is_india = market in ("INDIA", "IN")
+        currency = "INR" if is_india else "USD"
+
+        try:
+            from market_analyzer.capital_deployment import recommend_core_portfolio
+
+            portfolio = recommend_core_portfolio(
+                total_capital=total_capital,
+                currency=currency,
+                market=market,
+                regime_id=regime_id,
+                valuation_zone=val_zone,
+                risk_tolerance=risk,
+                deployment_months=months,
+            )
+
+            _print_header(f"Capital Deployment Plan — {portfolio.market}")
+            print(f"\n  Total Capital:  {currency} {total_capital:,.0f}")
+            print(f"  Risk Profile:   {risk}")
+            print(f"  Deploy Over:    {months} months")
+            print(f"  Allocation:     {portfolio.total_equity_pct:.0f}% equity | "
+                  f"{portfolio.total_gold_pct:.0f}% gold | "
+                  f"{portfolio.total_debt_pct:.0f}% debt")
+
+            # Core Holdings
+            print(f"\n  {_styled('Core Holdings:', 'bold')}")
+            rows = []
+            for h in portfolio.holdings:
+                amt = total_capital * (h.allocation_pct / 100.0)
+                rows.append({
+                    "Ticker": h.ticker,
+                    "Category": h.category,
+                    "Alloc%": f"{h.allocation_pct:.1f}%",
+                    "Amount": f"{currency} {amt:,.0f}",
+                    "Entry": h.entry_approach,
+                })
+            print(tabulate(rows, headers="keys", tablefmt="simple", stralign="right"))
+
+            # Deployment Schedule (first 3 months + last)
+            if portfolio.deployment:
+                dep = portfolio.deployment
+                print(f"\n  {_styled('Deployment Schedule:', 'bold')}")
+                print(f"  Base monthly: {currency} {dep.base_monthly:,.0f}")
+                print(f"  Regime:       {dep.regime_adjustment}")
+                print(f"  Valuation:    {dep.valuation_adjustment}")
+
+                allocs = dep.monthly_allocations
+                show = allocs[:3]
+                if len(allocs) > 3:
+                    show.append(allocs[-1])
+
+                dep_rows = []
+                for ma_item in show:
+                    note = ma_item.acceleration_reason or ma_item.deceleration_reason or ""
+                    dep_rows.append({
+                        "Month": ma_item.month,
+                        "Date": str(ma_item.date),
+                        "Total": f"{currency} {ma_item.amount:,.0f}",
+                        "Equity": f"{currency} {ma_item.equity_amount:,.0f}",
+                        "Gold": f"{currency} {ma_item.gold_amount:,.0f}",
+                        "Debt": f"{currency} {ma_item.debt_amount:,.0f}",
+                        "Note": note[:50] if note else "",
+                    })
+                if len(allocs) > 4:
+                    dep_rows.insert(3, {
+                        "Month": "...", "Date": "...", "Total": "...",
+                        "Equity": "...", "Gold": "...", "Debt": "...", "Note": "",
+                    })
+                print(tabulate(dep_rows, headers="keys", tablefmt="simple", stralign="right"))
+
+            # Commentary
+            if portfolio.commentary:
+                print()
+                for c in portfolio.commentary:
+                    print(f"  {_styled(c, 'dim')}")
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+
+    def do_allocate(self, arg: str) -> None:
+        """Show recommended asset allocation.\nUsage: allocate [--market INDIA] [--regime risk_off] [--valuation value] [--risk moderate] [--age 35]\n       allocate --market INDIA --regime risk_off --valuation deep_value\n       allocate --risk conservative --age 45"""
+        parts = arg.strip().split()
+
+        market = self._market.upper()
+        regime = "risk_off"
+        val_zone = "value"
+        risk = "moderate"
+        age: int | None = None
+
+        i = 0
+        while i < len(parts):
+            if parts[i] == "--market" and i + 1 < len(parts):
+                market = parts[i + 1].upper()
+                i += 2
+            elif parts[i] == "--regime" and i + 1 < len(parts):
+                regime = parts[i + 1].lower()
+                i += 2
+            elif parts[i] == "--valuation" and i + 1 < len(parts):
+                val_zone = parts[i + 1].lower()
+                i += 2
+            elif parts[i] == "--risk" and i + 1 < len(parts):
+                risk = parts[i + 1].lower()
+                i += 2
+            elif parts[i] == "--age" and i + 1 < len(parts):
+                age = int(parts[i + 1])
+                i += 2
+            else:
+                i += 1
+
+        try:
+            from market_analyzer.capital_deployment import compute_asset_allocation
+
+            alloc = compute_asset_allocation(
+                market=market,
+                regime=regime,
+                valuation_zone=val_zone,
+                risk_tolerance=risk,
+                age=age,
+            )
+
+            _print_header(f"Asset Allocation — {market}")
+            print(f"\n  Equity:  {_styled(f'{alloc.equity_pct:.1f}%', 'bold')}")
+            print(f"  Gold:    {alloc.gold_pct:.1f}%")
+            print(f"  Debt:    {alloc.debt_pct:.1f}%")
+            print(f"  Cash:    {alloc.cash_pct:.1f}%")
+
+            print(f"\n  {_styled('Equity Sub-Allocation:', 'bold')}")
+            for k, v in alloc.equity_split.items():
+                print(f"    {k:25s} {v:.0f}%")
+
+            print(f"\n  Regime:     {_styled(alloc.regime_context, 'dim')}")
+            print(f"  Rebalance:  {alloc.rebalance_trigger}")
+
+            if alloc.rationale:
+                print(f"\n  {_styled('Rationale:', 'bold')}")
+                for r in alloc.rationale:
+                    print(f"    {r}")
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+
+    def do_rebalance(self, arg: str) -> None:
+        """Check if portfolio needs rebalancing.\nUsage: rebalance EQUITY_PCT GOLD_PCT DEBT_PCT CASH_PCT --target EQ_T GOLD_T DEBT_T CASH_T --value PORTFOLIO_VALUE [--threshold 5]\n       rebalance 70 12 8 10 --target 60 15 15 10 --value 5000000\n       rebalance 55 20 20 5 --target 60 15 15 10 --value 200000 --threshold 3"""
+        parts = arg.strip().split()
+
+        if len(parts) < 4:
+            print("Usage: rebalance EQ% GOLD% DEBT% CASH% --target EQ% GOLD% DEBT% CASH% --value VALUE [--threshold 5]")
+            return
+
+        try:
+            current = {
+                "equity": float(parts[0]),
+                "gold": float(parts[1]),
+                "debt": float(parts[2]),
+                "cash": float(parts[3]),
+            }
+        except (ValueError, IndexError):
+            print("First 4 args must be current allocation percentages (equity gold debt cash).")
+            return
+
+        target = {"equity": 60.0, "gold": 15.0, "debt": 15.0, "cash": 10.0}
+        portfolio_value = 0.0
+        threshold = 5.0
+
+        i = 4
+        while i < len(parts):
+            if parts[i] == "--target" and i + 4 < len(parts):
+                target = {
+                    "equity": float(parts[i + 1]),
+                    "gold": float(parts[i + 2]),
+                    "debt": float(parts[i + 3]),
+                    "cash": float(parts[i + 4]),
+                }
+                i += 5
+            elif parts[i] == "--value" and i + 1 < len(parts):
+                portfolio_value = float(parts[i + 1].replace(",", ""))
+                i += 2
+            elif parts[i] == "--threshold" and i + 1 < len(parts):
+                threshold = float(parts[i + 1])
+                i += 2
+            else:
+                i += 1
+
+        if portfolio_value <= 0:
+            print("--value PORTFOLIO_VALUE is required (total portfolio value).")
+            return
+
+        try:
+            from market_analyzer.capital_deployment import check_rebalance
+
+            result = check_rebalance(
+                current_allocation=current,
+                target_allocation=target,
+                portfolio_value=portfolio_value,
+                drift_threshold_pct=threshold,
+            )
+
+            _print_header("Rebalance Check")
+            status = _styled("REBALANCE NEEDED", "yellow") if result.needs_rebalance else _styled("ON TARGET", "green")
+            print(f"\n  Status:    {status}")
+            print(f"  Trigger:   {result.trigger}")
+
+            print(f"\n  {_styled('Asset Drift:', 'bold')}")
+            rows = []
+            for a in result.actions:
+                action_color = "green" if a.action == "buy" else ("red" if a.action == "sell" else "dim")
+                rows.append({
+                    "Asset": a.asset.title(),
+                    "Current": f"{a.current_pct:.1f}%",
+                    "Target": f"{a.target_pct:.1f}%",
+                    "Drift": f"{a.drift_pct:+.1f}%",
+                    "Action": a.action.upper(),
+                    "Amount": f"{a.amount:,.0f}" if a.amount > 0 else "-",
+                })
+            print(tabulate(rows, headers="keys", tablefmt="simple", stralign="right"))
+
+            if result.commentary:
+                print()
+                for c in result.commentary:
+                    print(f"  {_styled(c, 'dim')}")
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+
+    def do_leap_vs_stock(self, arg: str) -> None:
+        """Compare LEAP call vs stock purchase for a ticker.\nUsage: leap_vs_stock TICKER [--price 150] [--iv 0.25] [--div-yield 1.5] [--dte 365]\n       leap_vs_stock AAPL\n       leap_vs_stock MSFT --price 420 --iv 0.22 --div-yield 0.8"""
+        parts = arg.strip().split()
+        if not parts:
+            print("Usage: leap_vs_stock TICKER [--price PRICE] [--iv IV] [--div-yield PCT] [--dte DAYS]")
+            return
+
+        ticker = parts[0].upper()
+        price: float | None = None
+        iv = 0.20
+        div_yield = 0.0
+        dte = 365
+        leap_premium: float | None = None
+        leap_strike: float | None = None
+
+        i = 1
+        while i < len(parts):
+            if parts[i] == "--price" and i + 1 < len(parts):
+                price = float(parts[i + 1])
+                i += 2
+            elif parts[i] == "--iv" and i + 1 < len(parts):
+                iv = float(parts[i + 1])
+                i += 2
+            elif parts[i] == "--div-yield" and i + 1 < len(parts):
+                div_yield = float(parts[i + 1])
+                i += 2
+            elif parts[i] == "--dte" and i + 1 < len(parts):
+                dte = int(parts[i + 1])
+                i += 2
+            elif parts[i] == "--premium" and i + 1 < len(parts):
+                leap_premium = float(parts[i + 1])
+                i += 2
+            elif parts[i] == "--strike" and i + 1 < len(parts):
+                leap_strike = float(parts[i + 1])
+                i += 2
+            else:
+                i += 1
+
+        try:
+            # Auto-fetch price if not provided
+            if price is None:
+                ma = self._get_ma()
+                ohlcv = ma.data_service.get_ohlcv(ticker)
+                price = float(ohlcv["Close"].iloc[-1])
+
+            from market_analyzer.capital_deployment import compare_leap_vs_stock
+
+            result = compare_leap_vs_stock(
+                ticker=ticker,
+                current_price=price,
+                dividend_yield_pct=div_yield,
+                leap_premium=leap_premium,
+                leap_strike=leap_strike,
+                leap_dte=dte,
+                iv=iv,
+            )
+
+            _print_header(f"LEAP vs Stock — {ticker} @ ${price:,.2f}")
+
+            # Stock side
+            print(f"\n  {_styled('Stock Purchase (100 shares):', 'bold')}")
+            print(f"    Cost:            ${result.stock_cost:,.0f}")
+            print(f"    Breakeven:       ${result.stock_breakeven:,.2f}")
+            print(f"    Annual Dividend: ${result.stock_annual_dividend:,.0f}")
+            print(f"    Max Loss:        {result.stock_max_loss}")
+
+            # LEAP side
+            print(f"\n  {_styled('LEAP Call:', 'bold')}")
+            print(f"    Strike:          ${result.leap_strike:,.2f} ({result.leap_dte} DTE)")
+            print(f"    Cost:            ${result.leap_cost:,.0f}")
+            print(f"    Delta:           {result.leap_delta:.2f}")
+            print(f"    Breakeven:       ${result.leap_breakeven:,.2f}")
+            print(f"    Daily Theta:     ${result.leap_daily_theta:,.2f}")
+            print(f"    Annual Theta:    ${result.leap_annual_theta_cost:,.0f}")
+            print(f"    Expiration:      {result.leap_expiration}")
+            print(f"    Max Loss:        {result.leap_max_loss}")
+
+            # Comparison
+            print(f"\n  {_styled('Comparison:', 'bold')}")
+            print(f"    Capital Efficiency:       {result.capital_efficiency:.1f}x")
+            print(f"    Capital Saved:            ${result.leap_capital_saved:,.0f}")
+            print(f"    Dividend Forgone:         ${result.dividend_forgone:,.0f}/yr")
+            print(f"    Theta Cost:               ${result.theta_cost_annual:,.0f}/yr")
+            print(f"    Interest on Saved Capital:${result.interest_on_saved_capital:,.0f}/yr")
+            print(f"    Net Annual Cost of LEAP:  ${result.net_annual_cost_of_leap:,.0f}")
+
+            # Verdict
+            color = "green" if result.leap_advantage else "yellow"
+            print(f"\n  Verdict: {_styled(result.verdict, color)}")
+            for r in result.rationale:
+                print(f"    {r}")
+
+            # When to use each
+            print(f"\n  {_styled('LEAP best when:', 'dim')}")
+            for item in result.leap_best_when:
+                print(f"    - {item}")
+            print(f"\n  {_styled('Stock best when:', 'dim')}")
+            for item in result.stock_best_when:
+                print(f"    - {item}")
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+
+    def do_wheel(self, arg: str) -> None:
+        """Analyze the Wheel strategy for a ticker.\nUsage: wheel TICKER [--price 150] [--iv 0.25] [--regime 1] [--dte 35] [--put-delta 0.30]\n       wheel AAPL\n       wheel MSFT --price 420 --iv 0.30 --regime 2"""
+        parts = arg.strip().split()
+        if not parts:
+            print("Usage: wheel TICKER [--price PRICE] [--iv IV] [--regime 1-4] [--dte DAYS] [--put-delta DELTA]")
+            return
+
+        ticker = parts[0].upper()
+        price: float | None = None
+        iv = 0.20
+        regime_id = 1
+        dte = 35
+        put_delta = 0.30
+        call_delta = 0.30
+        div_yield = 0.0
+
+        i = 1
+        while i < len(parts):
+            if parts[i] == "--price" and i + 1 < len(parts):
+                price = float(parts[i + 1])
+                i += 2
+            elif parts[i] == "--iv" and i + 1 < len(parts):
+                iv = float(parts[i + 1])
+                i += 2
+            elif parts[i] == "--regime" and i + 1 < len(parts):
+                regime_id = int(parts[i + 1])
+                i += 2
+            elif parts[i] == "--dte" and i + 1 < len(parts):
+                dte = int(parts[i + 1])
+                i += 2
+            elif parts[i] == "--put-delta" and i + 1 < len(parts):
+                put_delta = float(parts[i + 1])
+                i += 2
+            elif parts[i] == "--call-delta" and i + 1 < len(parts):
+                call_delta = float(parts[i + 1])
+                i += 2
+            elif parts[i] == "--div-yield" and i + 1 < len(parts):
+                div_yield = float(parts[i + 1])
+                i += 2
+            else:
+                i += 1
+
+        try:
+            # Auto-fetch price if not provided
+            if price is None:
+                ma = self._get_ma()
+                ohlcv = ma.data_service.get_ohlcv(ticker)
+                price = float(ohlcv["Close"].iloc[-1])
+
+            from market_analyzer.capital_deployment import analyze_wheel_strategy
+
+            result = analyze_wheel_strategy(
+                ticker=ticker,
+                current_price=price,
+                iv=iv,
+                regime_id=regime_id,
+                put_delta=put_delta,
+                call_delta=call_delta,
+                dte=dte,
+                dividend_yield_pct=div_yield,
+            )
+
+            _print_header(f"Wheel Strategy — {ticker} @ ${price:,.2f}")
+
+            # Phase 1: Cash-Secured Put
+            print(f"\n  {_styled('Phase 1: Cash-Secured Put', 'bold')}")
+            print(f"    Strike:            ${result.put_strike:,.2f}")
+            print(f"    Premium:           ${result.put_premium:,.0f}")
+            print(f"    DTE:               {result.put_dte} days")
+            print(f"    Annualized Yield:  {result.put_annualized_yield:.1f}%")
+            print(f"    Breakeven:         ${result.put_breakeven:,.2f}")
+            print(f"    Capital Required:  ${result.put_capital_required:,.0f}")
+
+            # Phase 2: Covered Call
+            print(f"\n  {_styled('Phase 2: Covered Call (if assigned)', 'bold')}")
+            print(f"    Strike:            ${result.call_strike:,.2f}")
+            print(f"    Premium:           ${result.call_premium:,.0f}")
+            print(f"    DTE:               {result.call_dte} days")
+            print(f"    Annualized Yield:  {result.call_annualized_yield:.1f}%")
+
+            # Full Wheel Metrics
+            print(f"\n  {_styled('Full Wheel Metrics:', 'bold')}")
+            print(f"    Total Premium:       ${result.total_premium_if_wheeled:,.0f}")
+            print(f"    Effective Cost Basis:${result.effective_cost_basis:,.2f}")
+            print(f"    Cost Reduction:      {result.cost_reduction_pct:.1f}%")
+            print(f"    Annualized Yield:    {result.annualized_wheel_yield:.1f}%")
+            print(f"    Combined Breakeven:  ${result.call_breakeven:,.2f}")
+
+            # Risk Assessment
+            print(f"\n  {_styled('Risk Assessment:', 'bold')}")
+            print(f"    Max Loss:            {result.max_loss_scenario}")
+            print(f"    Assignment Prob:     {result.assignment_probability}")
+
+            # Regime suitability
+            regime_color = "green" if regime_id in (1, 2) else "yellow" if regime_id == 3 else "red"
+            print(f"    Regime:              {_styled(result.regime_suitability, regime_color)}")
+
+            # Vs stock
+            print(f"\n  {_styled('vs Stock:', 'bold')} {result.vs_stock_advantage}")
+
+            # Verdict
+            if "ATTRACTIVE" in result.verdict:
+                v_color = "green"
+            elif "AVOID" in result.verdict:
+                v_color = "red"
+            elif "CAUTION" in result.verdict:
+                v_color = "yellow"
+            else:
+                v_color = "cyan"
+            print(f"\n  Verdict: {_styled(result.verdict, v_color)}")
+            for r in result.rationale:
+                print(f"    {r}")
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
 
     def do_quit(self, arg: str) -> bool:
         """Exit the REPL."""

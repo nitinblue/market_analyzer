@@ -18,9 +18,10 @@ This manual follows a trader's day — what you do first in the morning, how you
 8. [End of Day: Close or Hold](#8-end-of-day-close-or-hold)
 9. [After Close: Review and Learn](#9-after-close-review-and-learn)
 10. [Weekend: Plan and Calibrate](#10-weekend-plan-and-calibrate)
-11. [Capability Reference](#11-capability-reference)
-12. [Multi-Market: US + India](#12-multi-market-us--india)
-13. [Appendix: Models & Data Structures](#13-appendix-models--data-structures)
+11. [Equity Research: Stock Selection for Core Holdings](#11-equity-research)
+12. [Capability Reference](#12-capability-reference)
+13. [Multi-Market: US + India](#13-multi-market-us--india)
+14. [Appendix: Models & Data Structures](#14-appendix-models--data-structures)
 
 ---
 
@@ -139,6 +140,49 @@ cm = analyze_cross_market("SPY", "NIFTY", us_ohlcv, india_ohlcv,
 
 **CLI:** `crossmarket` or `india_context`
 
+### Full Macro Research Report
+
+The most comprehensive pre-market analysis — covers 22 assets across equities, bonds, commodities, currencies, and volatility. Classifies the macro regime, computes sentiment, and generates a research note.
+
+```python
+from market_analyzer import generate_research_report, RESEARCH_ASSETS
+
+# Fetch data for all 22 research assets
+data = {ticker: ds.get_ohlcv(ticker) for ticker in RESEARCH_ASSETS}
+report = generate_research_report(data, "daily", fred_api_key=None, spy_pe=26.3)
+```
+
+**What you get:**
+
+| Field | What it tells you |
+|-------|------------------|
+| `report.regime.regime` | RISK_ON / RISK_OFF / STAGFLATION / REFLATION / DEFLATIONARY / TRANSITION |
+| `report.regime.position_size_factor` | 1.0 (risk on) down to 0.2 (deflationary) — scale ALL trades |
+| `report.regime.favor_sectors` | Where to look (e.g., ["energy", "commodity"] in stagflation) |
+| `report.regime.avoid_sectors` | Where to stay away (e.g., ["tech", "bonds"] in stagflation) |
+| `report.sentiment.overall_sentiment` | extreme_fear / fear / neutral / greed / extreme_greed |
+| `report.sentiment.vix_term_structure` | contango (complacent) / backwardation (panic) |
+| `report.sentiment.equity_risk_premium` | Negative = bonds yield more than stocks |
+| `report.research_note` | 10-20 sentence research note (ready for daily email) |
+| `report.key_signals` | Actionable bullet points |
+| `report.india` | India VIX, FII flows, NIFTY-SPY correlation, banking health |
+
+**22 assets tracked:** SPY, QQQ, IWM, DIA (US equity) | NIFTY, BANKNIFTY (India) | EFA, EEM (global) | GLD, SLV, USO, COPX (commodities) | TLT, SHY, ^TNX, TIP (bonds) | HYG, LQD (credit) | UUP (dollar) | VIX, VIX3M, India VIX (volatility)
+
+**14 correlation pairs tracked** with divergence detection: SPY/TLT, SPY/GLD, SPY/VIX, GLD/yields, HYG/TLT, UUP/EEM, NIFTY/SPY, and more.
+
+**Macro regime classification rules:**
+- **RISK_ON:** Stocks up + credit tightening + VIX down + gold flat
+- **RISK_OFF:** Stocks down + gold/bonds up + VIX elevated
+- **STAGFLATION:** Stocks down + yields up + gold/oil up (growth slowing, inflation persistent)
+- **REFLATION:** Stocks up + yields up + oil/copper up (growth + inflation both rising)
+- **DEFLATIONARY:** Everything falling (liquidity crisis)
+
+**Economic fundamentals (optional, requires free FRED API key):**
+GDP growth, CPI, unemployment, Fed funds rate, M2 money supply, yield curve 2s10s, consumer sentiment, high yield spread, initial claims. Graceful without key.
+
+**CLI:** `research` or `research weekly` or `research monthly --fred-key YOUR_KEY`
+
 ---
 
 ## 3. Market Open: Find Opportunities
@@ -192,6 +236,39 @@ tech = ma.technicals.snapshot("SPY", debug=True)
 | Smart Money | Order blocks, fair value gaps | Institutional S/R zones |
 
 **CLI:** `technicals SPY`
+
+### Step 2.5: Universe — What to Scan
+
+Before screening, decide WHAT to scan. MA ships with built-in universes — no broker needed.
+
+```python
+# Built-in presets
+tickers = ma.registry.get_universe(preset="income")        # 12 tickers (high options liquidity)
+tickers = ma.registry.get_universe(preset="nifty50")       # 43 India NIFTY 50 stocks
+tickers = ma.registry.get_universe(preset="sector_etf")    # 12 US sector ETFs
+tickers = ma.registry.get_universe(preset="directional")   # 31 liquid equities (US + India)
+tickers = ma.registry.get_universe(preset="india_fno")     # 23 India F&O instruments
+
+# Filter by market/sector
+tickers = ma.registry.get_universe(market="INDIA", sector="finance")  # 10 India finance tickers
+
+# Custom: add your own instruments at runtime
+ma.registry.add_instrument(InstrumentInfo(ticker="COIN", market="US", ...))
+```
+
+**10 presets available:** income, directional, us_etf, us_mega, sector_etf, india_fno, india_index, nifty50, macro, all
+
+**85+ instruments** with sector, options liquidity rating (high/medium/low), and scan group tags.
+
+**CLI:** `scan_universe income` or `scan_universe nifty50 --market INDIA`
+
+**Also works in rank/screen:**
+```
+rank --preset income              # Scan income universe
+rank --preset nifty50             # Scan NIFTY 50 stocks
+screen --preset sector_etf        # Screen US sector ETFs
+rank                              # Auto-default: income (US) or india_fno (India)
+```
 
 ### Step 3: Screening
 
@@ -261,7 +338,7 @@ Iron condor, iron butterfly, calendar, diagonal, ratio spread, credit spread, de
 
 **CLI:** `rank SPY GLD QQQ --debug --account 50000`
 
-### Account Filtering
+### Account Filtering (Basic)
 
 ```python
 from market_analyzer import filter_trades_by_account
@@ -274,7 +351,218 @@ filtered = filter_trades_by_account(
 # → FilteredTrades: affordable + filtered_out with reasons
 ```
 
+### Portfolio-Aware Filtering (Full Risk Gate)
+
+When you have open positions, use the portfolio-aware filter instead. It enforces:
+- **Max positions** (don't open more than 5 total)
+- **Per-ticker limit** (max 2 on same underlying)
+- **Sector concentration** (max 40% of NLV in one sector)
+- **Portfolio risk budget** (max 25% total risk deployed)
+
+```python
+from market_analyzer import (
+    filter_trades_with_portfolio, OpenPosition, RiskLimits
+)
+
+# eTrading builds this from portfolio DB
+open_positions = [
+    OpenPosition(ticker="SPY", structure_type="iron_condor", sector="index",
+                 max_loss=420, buying_power_used=500),
+    OpenPosition(ticker="GLD", structure_type="credit_spread", sector="commodity",
+                 max_loss=300, buying_power_used=300),
+]
+
+result = filter_trades_with_portfolio(
+    ranked_entries=ranking.top_trades,
+    open_positions=open_positions,
+    account_nlv=50000,
+    available_buying_power=total_bp - sum(p.buying_power_used for p in open_positions),
+    risk_limits=RiskLimits(
+        max_positions=5,
+        max_per_ticker=2,
+        max_sector_concentration_pct=0.40,
+        max_portfolio_risk_pct=0.25,
+    ),
+    allowed_structures=["iron_condor", "credit_spread", "calendar"],
+    max_risk_per_trade=2500,
+)
+# → PortfolioFilterResult
+#   approved: trades that pass ALL gates
+#   rejected: trades with specific rejection reasons
+#   portfolio_risk_pct: current risk as % of NLV
+#   slots_remaining: how many more positions can be opened
+```
+
+**7-step filter cascade:**
+1. Structure whitelist
+2. Total position limit
+3. Per-ticker limit
+4. Buying power check
+5. Single trade risk limit
+6. Sector concentration
+7. Portfolio risk budget
+
 **CLI:** Part of `rank --account 30000`
+
+### Trade Gate Framework — BLOCK / SCALE / WARN
+
+Not all gates should block trades. The framework classifies every check into three tiers:
+
+```python
+from market_analyzer import evaluate_trade_gates
+
+report = evaluate_trade_gates(
+    ticker="SPY", strategy="iron_condor",
+    trade_quality_score=0.45,           # Below 0.50 threshold
+    macro_regime="risk_off",            # Cautious regime
+    position_count=3, max_positions=5,  # Room for 2 more
+    bp_sufficient=True,
+    strategy_concentrated=True,         # >50% in IC
+)
+
+print(report.final_action)       # "scale" (not blocked — just reduced)
+print(report.final_scale_factor) # 0.38 (trade at 38% of normal size)
+print(report.can_proceed)        # True (it's a scale, not a block)
+print(report.commentary)         # "SCALED to 38% by trade_quality_score, macro_regime_caution..."
+```
+
+**Three tiers:**
+
+| Tier | Action | What fires it | Effect |
+|------|--------|--------------|--------|
+| **BLOCK** | Trade does NOT proceed | Drawdown breaker, portfolio full, no BP, macro DEFLATIONARY | `can_proceed = False` |
+| **SCALE** | Reduce position size | Low quality score, macro caution, wide spreads, no IV rank | `final_scale_factor < 1.0` |
+| **WARN** | Log + alert, allow trade | Strategy/directional/sector concentration, model stale, data gaps | `can_proceed = True`, full size |
+
+**17 gates classified:**
+- 5 BLOCK gates (capital preservation — non-negotiable)
+- 5 SCALE gates (quality — trade allowed at reduced size)
+- 7 WARN gates (informational — logged but don't affect sizing)
+
+**Shadow Portfolio — Learning from Rejections:**
+
+eTrading should track trades that were BLOCKED to see if they would have been profitable:
+
+```python
+from market_analyzer import analyze_gate_effectiveness
+
+# eTrading stores rejected trades and tracks hypothetical P&L
+effectiveness = analyze_gate_effectiveness(gate_history, shadow_outcomes, actual_outcomes)
+
+# If rejected trades consistently win:
+if effectiveness.shadow_win_rate and effectiveness.shadow_win_rate > 0.60:
+    print("Gates too tight — relaxing thresholds")
+    # effectiveness.gates_too_tight shows which gates to loosen
+```
+
+This creates a **feedback loop**: gates that block profitable trades get flagged for loosening. Gates that let losing trades through get flagged for tightening.
+
+### Portfolio Risk Dashboard
+
+Before placing ANY new trade, check the full risk picture:
+
+```python
+from market_analyzer import (
+    compute_risk_dashboard, PortfolioPosition, GreeksLimits
+)
+
+positions = [
+    PortfolioPosition(ticker="SPY", structure_type="iron_condor", direction="neutral",
+                      sector="index", max_loss=420, delta=0.03, theta=0.04, vega=-0.10),
+    PortfolioPosition(ticker="GLD", structure_type="credit_spread", direction="bullish",
+                      sector="commodity", max_loss=300, delta=-0.15, theta=0.02),
+]
+
+dashboard = compute_risk_dashboard(
+    positions=positions,
+    account_nlv=50000,
+    peak_nlv=52000,      # Highest NLV ever (for drawdown check)
+    regime_id=2,          # Current macro regime
+)
+```
+
+**What you get:**
+
+```
+Overall Risk: MODERATE
+Can open new trades: YES (scaled to 75%)
+
+Portfolio VaR (1d 95%): $512 (1.0% of NLV)
+Net Delta: -0.12 (slightly bearish) — OK
+Net Theta: +$6/day (earning) — OK
+Strategy: 50% iron_condor, 50% credit_spread — diversified
+Direction: 1 neutral, 1 bullish — OK
+Drawdown: -3.8% from peak (threshold: 10%) — OK
+
+Alerts: none
+Slots remaining: 3 of 5
+```
+
+**7 risk dimensions checked:**
+
+| Dimension | What it checks | Gate |
+|-----------|---------------|------|
+| **Expected Loss** | ATR-based worst-case 1-day loss estimate | Loss > 5% of NLV → reduce size |
+| **Greeks** | Net delta, theta, vega vs limits | Excessive directional exposure → hedge |
+| **Strategy** | >50% in one strategy type? | Diversify strategy mix |
+| **Directional** | Net bullish/bearish score | >0.5 → directional concentration alert |
+| **Correlation** | Positions moving together? | Corr > 0.85 between positions → effectively same trade |
+| **Drawdown** | Current NLV vs peak | >10% drawdown → **HALT ALL TRADING** |
+| **Macro** | Macro regime from research | DEFLATIONARY → halt, STAGFLATION → 30% size |
+
+**Master gate:** `dashboard.can_open_new_trades` — False if any critical gate fails.
+
+**CLI:** `risk`
+
+### Stress Testing
+
+"What happens to my portfolio if the market crashes 5% tomorrow?"
+
+```python
+from market_analyzer import run_stress_suite, run_stress_test, PortfolioPosition
+
+positions = [
+    PortfolioPosition(ticker="SPY", structure_type="iron_condor", max_loss=420,
+                      delta=0.03, vega=-0.10, notional_value=66000),
+    PortfolioPosition(ticker="GLD", structure_type="equity_long", max_loss=5000,
+                      delta=1.0, notional_value=25000, direction="bullish"),
+]
+
+# Run full suite (7 scenarios)
+suite = run_stress_suite(positions, account_nlv=50000)
+print(suite.summary)
+# → "Stress tested 7 scenarios | Worst: Flash Crash (-8.2%) | Survives all: YES"
+
+# Single scenario
+from market_analyzer import get_predefined_scenario
+crash = get_predefined_scenario("market_down_5pct")
+result = run_stress_test(positions, crash, account_nlv=50000)
+# → StressTestResult: total_impact_dollars, per-position impacts, recommended_action
+```
+
+**13 predefined scenarios:**
+
+| Scenario | Price | Vol | What it simulates |
+|----------|-------|-----|------------------|
+| Market -1% | -1% | +10% | Mild selloff |
+| Market -3% | -3% | +30% | Significant drop |
+| Market -5% | -5% | +60% | Sharp selloff |
+| Market -10% | -10% | +150% | Crash |
+| Market +3% | +3% | -20% | Strong rally |
+| VIX Spike 50% | — | +50% | Volatility shock |
+| VIX Doubles | — | +100% | Vol explosion |
+| Flash Crash | -7% | +200% | 2015-style flash crash |
+| Black Monday | -20% | +300% | 1987 scenario |
+| COVID March | -12% | +200% | March 2020 crash |
+| India Crash | -5% | +80% | India-specific selloff + INR weakness |
+| Fed Surprise | -2% | +20% | Unexpected hawkish signal |
+| Rate Shock | -2% | +15% | 10Y yield +50bp |
+
+**Per-position impact** shows exactly which positions survive and which hit max loss.
+
+**Capital preservation rule:** If `suite.survives_all == False` → reduce positions until it does.
+
+**CLI:** `stress_test` (full suite) or `stress_test flash_crash` (single scenario)
 
 ### Daily Trading Plan
 
@@ -403,6 +691,39 @@ be = compute_breakevens(spec, entry_price=0.80)
 ```
 
 **CLI:** Part of `yield`
+
+### Leg Execution Plan (India)
+
+India brokers execute multi-leg orders **one leg at a time**. MA plans the safest execution order.
+
+```python
+from market_analyzer import plan_leg_execution
+plan = plan_leg_execution(spec, market="INDIA")
+# → ExecutionPlan: ordered legs with risk assessment per intermediate state
+```
+
+**For an iron condor on NIFTY:**
+```
+Execution Order:
+  1. BTO NIFTY 22300P  [SAFE]      — long put wing (protective)
+  2. BTO NIFTY 22800C  [SAFE]      — long call wing (protective)
+  3. STO NIFTY 22500P  [MODERATE]  — short put (covered by wing)
+  4. STO NIFTY 22600C  [MODERATE]  — short call (covered by wing)
+
+Abort rule: If any BUY fails → ABORT. Never sell short without protective wing.
+```
+
+**Key rule:** ALWAYS buy protective legs BEFORE selling short legs. This prevents naked exposure.
+
+**Risk levels per intermediate state:**
+- **SAFE** — only long legs filled, defined risk
+- **MODERATE** — spread completed on one side
+- **HIGH** — partial naked exposure
+- **CRITICAL** — naked short without protective wing
+
+US trades don't need this — multi-leg orders execute atomically.
+
+**CLI:** `leg_plan NIFTY ic`
 
 ---
 
@@ -643,7 +964,178 @@ Optimizes: IC IV rank minimum (default 15), POP minimum (default 50%), score min
 
 ---
 
-## 11. Capability Reference
+## 11. Equity Research: Stock Selection for Core Holdings
+
+For core portfolio construction — especially India where options depth is limited.
+
+### Single Stock Analysis
+
+```python
+from market_analyzer import analyze_stock, InvestmentHorizon
+
+rec = analyze_stock("RELIANCE", ohlcv=ohlcv_data, horizon=InvestmentHorizon.LONG_TERM, market="INDIA")
+# → StockRecommendation with composite_score, rating, entry/stop/target, thesis
+```
+
+**5 strategies scored per stock:**
+
+| Strategy | What it looks for | Best for |
+|----------|------------------|----------|
+| **Value** | Low P/E, low P/B, high dividend, strong balance sheet | Beaten-down quality stocks |
+| **Growth** | High revenue/EPS growth, expanding margins, low PEG | Tech, pharma, consumer growth |
+| **Dividend** | High sustainable yield, low payout ratio, growing dividends | Income generation, retirees |
+| **Quality + Momentum** | High ROE + positive price momentum (GARP) | Core holdings, best of both worlds |
+| **Turnaround** | Down 30%+ from high with improving fundamentals | Contrarian, higher risk |
+
+Each strategy returns a **0-100 score** with factors, strengths, and risks.
+
+**Composite score** (horizon-dependent weighting):
+- Long-term: 25% value + 20% growth + 20% dividend + 25% quality + 10% turnaround
+- Medium-term: 15% value + 15% growth + 10% dividend + 40% quality + 20% turnaround
+
+### Stock Screening
+
+```python
+from market_analyzer import screen_stocks, InvestmentStrategy
+
+result = screen_stocks(
+    tickers=ma.registry.get_universe(preset="nifty50"),
+    ohlcv_data=ohlcv_data,
+    strategy=InvestmentStrategy.VALUE,      # Or: growth, dividend, quality_momentum, turnaround
+    horizon=InvestmentHorizon.LONG_TERM,
+    market="INDIA",
+    top_n=10,
+    min_score=55.0,
+)
+# → EquityScreenResult with top_picks, sector_allocation, summary
+```
+
+### Entry / Stop / Target Framework
+
+Every `StockRecommendation` includes:
+
+| Field | How it's computed | Example |
+|-------|------------------|---------|
+| `entry_price` | Current price (buy at market) | ₹1,380 |
+| `stop_loss` | Price - 2.0 × ATR (long-term) or 1.5 × ATR (medium-term) | ₹1,307 (5.3% risk) |
+| `target_price` | Price + 4.0 × ATR (long-term) or 3.0 × ATR (medium-term) | ₹1,527 (10.6% reward) |
+| `risk_reward` | (target - entry) / (entry - stop) | 2.0:1 |
+
+**Position sizing:** `risk_per_share × shares ≤ account × risk_pct`
+- US: risk_pct = 3% of account, round to whole shares
+- India: same, but round to lot size
+
+### Exit Rules for Equity
+
+| Rule | Trigger | Action |
+|------|---------|--------|
+| **Stop loss** | Price hits stop | Sell immediately — no exceptions |
+| **Target reached** | Price hits target | Take 50% profit, trail stop on rest |
+| **Trailing stop** | After +1 ATR: move stop to breakeven. Then trail by 2 ATR | Protects gains |
+| **Regime change** | DEFLATIONARY → close all. RISK_OFF → reduce 50% | Capital preservation |
+| **Fundamental break** | Revenue negative, dividend cut, debt doubles, ROE < 8% | Sell — thesis broken |
+| **Time review** | Long: 6 months. Medium: 4 weeks. | If no progress, exit |
+| **Earnings** | Before every earnings report | Review thesis, tighten stop |
+
+**CLI:** `stock RELIANCE --horizon long`, `stock_screen --strategy value --preset nifty50 --market INDIA`
+
+**Reference flow:** `challenge/trader_stocks.py --market India --strategy value --top 10`
+
+---
+
+## 11b. Capital Deployment: Systematic Long-Term Investing
+
+For deploying a large cash position systematically over 6-18 months.
+
+### Market Valuation — Is It Cheap?
+
+```python
+from market_analyzer import compute_market_valuation
+val = compute_market_valuation("NIFTY", nifty_ohlcv)
+# → MarketValuation: zone="deep_value", zone_score=-0.53
+# "NIFTY is in deep value territory — historically attractive for long-term entry"
+```
+
+| Zone | Score | What it means | Action |
+|------|-------|--------------|--------|
+| Deep Value | < -0.5 | Significant discount to history | Accelerate deployment +30% |
+| Value | -0.5 to -0.2 | Below average | Accelerate +15% |
+| Fair | -0.2 to +0.2 | Normal | Deploy at base rate |
+| Expensive | +0.2 to +0.5 | Above average | Decelerate -30% |
+| Bubble | > +0.5 | Extreme premium | Decelerate -50%, hold cash |
+
+**CLI:** `valuation NIFTY` or `valuation SPY`
+
+### Deployment Plan — How Much Per Month?
+
+```python
+from market_analyzer import plan_deployment
+plan = plan_deployment(
+    total_capital=500000, currency="INR", deployment_months=12,
+    market="INDIA", current_regime_id=4, valuation_zone="deep_value",
+)
+# → DeploymentSchedule: ₹65,000/month (accelerated from ₹41,667 base)
+#   equity ₹39,000 / gold ₹9,750 / debt ₹9,750 per month
+```
+
+**Acceleration logic:** R4 (buy fear) + deep_value = +56% above base rate. The system deploys more when markets are cheap and volatile.
+
+**CLI:** `deploy 500000 --market India --months 12`
+
+### Asset Allocation — Equity vs Gold vs Debt vs Cash
+
+```python
+from market_analyzer import compute_asset_allocation
+alloc = compute_asset_allocation(market="INDIA", regime="risk_off", valuation_zone="deep_value")
+# → Equity 60% | Gold 25% | Debt 10% | Cash 5%
+```
+
+Adjusted by regime, valuation, risk tolerance, and age. Gold increases in risk_off/stagflation. Equity increases when cheap.
+
+**CLI:** `allocate --market India --regime risk_off`
+
+### Core Portfolio — What to Actually Buy
+
+```python
+from market_analyzer import recommend_core_portfolio
+portfolio = recommend_core_portfolio(500000, "INR", "INDIA", regime_id=4, valuation_zone="deep_value")
+# → CorePortfolio with specific holdings:
+#   NIFTYBEES (40% of equity), JUNIORBEES (15%), BANKBEES (10%),
+#   top 5 value stocks (20%), MIDCAPBEES (15%)
+#   + Gold ETF/SGB (25% of total) + debt fund (10%)
+```
+
+**CLI:** `deploy 500000 --market India --months 12`
+
+### Rebalancing — When to Adjust
+
+```python
+from market_analyzer import check_rebalance
+rebalance = check_rebalance(
+    current_allocation={"equity": 70, "gold": 12, "debt": 8, "cash": 10},
+    target_allocation=alloc,
+    portfolio_value=500000,
+)
+# → RebalanceCheck: needs_rebalance=True
+#   "Sell: gold drifted -13% from 25% target"
+#   "Buy: equity drifted +10% from 60% target"
+```
+
+**CLI:** `rebalance`
+
+### 7 Principles for Deployment
+
+1. **Never deploy all at once** — systematic over 6-18 months
+2. **Buy fear, not greed** — accelerate when market is down + volatile
+3. **Diversify across asset classes** — equity + gold + debt + cash
+4. **Index first, stocks second** — NIFTY ETF as core, individual stocks as satellite
+5. **Rebalance mechanically** — quarterly, don't predict
+6. **Keep cash reserve** — always 10% minimum (5% in deep value)
+7. **Ignore daily noise** — review monthly, act quarterly, think in decades
+
+---
+
+## 12. Capability Reference
 
 ### By Category
 
@@ -656,11 +1148,26 @@ Optimizes: IC IV rank minimum (default 15), POP minimum (default 50%), score min
 **Trade Planning (4 services):**
 `screening`, `ranking`, `plan`, `strategy`
 
-**Trade Lifecycle (10 functions):**
-`estimate_pop`, `compute_income_yield`, `compute_breakevens`, `check_income_entry`, `filter_trades_by_account`, `aggregate_greeks`, `monitor_exit_conditions`, `check_trade_health`, `assess_overnight_risk`, `recommend_adjustment_action`
+**Trade Lifecycle (11 functions):**
+`estimate_pop`, `compute_income_yield`, `compute_breakevens`, `check_income_entry`, `filter_trades_by_account`, `filter_trades_with_portfolio`, `aggregate_greeks`, `monitor_exit_conditions`, `check_trade_health`, `assess_overnight_risk`, `recommend_adjustment_action`
 
-**Risk & Hedging (4 functions):**
-`assess_hedge`, `validate_execution_quality`, `assess_currency_exposure`, `compute_portfolio_exposure`
+**Risk Management (7 functions):**
+`compute_risk_dashboard`, `estimate_portfolio_loss`, `check_portfolio_greeks`, `check_strategy_concentration`, `check_directional_concentration`, `check_correlation_risk`, `check_drawdown_circuit_breaker`
+
+**Trade Gates (2 functions):**
+`evaluate_trade_gates` (BLOCK/SCALE/WARN for 17 gates), `analyze_gate_effectiveness` (shadow portfolio learning)
+
+**Stress Testing (3 functions):**
+`run_stress_test`, `run_stress_suite`, `get_predefined_scenario` (13 predefined scenarios)
+
+**Equity Research (3 functions):**
+`analyze_stock`, `screen_stocks`, `fetch_fundamental_profile` (5 strategies, 2 horizons)
+
+**Capital Deployment (5 functions):**
+`compute_market_valuation`, `plan_deployment`, `compute_asset_allocation`, `recommend_core_portfolio`, `check_rebalance`
+
+**Hedging & Execution (5 functions):**
+`assess_hedge`, `validate_execution_quality`, `assess_currency_exposure`, `compute_portfolio_exposure`, `plan_leg_execution`
 
 **Performance & Learning (12 functions):**
 `compute_performance_report`, `compute_sharpe`, `compute_drawdown`, `compute_regime_performance`, `calibrate_weights`, `calibrate_pop_factors`, `optimize_thresholds`, `detect_drift`, `build_bandits`, `update_bandit`, `select_strategies`
@@ -668,28 +1175,36 @@ Optimizes: IC IV rank minimum (default 15), POP minimum (default 50%), score min
 **Cross-Market (3 functions):**
 `analyze_cross_market`, `compute_cross_market_correlation`, `predict_gap`
 
+**Macro Research (8 functions):**
+`generate_research_report`, `compute_all_scorecards`, `compute_correlation_matrix`, `compute_sentiment`, `classify_macro_regime`, `compute_india_context`, `compute_economic_snapshot`, `compute_asset_score`
+
 **Macro Indicators (5 functions):**
 `compute_macro_dashboard`, `compute_bond_market`, `compute_credit_spreads`, `compute_dollar_strength`, `compute_inflation_expectations`
 
 **Currency (4 functions):**
 `convert_amount`, `compute_portfolio_exposure`, `compute_currency_pnl`, `assess_currency_exposure`
 
-**Market Registry (6 methods):**
-`get_market`, `get_instrument`, `list_instruments`, `strategy_available`, `to_yfinance`, `estimate_margin`
+**Execution (1 function):**
+`plan_leg_execution` — leg sequencing for India single-leg markets
 
-### CLI Commands (48 total)
+**Market Registry (8 methods):**
+`get_market`, `get_instrument`, `list_instruments`, `get_universe`, `strategy_available`, `to_yfinance`, `estimate_margin`, `add_instrument`
+
+### CLI Commands (59 total)
 
 | Category | Commands |
 |----------|----------|
-| Context | `context`, `stress`, `macro`, `macro_indicators` |
+| Context & Macro | `context`, `stress`, `macro`, `macro_indicators`, `research` |
+| Cross-Market | `crossmarket`, `india_context` |
 | Analysis | `regime`, `technicals`, `levels`, `analyze`, `vol` |
-| Screening | `screen`, `rank`, `plan`, `universe`, `watchlist` |
+| Screening | `screen`, `rank`, `plan`, `universe`, `watchlist`, `scan_universe` |
 | Opportunity | `opportunity`, `setup`, `entry`, `strategy`, `exit_plan` |
 | Trade Analytics | `yield`, `pop`, `income_entry`, `greeks`, `size`, `parse` |
-| Monitoring | `monitor`, `health`, `adjust`, `overnight`, `quality` |
-| Risk & Hedging | `hedge`, `currency`, `exposure` |
-| Cross-Market | `crossmarket`, `india_context` |
+| Monitoring | `monitor`, `health`, `adjust`, `overnight`, `quality`, `leg_plan` |
+| Risk | `risk`, `stress_test`, `hedge`, `currency`, `exposure` |
 | Performance | `performance`, `sharpe`, `drawdown`, `drift`, `bandit` |
+| Equity Research | `stock`, `stock_screen` |
+| Capital Deployment | `valuation`, `deploy`, `allocate`, `rebalance` |
 | Registry | `registry`, `margin` |
 | Broker | `broker`, `balance`, `quotes` |
 
@@ -750,6 +1265,51 @@ registry.estimate_margin("iron_condor", "NIFTY", wing_width=200)
 ```
 
 **CLI:** `registry NIFTY`, `margin NIFTY ic --width 200`
+
+### Zerodha Integration (Live Broker Data for India)
+
+```python
+from market_analyzer.broker.zerodha import connect_zerodha
+md, mm, acct, wl = connect_zerodha(api_key="xxx", access_token="yyy")
+
+ma = MarketAnalyzer(
+    data_service=DataService(), market="India",
+    market_data=md, market_metrics=mm,
+    account_provider=acct, watchlist_provider=wl,
+)
+
+# Now you get REAL bid/ask/OI for India options
+chain = ma.quotes.get_chain("NIFTY")       # Live option chain
+quality = validate_execution_quality(spec, chain)  # Real liquidity check
+balance = acct.get_balance()               # Account in INR
+```
+
+**What Zerodha provides:**
+- Live bid/ask spreads per option strike (via Kite Connect REST)
+- Open interest and volume per strike
+- Account balance and margins in INR
+- F&O instrument master (all lot sizes, expiries)
+- Intraday candles via historical data API
+- IV rank computed from chain data
+
+**Credentials:** `zerodha_credentials.yaml` (copy from template). Access token expires daily — re-auth each morning. In SaaS mode, eTrading handles OAuth and passes the KiteConnect session.
+
+**India leg execution:** Multi-leg orders execute one leg at a time on Zerodha. Use `plan_leg_execution(spec, market="INDIA")` to get the safest execution order. See `leg_plan` CLI command.
+
+### Built-in Scanning Universes
+
+No broker needed — MA ships with curated instrument lists:
+
+```
+scan_universe income          → 12 tickers (high options liquidity)
+scan_universe nifty50         → 43 NIFTY 50 stocks
+scan_universe india_fno       → 23 India F&O instruments
+scan_universe sector_etf      → 12 US sector ETFs
+scan_universe us_mega         → 17 US mega-cap equities
+scan_universe directional     → 31 liquid equities (US + India)
+```
+
+**CLI:** `scan_universe`, `rank --preset income`, `screen --preset nifty50`
 
 ---
 
@@ -824,5 +1384,6 @@ The system never hides what it doesn't know. If broker is down, IV rank is missi
 
 ---
 
-*market_analyzer — making money, not theory.*
-*1331 tests. 48 CLI commands. Zero open gaps.*
+*market_analyzer — capital preservation first, income second, growth third.*
+*1331 tests. 59 CLI commands. US + India markets. Zerodha + TastyTrade brokers.*
+*Options + equities + capital deployment. 5 investment strategies. 13 stress test scenarios.*

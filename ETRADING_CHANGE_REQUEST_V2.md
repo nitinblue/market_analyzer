@@ -480,6 +480,85 @@ class MarketDataProvider(ABC):
         return False
 ```
 
+---
+
+## CR-14: Benchmark Returns API
+
+### Problem
+eTrading has a new "Board Member" agent (Vidura) that needs to benchmark desk P&L against market indices. Currently no MA API provides simple benchmark returns for comparison.
+
+### Ask
+```python
+from market_analyzer import compute_benchmark_returns
+
+benchmarks = compute_benchmark_returns(
+    tickers=['SPY', 'QQQ', '^NSEI', '^TNX'],
+    days=30,
+)
+# Returns: dict[str, BenchmarkReturn]
+# BenchmarkReturn: ticker, label, return_pct, start_price, end_price, period_days
+
+# Alpha calculation:
+from market_analyzer import compute_alpha
+alpha = compute_alpha(
+    portfolio_return_pct=5.2,
+    benchmark_return_pct=3.1,  # SPY
+    risk_free_rate=0.05,
+)
+# Returns: AlphaResult: alpha_pct, beating_benchmark, information_ratio
+```
+
+### Why This Belongs in MA
+- MA owns all market data (yfinance, DataService)
+- eTrading should NOT call yfinance directly
+- Benchmark computation is market analysis, not portfolio management
+- Keeps the boundary clean: MA computes, eTrading displays
+
+### Priority
+MEDIUM — Vidura works without this (shows desk P&L only). Full benchmark comparison needs this API.
+
+---
+
+## CR-15: Opportunity Scanner for Vidura
+
+### Problem
+Vidura needs to proactively identify opportunities the system is NOT currently trading — not just from the screening universe, but from the broader market. "Crude oil broke $90 — are we positioned? Gold ATH — do we have exposure?"
+
+### What MR1-MR6 Already Provides
+- MR1: Asset scorecards with signal_score for 22 tickers ✓
+- MR2: Cross-asset correlations with divergence alerts ✓
+- MR3: Macro regime (growth/deflation/stagflation) ✓
+- MR4: Sentiment (fear/greed) ✓
+
+### What's Still Needed
+A **proactive opportunity scanner** that combines MR1-MR4 signals into actionable recommendations:
+
+```python
+from market_analyzer import scan_vidura_opportunities
+
+opps = scan_vidura_opportunities(
+    scorecards=scorecards,
+    correlations=correlations,
+    macro_regime=macro_regime,
+    sentiment=sentiment,
+    current_positions=['SPY', 'GLD'],  # What we already hold
+)
+# Returns: list[ViduraOpportunity]
+# ViduraOpportunity:
+#   ticker, signal_score, thesis, suggested_strategy,
+#   timeframe, risk_level, macro_alignment
+```
+
+Example output:
+- "XLE signal_score +0.8, crude above 90, energy sector momentum. Consider bull call spread."
+- "TLT signal_score -0.7, rates rising. Short TLT via put spread or bear call."
+- "GLD diverging from USD — unusual. Investigate gold breakout thesis."
+
+### Priority
+HIGH for Vidura — this is his core value proposition.
+
+---
+
 ### eTrading Side (will implement in parallel)
 - Broker connection UI per user
 - Per-broker desk configuration in YAML

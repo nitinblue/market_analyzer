@@ -100,6 +100,7 @@ This data feeds back into model improvement — retrain HMM weights, adjust scor
 - **Additive changes preferred** over moving existing files.
 - **Update SYSTEMATIC_GAPS.md after any gap-related work.** Mark status, add implementation details, update test counts. This is the single source of truth for what's done vs open.
 - **Every gap must have an eTrading Integration column.** When building a new MA API, document what eTrading needs to do to consume it (pass iv_rank, store outcomes, schedule calibration, etc.). If no eTrading action needed, say so explicitly.
+- **Always update USER_MANUAL.md after building new features.** This is the trader's single source of truth. Every new capability, CLI command, or API must be documented there.
 
 ---
 

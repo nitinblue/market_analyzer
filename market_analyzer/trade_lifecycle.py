@@ -345,6 +345,172 @@ def filter_trades_by_account(
     )
 
 
+class OpenPosition(BaseModel):
+    """Snapshot of an open position — eTrading provides this from portfolio DB."""
+
+    ticker: str
+    structure_type: str  # "iron_condor", "credit_spread", "equity_long", etc.
+    sector: str = ""     # "tech", "finance", "energy", etc.
+    max_loss: float = 0  # Max loss in local currency
+    buying_power_used: float = 0
+
+
+class RiskLimits(BaseModel):
+    """Risk limits for position-aware filtering — eTrading configures per desk."""
+
+    max_positions: int = 5
+    max_per_ticker: int = 2
+    max_sector_concentration_pct: float = 0.40  # 40% of NLV in one sector
+    max_portfolio_risk_pct: float = 0.25  # 25% total risk deployed
+    min_trade_quality_score: float = 0.50  # From POPEstimate.trade_quality_score
+
+
+class PortfolioFilterResult(BaseModel):
+    """Result of position-aware trade filtering."""
+
+    approved: list[dict]
+    rejected: list[dict]  # Each has "reason" field
+    total_input: int
+    total_approved: int
+    open_positions_count: int
+    portfolio_risk_pct: float  # Current risk as % of NLV
+    slots_remaining: int  # How many more positions can be opened
+    summary: str
+
+
+def filter_trades_with_portfolio(
+    ranked_entries: list[RankedEntry],
+    open_positions: list[OpenPosition],
+    account_nlv: float,
+    available_buying_power: float,
+    risk_limits: RiskLimits = RiskLimits(),
+    allowed_structures: list[str] | None = None,
+    max_risk_per_trade: float | None = None,
+) -> PortfolioFilterResult:
+    """Position-aware trade filtering — the full risk gate.
+
+    Combines account filtering with position limits, sector concentration,
+    and portfolio risk budget. eTrading calls this INSTEAD of filter_trades_by_account()
+    when position data is available.
+
+    Args:
+        ranked_entries: Ranked trades from MA
+        open_positions: Current open positions from eTrading portfolio DB
+        account_nlv: Net liquidating value of account
+        available_buying_power: BP minus what's used by open positions
+        risk_limits: Per-desk risk configuration
+        allowed_structures: Structure whitelist
+        max_risk_per_trade: Max dollar risk per trade
+
+    Returns:
+        PortfolioFilterResult with approved/rejected trades and portfolio stats
+    """
+    # Build concentration maps from open positions
+    ticker_count: dict[str, int] = {}
+    sector_risk: dict[str, float] = {}
+    total_risk = 0.0
+
+    for pos in open_positions:
+        ticker_count[pos.ticker] = ticker_count.get(pos.ticker, 0) + 1
+        sector_risk[pos.sector] = sector_risk.get(pos.sector, 0) + pos.max_loss
+        total_risk += pos.max_loss
+
+    approved = []
+    rejected = []
+    new_positions = 0
+
+    for entry in ranked_entries:
+        ts = entry.trade_spec
+        reason = None
+
+        # 1. Structure whitelist
+        if allowed_structures and ts and ts.structure_type:
+            if ts.structure_type not in allowed_structures:
+                reason = f"structure '{ts.structure_type}' not allowed"
+
+        # 2. Total position limit
+        if not reason and len(open_positions) + new_positions >= risk_limits.max_positions:
+            reason = f"portfolio full ({risk_limits.max_positions} positions)"
+
+        # 3. Per-ticker limit
+        if not reason and ts:
+            current = ticker_count.get(ts.ticker, 0)
+            if current >= risk_limits.max_per_ticker:
+                reason = f"ticker {ts.ticker} at limit ({current}/{risk_limits.max_per_ticker})"
+
+        # 4. BP check
+        if not reason and ts and ts.wing_width_points:
+            bp_needed = ts.wing_width_points * ts.lot_size
+            if bp_needed > available_buying_power:
+                reason = f"insufficient BP (need {bp_needed:.0f}, have {available_buying_power:.0f})"
+
+        # 5. Single trade risk limit
+        trade_risk = 0.0
+        if ts:
+            trade_risk = (ts.wing_width_points or 0) * ts.lot_size
+            if ts.order_side == "debit" and ts.max_entry_price:
+                trade_risk = ts.max_entry_price * ts.lot_size
+        if not reason and max_risk_per_trade and trade_risk > max_risk_per_trade:
+            reason = f"trade risk {trade_risk:.0f} exceeds limit {max_risk_per_trade:.0f}"
+
+        # 6. Sector concentration
+        if not reason and ts and account_nlv > 0:
+            sector = ""
+            try:
+                from market_analyzer.registry import MarketRegistry
+                inst = MarketRegistry().get_instrument(ts.ticker)
+                sector = inst.sector
+            except (KeyError, ImportError):
+                pass
+            if sector:
+                new_sector_risk = sector_risk.get(sector, 0) + trade_risk
+                if new_sector_risk / account_nlv > risk_limits.max_sector_concentration_pct:
+                    reason = f"sector '{sector}' at {new_sector_risk / account_nlv:.0%} (limit {risk_limits.max_sector_concentration_pct:.0%})"
+
+        # 7. Portfolio risk budget
+        if not reason and account_nlv > 0:
+            new_total_risk = total_risk + trade_risk
+            if new_total_risk / account_nlv > risk_limits.max_portfolio_risk_pct:
+                reason = f"portfolio risk {new_total_risk / account_nlv:.0%} exceeds {risk_limits.max_portfolio_risk_pct:.0%}"
+
+        rec = {
+            "rank": entry.rank,
+            "ticker": entry.ticker,
+            "strategy_type": str(entry.strategy_type),
+            "composite_score": entry.composite_score,
+            "verdict": str(entry.verdict),
+            "structure_type": ts.structure_type if ts else None,
+            "trade_risk": round(trade_risk, 2),
+        }
+
+        if reason:
+            rec["reason"] = reason
+            rejected.append(rec)
+        else:
+            approved.append(rec)
+            new_positions += 1
+            if ts:
+                ticker_count[ts.ticker] = ticker_count.get(ts.ticker, 0) + 1
+                total_risk += trade_risk
+                available_buying_power -= (ts.wing_width_points or 0) * ts.lot_size
+
+    portfolio_risk_pct = total_risk / account_nlv if account_nlv > 0 else 0
+    slots = max(0, risk_limits.max_positions - len(open_positions) - new_positions)
+
+    return PortfolioFilterResult(
+        approved=approved,
+        rejected=rejected,
+        total_input=len(ranked_entries),
+        total_approved=len(approved),
+        open_positions_count=len(open_positions),
+        portfolio_risk_pct=round(portfolio_risk_pct, 4),
+        slots_remaining=slots,
+        summary=f"{len(approved)} approved, {len(rejected)} rejected | "
+                f"{len(open_positions)} open + {new_positions} new = {len(open_positions) + new_positions} total | "
+                f"Risk: {portfolio_risk_pct:.0%} of NLV | {slots} slots remaining",
+    )
+
+
 # ── F6: Strike Alignment to Support/Resistance ──
 
 

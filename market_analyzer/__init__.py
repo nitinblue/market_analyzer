@@ -114,6 +114,52 @@ from market_analyzer.macro_indicators import (
     compute_macro_dashboard,
 )
 
+# Macro research (scorecards, correlations, regime, sentiment, economics, reports)
+from market_analyzer.macro_research import (
+    AssetClass,
+    AssetScore,
+    CorrelationPair,
+    EconomicSnapshot,
+    IndiaResearchContext,
+    MacroRegime,
+    MacroResearchReport,
+    RESEARCH_ASSETS,
+    RegimeClassification,
+    SentimentDashboard,
+    TrendSignal,
+    classify_macro_regime,
+    compute_all_scorecards,
+    compute_asset_score,
+    compute_correlation_matrix,
+    compute_economic_snapshot,
+    compute_india_context,
+    compute_sentiment,
+    generate_research_report,
+)
+
+# Equity research (stock selection for core holdings)
+from market_analyzer.equity_research import (
+    EquityScreenResult,
+    FundamentalProfile,
+    InvestmentHorizon,
+    InvestmentStrategy,
+    StockRating,
+    StockRecommendation,
+    StrategyScore,
+    analyze_stock,
+    fetch_fundamental_profile,
+    screen_stocks,
+)
+
+# Wheel strategy state machine (MA = decision engine, eTrading = state machine)
+from market_analyzer.wheel_strategy import (
+    WheelAction,
+    WheelDecision,
+    WheelPosition,
+    WheelState,
+    decide_wheel_action,
+)
+
 # Quotes (broker-agnostic)
 from market_analyzer.models.quotes import AccountBalance, MarketMetrics, OptionQuote, QuoteSnapshot
 
@@ -291,6 +337,30 @@ from market_analyzer.currency import (
     assess_currency_exposure,
 )
 
+# Capital deployment engine (long-term systematic investing)
+from market_analyzer.capital_deployment import (
+    AssetAllocation,
+    CoreHolding,
+    CorePortfolio,
+    DeploymentSchedule,
+    LeapVsStockAnalysis,
+    MarketValuation,
+    MonthlyAllocation,
+    RebalanceAction,
+    RebalanceCheck,
+    RiskTolerance,
+    ValuationZone,
+    WheelStrategyAnalysis,
+    analyze_core_holding_entry,
+    analyze_wheel_strategy,
+    check_rebalance,
+    compare_leap_vs_stock,
+    compute_asset_allocation,
+    compute_market_valuation,
+    plan_deployment,
+    recommend_core_portfolio,
+)
+
 # Same-ticker hedge assessment
 from market_analyzer.hedging import (
     HedgeType,
@@ -325,6 +395,54 @@ from market_analyzer.execution_quality import (
     validate_execution_quality,
 )
 
+# Portfolio risk management
+from market_analyzer.risk import (
+    CorrelationRisk,
+    DirectionalExposure,
+    DrawdownStatus,
+    ExpectedLossResult,
+    GreeksCheckResult,
+    GreeksLimits,
+    PortfolioGreeks,
+    PortfolioPosition,
+    RiskDashboard,
+    StrategyConcentration,
+    VaRResult,  # backward compat alias for ExpectedLossResult
+    check_correlation_risk,
+    check_directional_concentration,
+    check_drawdown_circuit_breaker,
+    check_portfolio_greeks,
+    check_strategy_concentration,
+    compute_portfolio_var,  # backward compat alias for estimate_portfolio_loss
+    estimate_portfolio_loss,
+    compute_risk_dashboard,
+)
+
+# Trade gate framework (BLOCK/SCALE/WARN classification)
+from market_analyzer.gate_framework import (
+    GateAction,
+    GateEffectivenessReport,
+    GateResult,
+    GateStats,
+    RejectedTrade,
+    TradeGateReport,
+    analyze_gate_effectiveness,
+    evaluate_trade_gates,
+)
+
+# Stress testing (portfolio scenario analysis)
+from market_analyzer.stress_testing import (
+    PredefinedScenario,
+    PositionImpact,
+    ScenarioParams,
+    ScenarioType,
+    StressTestResult,
+    StressTestSuite,
+    get_predefined_scenario,
+    run_stress_suite,
+    run_stress_test,
+)
+
 # TradeSpec factory (public API for eTrading)
 from market_analyzer.trade_spec_factory import (
     create_trade_spec,
@@ -357,6 +475,10 @@ from market_analyzer.trade_lifecycle import (
     compute_income_yield,
     estimate_pop,
     filter_trades_by_account,
+    filter_trades_with_portfolio,
+    OpenPosition,
+    RiskLimits,
+    PortfolioFilterResult,
     get_adjustment_recommendation,
     monitor_exit_conditions,
     OvernightRisk,
@@ -476,6 +598,26 @@ __all__ = [
     "MacroRiskLevel",
     "MacroTrend",
     "compute_macro_dashboard",
+    # Macro research (scorecards, correlations, regime, sentiment, economics, reports)
+    "AssetClass",
+    "AssetScore",
+    "CorrelationPair",
+    "EconomicSnapshot",
+    "IndiaResearchContext",
+    "MacroRegime",
+    "MacroResearchReport",
+    "RESEARCH_ASSETS",
+    "RegimeClassification",
+    "SentimentDashboard",
+    "TrendSignal",
+    "classify_macro_regime",
+    "compute_all_scorecards",
+    "compute_asset_score",
+    "compute_correlation_matrix",
+    "compute_economic_snapshot",
+    "compute_india_context",
+    "compute_sentiment",
+    "generate_research_report",
     # Levels models
     "LevelRole",
     "LevelSource",
@@ -619,6 +761,10 @@ __all__ = [
     "compute_income_yield",
     "estimate_pop",
     "filter_trades_by_account",
+    "filter_trades_with_portfolio",
+    "OpenPosition",
+    "RiskLimits",
+    "PortfolioFilterResult",
     "monitor_exit_conditions",
     "TradeHealthCheck",
     "check_trade_health",
@@ -658,6 +804,54 @@ __all__ = [
     "analyze_cross_market",
     "compute_cross_market_correlation",
     "predict_gap",
+    # Portfolio risk management
+    "PortfolioPosition",
+    "PortfolioGreeks",
+    "GreeksLimits",
+    "GreeksCheckResult",
+    "VaRResult",
+    "StrategyConcentration",
+    "DirectionalExposure",
+    "CorrelationRisk",
+    "DrawdownStatus",
+    "RiskDashboard",
+    "compute_portfolio_var",
+    "check_portfolio_greeks",
+    "check_strategy_concentration",
+    "check_directional_concentration",
+    "check_correlation_risk",
+    "check_drawdown_circuit_breaker",
+    "compute_risk_dashboard",
+    # Trade gate framework
+    "GateAction",
+    "GateEffectivenessReport",
+    "GateResult",
+    "GateStats",
+    "RejectedTrade",
+    "TradeGateReport",
+    "analyze_gate_effectiveness",
+    "evaluate_trade_gates",
+    # Stress testing (portfolio scenario analysis)
+    "ScenarioType",
+    "ScenarioParams",
+    "PredefinedScenario",
+    "PositionImpact",
+    "StressTestResult",
+    "StressTestSuite",
+    "get_predefined_scenario",
+    "run_stress_test",
+    "run_stress_suite",
+    # Equity research (stock selection)
+    "InvestmentHorizon",
+    "InvestmentStrategy",
+    "StockRating",
+    "FundamentalProfile",
+    "StrategyScore",
+    "StockRecommendation",
+    "EquityScreenResult",
+    "fetch_fundamental_profile",
+    "analyze_stock",
+    "screen_stocks",
     # Transparency
     "DataGap",
     # Performance feedback
@@ -689,4 +883,25 @@ __all__ = [
     # Threshold optimization
     "ThresholdConfig",
     "optimize_thresholds",
+    # Capital deployment engine
+    "ValuationZone",
+    "RiskTolerance",
+    "MarketValuation",
+    "MonthlyAllocation",
+    "DeploymentSchedule",
+    "AssetAllocation",
+    "CoreHolding",
+    "CorePortfolio",
+    "RebalanceAction",
+    "RebalanceCheck",
+    "LeapVsStockAnalysis",
+    "WheelStrategyAnalysis",
+    "compute_market_valuation",
+    "plan_deployment",
+    "compute_asset_allocation",
+    "recommend_core_portfolio",
+    "check_rebalance",
+    "compare_leap_vs_stock",
+    "analyze_wheel_strategy",
+    "analyze_core_holding_entry",
 ]

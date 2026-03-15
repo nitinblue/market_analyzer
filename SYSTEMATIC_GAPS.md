@@ -61,6 +61,36 @@
 | MC5 | Macro | Macro dashboard | **DONE** | `compute_macro_dashboard()` — aggregates all indicators, overall risk level, trading impact guidance. CLI `macro_indicators`. |
 | ZRD | Broker | Zerodha Kite Connect — full integration | **DONE** | Live option chains (bid/ask/OI/volume), underlying price, intraday candles, account balance, IV rank (computed), instrument master. `connect_zerodha(api_key, token)`. eTrading: handle daily OAuth token refresh, pass session via `connect_zerodha_from_session()`. |
 | LEG1 | Execution | India leg execution sequencing | **DONE** | `plan_leg_execution(trade_spec, market)` — safest leg order for single-leg markets. BUY protective legs FIRST, then SELL. Risk assessment per intermediate state. Abort rules. Slippage budget. CLI `leg_plan`. eTrading: follow the sequence, abort on partial fill per abort_rule. |
+| MR1 | Research | Core asset scorecards | **DONE** | `compute_all_scorecards(data, timeframe)`. eTrading: fetch OHLCV for `RESEARCH_ASSETS` dict (22 tickers), pass as `dict[str, DataFrame]`. Render `AssetScore.commentary` in heat map. `signal_score` (-1 to +1) for sorting. |
+| MR2 | Research | Cross-asset correlations | **DONE** | `compute_correlation_matrix(data)`. eTrading: render 14 pairs in correlation dashboard. Alert on `diverging=True` pairs. |
+| MR3 | Research | Macro regime classification | **DONE** | `classify_macro_regime(scores, sentiment, data)`. eTrading: use `regime.position_size_factor` to scale ALL position sizes. `favor_sectors`/`avoid_sectors` to filter screening. Gate: if DEFLATIONARY → halt new trades. |
+| MR4 | Research | Sentiment dashboard | **DONE** | `compute_sentiment(data, spy_pe)`. eTrading: display `overall_sentiment` as fear/greed gauge. `sentiment_score` for alerts (< -0.6 = extreme fear notification). Pass `spy_pe` from `yfinance.Ticker('SPY').info['trailingPE']`. |
+| MR5 | Research | Economic fundamentals (FRED) | **DONE** | `compute_economic_snapshot(fred_api_key)`. eTrading: store FRED API key in platform config. Pass to MA. Graceful without key. Display `economic_regime` + `commentary` in fundamentals tab. |
+| MR6 | Research | India research context | **DONE** | `compute_india_context(data)`. eTrading: display for India desk. `fii_flow_signal="outflow"` → reduce India allocation. `banknifty_vs_nifty="banking_lagging"` → avoid banking sector. |
+| MR7 | Research | Commentary generation | **DONE** | `report.research_note` (10-20 sentences), `report.key_signals` (bullet points). eTrading: use `research_note` in daily email to users. `key_signals` in notification system. |
+| MR8 | Research | Full report | **DONE** | `generate_research_report(data, timeframe, fred_key, spy_pe)`. eTrading: call daily pre-market. Store full `MacroResearchReport` in DB. Render in research dashboard. CLI `research [daily|weekly|monthly]`. |
+| PF1 | Risk | Position-aware portfolio filtering | **DONE** | `filter_trades_with_portfolio()` — 7-step cascade. eTrading: pass open positions + risk limits. |
+| RM1 | Risk | Expected portfolio loss | **DONE** | `estimate_portfolio_loss(positions, nlv)` — ATR-based, regime-adjusted. NOT formal VaR. For scenarios use `run_stress_suite()`. eTrading: pass positions + ATR data. |
+| GF1 | Risk | Trade gate framework (BLOCK/SCALE/WARN) | **DONE** | `evaluate_trade_gates()` — classifies 17 gates into 3 tiers: BLOCK (capital preservation), SCALE (quality), WARN (informational). `TradeGateReport` with `can_proceed` and `final_scale_factor`. eTrading: call before every order, respect action, log gate_history. |
+| GF2 | Learning | Shadow portfolio + gate effectiveness | **DONE** | `RejectedTrade` model for tracking what-if outcomes. `analyze_gate_effectiveness(gate_history, shadow_outcomes)` — detects gates too tight/loose. eTrading: store rejected trades, track hypothetical P&L, run monthly. |
+| ST1 | Risk | Stress testing | **DONE** | `run_stress_test(positions, scenario, nlv)` + `run_stress_suite()`. 13 predefined scenarios (market -1/-3/-5/-10%, VIX spike, flash crash, Black Monday, COVID, India crash, Fed surprise). Per-position impact. CLI `stress_test`. eTrading: build stress test framework — run suite pre-trade and on schedule, display results, halt if portfolio doesn't survive. |
+| RM2 | Risk | Portfolio Greeks limits | **DONE** | `check_portfolio_greeks(positions, limits)` — net delta/theta/vega vs configurable limits. eTrading: pass position Greeks from broker. |
+| RM3 | Risk | Strategy concentration | **DONE** | `check_strategy_concentration(positions)` — flags >50% in one strategy type. eTrading: display in risk dashboard. |
+| RM4 | Risk | Directional concentration | **DONE** | `check_directional_concentration(positions)` — net bullish/bearish score. >0.5 magnitude = concentrated. eTrading: alert when directional. |
+| RM5 | Risk | Correlation risk | **DONE** | `check_correlation_risk(positions, correlations)` — effective positions, diversification score. eTrading: pass correlation data from `compute_correlation_matrix()`. |
+| RM6 | Risk | Drawdown circuit breaker | **DONE** | `check_drawdown_circuit_breaker(current_nlv, peak_nlv, threshold)` — triggers at 10% default. eTrading: track peak NLV, halt if triggered. |
+| RM7 | Risk | Combined risk dashboard | **DONE** | `compute_risk_dashboard(positions, nlv, peak, regime, correlations)` — all above combined. `can_open_new_trades` master gate. `alerts` list. CLI `risk`. eTrading: call pre-trade, display in dashboard, enforce `can_open_new_trades`. | `filter_trades_with_portfolio(ranked, open_positions, account_nlv, bp, risk_limits)` — enforces max_positions, max_per_ticker, sector concentration, portfolio risk budget. `OpenPosition`, `RiskLimits`, `PortfolioFilterResult` models. eTrading: pass open positions from portfolio DB, configure `RiskLimits` per desk. |
+| EQ1 | Equity | Stock fundamental analysis (5 strategies) | **DONE** | `analyze_stock(ticker, ohlcv, horizon)` — value, growth, dividend, quality_momentum, turnaround scoring. `FundamentalProfile` from yfinance. Entry/stop/target from ATR. eTrading: call for equity positions, display in research tab. |
+| EQ2 | Equity | Stock screening across universe | **DONE** | `screen_stocks(tickers, strategy, horizon, market)` — screens + ranks by composite or strategy-specific score. Top N picks with sector allocation. CLI `stock`, `stock_screen`. |
+| EQ3 | Equity | Stock trader reference flow | **DONE** | `challenge/trader_stocks.py` — 8-step flow. `--market US|India` switch. |
+| CD1 | Deployment | Market valuation framework | **DONE** | `compute_market_valuation(ticker, ohlcv)` — deep_value/value/fair/expensive/bubble zones. 52-week position. CLI `valuation`. eTrading: display in dashboard, feed to deployment planner. |
+| CD2 | Deployment | Systematic deployment planner (SIP) | **DONE** | `plan_deployment(capital, months, regime, valuation)` — regime-adjusted, valuation-aware monthly schedule. Accelerates in R4+deep_value. CLI `deploy`. eTrading: store schedule, trigger monthly, track progress. |
+| CD3 | Deployment | Asset allocation model | **DONE** | `compute_asset_allocation(market, regime, valuation, risk_tolerance)` — equity/gold/debt/cash split with sub-allocation. CLI `allocate`. eTrading: apply to portfolio construction. |
+| CD4 | Deployment | Core holdings recommender | **DONE** | `recommend_core_portfolio(capital, market, regime)` — specific ETFs + stocks. India: NIFTYBEES/JUNIORBEES/BANKBEES + value stocks + SGB. US: VOO/QQQ + quality stocks + GLD + TLT. |
+| CD5 | Deployment | Rebalancing engine | **DONE** | `check_rebalance(current, target, value, drift_threshold)` — buy/sell actions when drift >5%. CLI `rebalance`. |
+| CD6 | Deployment | LEAP vs Stock comparison | **DONE** | `compare_leap_vs_stock(ticker, price, div_yield, iv)` — capital efficiency, net annual cost, verdict. CLI `leap_vs_stock`. |
+| CD7 | Deployment | Wheel strategy analysis | **DONE** | `analyze_wheel_strategy(ticker, price, iv, regime)` — put/call yields, effective cost basis, annualized return. CLI `wheel`. |
+| WH1 | Wheel | Wheel state machine decision engine | **DONE** | `decide_wheel_action(position, regime)` — eTrading passes `WheelPosition` state, MA returns `WheelDecision` with next action + trade params. States: IDLE→PUT_OPEN→ASSIGNED→CALL_OPEN→CALLED_AWAY. Regime-aware: R4=pause wheel. eTrading: build state machine (persistence, transitions, execution). Call `decide_wheel_action()` on every state change. | `check_rebalance(current, target, value, drift_threshold)` — buy/sell actions when drift >5%. CLI `rebalance`. eTrading: run quarterly, execute actions. | `challenge/trader_stocks.py` — 8-step flow: context → universe → data → screen → picks → sectors → portfolio construction → exit rules. `--market US|India` switch. |
 | UV1 | Universe | Broker-independent scanning universes | **DONE** | `registry.get_universe(preset, market, sector)` — 10 presets, 85+ instruments. CLI `scan_universe`. eTrading: store preset names per desk in YAML config. Call `get_universe(preset)` → pass to `rank()`. Use `add_instrument()` for custom tickers. |
 | TQ1 | Analysis | Trade quality scoring (POP + EV + R:R) | **DONE** | `POPEstimate` now has `max_profit`, `max_loss`, `risk_reward_ratio`, `trade_quality` (excellent/good/marginal/poor), `trade_quality_score` (0-1 composite). Combines POP (40%) + EV (30%) + R:R (30%). eTrading: gate on `trade_quality_score >= 0.50` for systematic trading. |
 
@@ -111,6 +141,37 @@ Everything below is eTrading's responsibility. MA APIs are ready — eTrading mu
 | E25 | Broker connection UI per user | `connect_dhan_from_session()`, `connect_zerodha_from_session()` | Stubs ready, API impl pending |
 | E26 | Currency-aware P&L display | `compute_currency_pnl()`, `compute_portfolio_exposure()` | MA decomposes, eTrading displays |
 | E27 | Timezone-aware scheduling | `registry.get_market("INDIA").market_hours` | India 9:15-15:30 IST, US 9:30-16:00 ET |
+
+---
+
+## MA ↔ eTrading Feedback Contract
+
+**MA needs exactly 3 things from eTrading to learn. Everything else MA computes on its own.**
+
+| # | What eTrading Sends | Format | When | What MA Does With It |
+|---|--------------------|--------|------|---------------------|
+| **F1** | Closed trade results | `list[TradeOutcome]` | On every trade close (append to DB), pass full list weekly | `calibrate_weights()` → adjusted regime-strategy alignment. `calibrate_pop_factors()` → regime move factors. `detect_drift()` → strategy suspension alerts. `optimize_thresholds()` → learned IV/POP cutoffs. `compute_sharpe()`, `compute_drawdown()` → performance metrics. **Without this, the entire learning stack is dead.** |
+| **F2** | Rejected trade outcomes | `list[RejectedTrade]` | On every gate rejection (store), monthly add hypothetical P&L | `analyze_gate_effectiveness()` → flags gates that are too tight (blocking winners) or too loose (allowing losers). **Without this, we can't tell if gates leave money on the table.** |
+| **F3** | Peak account value | `peak_nlv: float` | On every call to `compute_risk_dashboard()` or `check_drawdown_circuit_breaker()` | Drawdown calculation: `(peak - current) / peak`. **Without this, the drawdown circuit breaker doesn't work.** MA is stateless — can't track peak across calls. |
+
+**What MA does NOT need:** live portfolio state (passed per-call), order history, fill data (only for building TradeOutcome), user preferences, session state.
+
+**The loop:**
+
+```
+eTrading closes trade
+  → builds TradeOutcome → stores in DB
+
+Weekly batch:
+  eTrading passes list[TradeOutcome] to MA
+  → MA returns: calibrated weights, POP factors, drift alerts, threshold adjustments
+  → eTrading applies to next cycle
+
+Monthly:
+  eTrading passes list[RejectedTrade] with hypothetical P&L
+  → MA returns: gate effectiveness report
+  → eTrading adjusts gate thresholds
+```
 
 ---
 
@@ -400,5 +461,10 @@ save_threshold_config(optimized)
 | 2026-03-14 | ML1-ML3: Drift detection, Thompson Sampling bandits, threshold optimization | +22 | 1241 |
 | 2026-03-14 | CR6-CR13: Multi-broker stubs, currency/timezone/lot_size, India data, MarketRegistry, analytics | +64 | 1305 |
 | 2026-03-14 | H1-H5 + CR14-17: Currency, hedging, SaaS isolation, token expiry, rate limits | +26 | 1331 |
+| 2026-03-15 | MR1-MR8: Full macro research — 22 assets, correlations, regime, sentiment, FRED, India context | +0 | 1331 |
+| 2026-03-15 | PF1 + RM1-RM7 + ST1: Position-aware filtering, expected loss, Greeks, concentrations, drawdown, stress testing, risk dashboard | +0 | 1331 |
+| 2026-03-15 | GF1-GF2: Trade gate framework (BLOCK/SCALE/WARN), shadow portfolio learning | +0 | 1331 |
+| 2026-03-15 | EQ1-EQ3: Equity research (5 strategies), stock screening, trader_stocks.py (US + India) | +0 | 1331 |
+| 2026-03-15 | CD1-CD8 + WH1: Capital deployment, LEAP vs stock, wheel strategy + state machine | +0 | 1331 |
 | 2026-03-14 | IN1-IN5: India equity-first, equity trade models, market-aware exit notes, LEAP blocking | +0 | 1331 |
 | 2026-03-14 | CM1 + MC1-MC5: Cross-market correlation, macro indicators (bonds, credit, dollar, inflation) | +0 | 1331 |
