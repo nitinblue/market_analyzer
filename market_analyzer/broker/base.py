@@ -19,6 +19,12 @@ if TYPE_CHECKING:
     from market_analyzer.models.quotes import AccountBalance, MarketMetrics, OptionQuote
 
 
+class TokenExpiredError(Exception):
+    """Broker session token has expired. Re-authenticate."""
+
+    pass
+
+
 class BrokerSession(ABC):
     """Abstract broker connection. Implement for each broker."""
 
@@ -41,6 +47,10 @@ class BrokerSession(ABC):
     def broker_name(self) -> str:
         """Human-readable name: 'tastytrade', 'schwab', 'ibkr', etc."""
         ...
+
+    def is_token_valid(self) -> bool:
+        """Check if the session token is still valid."""
+        return True
 
 
 class MarketDataProvider(ABC):
@@ -86,6 +96,22 @@ class MarketDataProvider(ABC):
     def provider_name(self) -> str:
         """'tastytrade', 'schwab', 'ibkr', etc."""
         ...
+
+    # -- SaaS support --
+
+    def is_token_valid(self) -> bool:
+        """Check if the broker session token is still valid. Default: always True."""
+        return True
+
+    @property
+    def rate_limit_per_second(self) -> int:
+        """Max requests per second for this provider. Default: 10."""
+        return 10
+
+    @property
+    def supports_batch(self) -> bool:
+        """Can this provider batch multiple tickers in one call? Default: False."""
+        return False
 
     # -- Market properties (override per-broker / per-market) --
 

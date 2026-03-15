@@ -99,6 +99,7 @@ This data feeds back into model improvement — retrain HMM weights, adjust scor
 - **DXLink is the only path for live data.** `from tastytrade.streamer import DXLinkStreamer`, `from tastytrade.dxfeed import Greeks as DXGreeks, Quote as DXQuote`.
 - **Additive changes preferred** over moving existing files.
 - **Update SYSTEMATIC_GAPS.md after any gap-related work.** Mark status, add implementation details, update test counts. This is the single source of truth for what's done vs open.
+- **Every gap must have an eTrading Integration column.** When building a new MA API, document what eTrading needs to do to consume it (pass iv_rank, store outcomes, schedule calibration, etc.). If no eTrading action needed, say so explicitly.
 
 ---
 

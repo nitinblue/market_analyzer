@@ -39,6 +39,14 @@ class DhanMarketData(MarketDataProvider):
         return "dhan"
 
     @property
+    def rate_limit_per_second(self) -> int:
+        return 25
+
+    @property
+    def supports_batch(self) -> bool:
+        return False
+
+    @property
     def currency(self) -> str:
         return "INR"
 

@@ -97,7 +97,7 @@ def assess_diagonal(
     trend_dir = _determine_direction(regime, technicals, phase)
 
     # --- Hard stops ---
-    hard_stops = _check_hard_stops(regime, vol_surface, days_to_earnings, cfg)
+    hard_stops = _check_hard_stops(regime, vol_surface, days_to_earnings, cfg, ticker=ticker)
 
     front_iv = vol_surface.front_iv if vol_surface else 0.0
     back_iv = vol_surface.back_iv if vol_surface else 0.0
@@ -196,7 +196,7 @@ def _determine_direction(regime, technicals, phase) -> str:
     return "neutral"
 
 
-def _check_hard_stops(regime, vol_surface, days_to_earnings, cfg) -> list[HardStop]:
+def _check_hard_stops(regime, vol_surface, days_to_earnings, cfg, ticker: str | None = None) -> list[HardStop]:
     stops: list[HardStop] = []
 
     if regime.regime == RegimeID.R4_HIGH_VOL_TREND and regime.confidence >= cfg.r4_confidence_threshold:
@@ -204,6 +204,20 @@ def _check_hard_stops(regime, vol_surface, days_to_earnings, cfg) -> list[HardSt
             name="R4 explosive moves",
             description="R4 (high-vol trending) — explosive moves blow through diagonal strikes",
         ))
+
+    # Max DTE enforcement — back leg may exceed market's max DTE
+    if ticker is not None:
+        try:
+            from market_analyzer.registry import MarketRegistry
+            _inst = MarketRegistry().get_instrument(ticker)
+            # Diagonal back leg targets 50-90 DTE by default
+            if _inst.max_dte < 50:
+                stops.append(HardStop(
+                    name="dte_exceeds_market_max",
+                    description=f"Diagonal back leg needs ~50-90 DTE but {ticker} max DTE is {_inst.max_dte}",
+                ))
+        except (KeyError, ImportError):
+            pass
 
     if vol_surface is None:
         stops.append(HardStop(

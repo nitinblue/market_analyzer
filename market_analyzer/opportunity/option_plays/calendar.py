@@ -92,7 +92,7 @@ def assess_calendar(
         days_to_earnings = fundamentals.upcoming_events.days_to_earnings
 
     # --- Hard stops ---
-    hard_stops = _check_hard_stops(regime, vol_surface, days_to_earnings, cfg)
+    hard_stops = _check_hard_stops(regime, vol_surface, days_to_earnings, cfg, ticker=ticker)
 
     # Defaults when no vol surface
     front_iv = vol_surface.front_iv if vol_surface else 0.0
@@ -190,7 +190,7 @@ def assess_calendar(
 # --- Internal helpers ---
 
 
-def _check_hard_stops(regime, vol_surface, days_to_earnings, cfg) -> list[HardStop]:
+def _check_hard_stops(regime, vol_surface, days_to_earnings, cfg, ticker: str | None = None) -> list[HardStop]:
     stops: list[HardStop] = []
 
     # R4 at high confidence
@@ -199,6 +199,20 @@ def _check_hard_stops(regime, vol_surface, days_to_earnings, cfg) -> list[HardSt
             name="R4 trending",
             description="R4 (high-vol trending) with high confidence — directional moves destroy calendars",
         ))
+
+    # Max DTE enforcement — back leg may exceed market's max DTE
+    if ticker is not None:
+        try:
+            from market_analyzer.registry import MarketRegistry
+            _inst = MarketRegistry().get_instrument(ticker)
+            # Calendar back leg targets 50-70 DTE by default
+            if _inst.max_dte < 50:
+                stops.append(HardStop(
+                    name="dte_exceeds_market_max",
+                    description=f"Calendar back leg needs ~50-70 DTE but {ticker} max DTE is {_inst.max_dte}",
+                ))
+        except (KeyError, ImportError):
+            pass
 
     # No vol surface data
     if vol_surface is None:

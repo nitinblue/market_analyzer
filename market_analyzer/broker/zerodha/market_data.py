@@ -39,6 +39,14 @@ class ZerodhaMarketData(MarketDataProvider):
         return "zerodha"
 
     @property
+    def rate_limit_per_second(self) -> int:
+        return 3
+
+    @property
+    def supports_batch(self) -> bool:
+        return False
+
+    @property
     def currency(self) -> str:
         return "INR"
 

@@ -11,6 +11,35 @@ from market_analyzer.models.opportunity import LegAction, LegSpec, OrderSide, St
 from market_analyzer.models.vol_surface import TermStructurePoint, VolatilitySurface
 
 
+def _get_instrument_info(ticker: str):
+    """Look up instrument info from MarketRegistry. Returns None if unknown."""
+    try:
+        from market_analyzer.registry import MarketRegistry
+        return MarketRegistry().get_instrument(ticker)
+    except (KeyError, ImportError):
+        return None
+
+
+def _assignment_exit_note(ticker: str) -> str:
+    """Generate market-aware assignment risk exit note for dual-expiry structures."""
+    inst = _get_instrument_info(ticker)
+    if inst is not None:
+        if inst.exercise_style == "european" and inst.settlement == "cash":
+            return "Front leg auto-settles at expiry (cash, European — no assignment risk)"
+        elif inst.exercise_style == "european" and inst.settlement == "physical":
+            return "Close before front leg expiry to manage physical delivery risk (European — no early assignment)"
+    # American + physical (US default) or unknown ticker — conservative default
+    return "Close before front leg expiry to avoid assignment risk"
+
+
+def _populate_instrument_fields(ticker: str) -> dict:
+    """Return settlement/exercise_style kwargs for TradeSpec construction."""
+    inst = _get_instrument_info(ticker)
+    if inst is not None:
+        return {"settlement": inst.settlement, "exercise_style": inst.exercise_style}
+    return {}
+
+
 def action_from_role(role: str) -> LegAction:
     """Derive BTO/STO from a leg role string.
 
@@ -448,6 +477,8 @@ def build_single_expiry_trade_spec(
     if exp_pt is None:
         return None
 
+    inst_fields = _populate_instrument_fields(ticker)
+
     if structure_type == "iron_condor":
         legs, wing_width = build_iron_condor_legs(
             price, atr, regime_id, exp_pt.expiration, exp_pt.days_to_expiry, exp_pt.atm_iv,
@@ -473,6 +504,7 @@ def build_single_expiry_trade_spec(
                         "Close at 21 DTE to avoid gamma risk"],
             entry_window_start=time(10, 0),
             entry_window_end=time(15, 0),
+            **inst_fields,
         )
 
     if structure_type == "iron_butterfly":
@@ -499,6 +531,7 @@ def build_single_expiry_trade_spec(
                         "Close at 14 DTE to avoid pin risk"],
             entry_window_start=time(10, 0),
             entry_window_end=time(15, 0),
+            **inst_fields,
         )
 
     if structure_type == "ratio_spread":
@@ -524,6 +557,7 @@ def build_single_expiry_trade_spec(
                         "Close at 21 DTE — gamma risk on naked leg"],
             entry_window_start=time(10, 0),
             entry_window_end=time(15, 0),
+            **inst_fields,
         )
 
     return None
@@ -562,6 +596,10 @@ def build_dual_expiry_trade_spec(
 
     iv_diff = (front_pt.atm_iv - back_pt.atm_iv) / back_pt.atm_iv * 100 if back_pt.atm_iv > 0 else 0.0
 
+    # Market-aware assignment note for dual-expiry structures
+    _assign_note = _assignment_exit_note(ticker)
+    inst_fields = _populate_instrument_fields(ticker)
+
     if structure_type == "calendar" and strategy_type == "double_calendar":
         legs = build_double_calendar_legs(price, front_pt, back_pt, atr)
         rationale = (
@@ -572,7 +610,7 @@ def build_dual_expiry_trade_spec(
         )
         st = StructureType.DOUBLE_CALENDAR
         exit_dte = max(front_pt.days_to_expiry - 7, 0)
-        exit_notes = ["Close before front leg expiry to avoid assignment risk",
+        exit_notes = [_assign_note,
                       "Roll front legs on 25% profit",
                       "Close if underlying moves beyond either strike"]
     elif structure_type == "calendar":
@@ -584,7 +622,7 @@ def build_dual_expiry_trade_spec(
         )
         st = StructureType.CALENDAR
         exit_dte = max(front_pt.days_to_expiry - 7, 0)
-        exit_notes = ["Close before front leg expiry to avoid assignment risk",
+        exit_notes = [_assign_note,
                       "Roll front leg on 25% profit",
                       "Close if underlying moves >1 ATR from strike"]
     elif structure_type == "diagonal":
@@ -628,6 +666,7 @@ def build_dual_expiry_trade_spec(
         exit_notes=exit_notes,
         entry_window_start=time(10, 0),
         entry_window_end=time(15, 0),
+        **inst_fields,
     )
 
 
@@ -861,6 +900,8 @@ def build_setup_trade_spec(
     if exp_pt is None:
         return None
 
+    inst_fields = _populate_instrument_fields(ticker)
+
     if direction == "neutral" and regime_id in (1, 2):
         # Iron condor for neutral setups
         legs, wing_width = build_iron_condor_legs(
@@ -883,6 +924,7 @@ def build_setup_trade_spec(
             exit_notes=["Suggested default structure for neutral setup",
                         "Close at 50% of credit received",
                         "Close if short strike tested on either side"],
+            **inst_fields,
         )
 
     if regime_id in (1, 2):
@@ -911,6 +953,7 @@ def build_setup_trade_spec(
             exit_notes=["Suggested default structure for setup",
                         "Close at 50% of credit received",
                         "Close if short strike tested"],
+            **inst_fields,
         )
 
     # R3: debit spread (directional)
@@ -936,6 +979,7 @@ def build_setup_trade_spec(
         exit_notes=["Suggested default structure for setup",
                     "Target 50% of max profit",
                     "Close at 50% loss of debit paid"],
+        **inst_fields,
     )
 
 

@@ -538,6 +538,8 @@ def _select_strategy(
                 structure="Buy deep ITM LEAP call, sell near-term OTM calls monthly.",
                 rationale="Markup phase — ride the trend with income from short calls.",
                 risk_notes=[
+                    # Assignment note is generic here (ticker not available);
+                    # the TradeSpec exit_notes carry market-aware detail.
                     "Short call assignment risk if ITM at expiry.",
                     "LEAP must be deep ITM (80+ delta).",
                 ],
@@ -601,6 +603,8 @@ def _build_leap_trade_spec(
         build_long_option_legs,
         build_pmcc_legs,
         find_best_expiration,
+        _assignment_exit_note,
+        _populate_instrument_fields,
     )
 
     if vol_surface is None or not vol_surface.term_structure:
@@ -608,6 +612,21 @@ def _build_leap_trade_spec(
 
     price = technicals.current_price
     atr = technicals.atr
+    inst_fields = _populate_instrument_fields(ticker)
+
+    # Market-aware assignment note for PMCC front leg
+    _assign_note = _assignment_exit_note(ticker)
+
+    # Market-aware short call assignment note for strategy risk_notes
+    try:
+        from market_analyzer.registry import MarketRegistry
+        _inst = MarketRegistry().get_instrument(ticker)
+        if _inst.exercise_style == "european":
+            _short_call_note = "European exercise — no early assignment risk. Settlement at expiry only."
+        else:
+            _short_call_note = "Short call assignment risk if ITM at expiry."
+    except (KeyError, ImportError):
+        _short_call_note = "Short call assignment risk if ITM at expiry."
 
     try:
         if leap_strategy in (LEAPStrategy.BULL_CALL_LEAP, LEAPStrategy.BEAR_PUT_LEAP):
@@ -633,6 +652,7 @@ def _build_leap_trade_spec(
                 exit_notes=["Time decay works against you — monitor theta",
                             "Close at 50% loss of premium paid",
                             "Consider rolling to later expiry at 180 DTE"],
+                **inst_fields,
             )
 
         elif leap_strategy == LEAPStrategy.BULL_CALL_SPREAD:
@@ -658,6 +678,7 @@ def _build_leap_trade_spec(
                 exit_notes=["Target 50% of max profit",
                             "Close at 50% loss of debit paid",
                             "Consider rolling to later expiry at 180 DTE"],
+                **inst_fields,
             )
 
         elif leap_strategy == LEAPStrategy.PROTECTIVE_PUT:
@@ -683,6 +704,7 @@ def _build_leap_trade_spec(
                 exit_notes=["Protective put — hedge, not primary income",
                             "Roll to later expiry before 90 DTE",
                             "Close if underlying recovers above entry"],
+                **inst_fields,
             )
 
         elif leap_strategy == LEAPStrategy.PMCC:
@@ -708,8 +730,9 @@ def _build_leap_trade_spec(
                 max_profit_desc="Front leg decay + back leg appreciation",
                 max_loss_desc="Net debit on back leg minus front premium collected",
                 exit_notes=["Roll front leg on 50% profit for recurring income",
-                            "Close front before expiry to avoid assignment",
+                            _assign_note,
                             "Monitor back leg delta — close if stock drops below back strike"],
+                **inst_fields,
             )
     except Exception:
         return None

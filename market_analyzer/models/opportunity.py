@@ -487,6 +487,8 @@ class TradeSpec(BaseModel):
     exit_plan: ExitPlan | None = None  # First-class exit plan (REQ-3)
     currency: str = "USD"  # Currency for all dollar amounts
     lot_size: int = 100  # Contract multiplier (100 for US equities, 10 for mini options)
+    settlement: str | None = None  # "cash" or "physical" — from MarketRegistry
+    exercise_style: str | None = None  # "european" or "american" — from MarketRegistry
 
     @property
     def leg_codes(self) -> list[str]:

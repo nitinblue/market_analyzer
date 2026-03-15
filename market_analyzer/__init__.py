@@ -111,6 +111,7 @@ from market_analyzer.broker.base import (
     BrokerSession,
     MarketDataProvider,
     MarketMetricsProvider,
+    TokenExpiredError,
     WatchlistProvider,
 )
 
@@ -264,6 +265,27 @@ from market_analyzer.performance import (
 # Features
 from market_analyzer.features.pipeline import compute_features
 from market_analyzer.features.technicals import compute_technicals
+
+# Currency conversion & cross-market exposure
+from market_analyzer.currency import (
+    CurrencyPair,
+    PositionExposure,
+    PortfolioExposure,
+    CurrencyPnL,
+    CurrencyHedgeAssessment,
+    convert_amount,
+    compute_portfolio_exposure,
+    compute_currency_pnl,
+    assess_currency_exposure,
+)
+
+# Same-ticker hedge assessment
+from market_analyzer.hedging import (
+    HedgeType,
+    HedgeUrgency,
+    HedgeRecommendation,
+    assess_hedge,
+)
 
 # Execution quality validation
 from market_analyzer.execution_quality import (
@@ -512,6 +534,7 @@ __all__ = [
     "BrokerSession",
     "MarketDataProvider",
     "MarketMetricsProvider",
+    "TokenExpiredError",
     "WatchlistProvider",
     # Market registry
     "MarketRegistry",
@@ -564,6 +587,21 @@ __all__ = [
     "OvernightRisk",
     "OvernightRiskLevel",
     "assess_overnight_risk",
+    # Currency conversion & cross-market exposure
+    "CurrencyPair",
+    "PositionExposure",
+    "PortfolioExposure",
+    "CurrencyPnL",
+    "CurrencyHedgeAssessment",
+    "convert_amount",
+    "compute_portfolio_exposure",
+    "compute_currency_pnl",
+    "assess_currency_exposure",
+    # Same-ticker hedge assessment
+    "HedgeType",
+    "HedgeUrgency",
+    "HedgeRecommendation",
+    "assess_hedge",
     # Execution quality validation
     "ExecutionQuality",
     "ExecutionVerdict",

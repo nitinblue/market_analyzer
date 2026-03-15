@@ -4,7 +4,7 @@
 
 **Boundary:** MA is stateless. eTrading passes context in, MA computes and returns. eTrading owns all state (outcomes, bandit params, drift history).
 
-**Stats:** 1305 tests passing. 233 in test_systematic.py.
+**Stats:** 1331 tests passing. 259 in test_systematic.py.
 
 ---
 
@@ -39,6 +39,63 @@
 | CR11 | Analytics | Sharpe, drawdown, regime perf | **DONE** | Call `compute_sharpe(outcomes)`, `compute_drawdown(outcomes)`, `compute_regime_performance(outcomes)`. Render in dashboard. |
 | CR12 | Multi-Market | India ticker mapping | **DONE** | Auto-resolved — NIFTY/BANKNIFTY/FINNIFTY/SENSEX aliases in DataService. No eTrading action. |
 | CR13 | Multi-Market | MarketRegistry static data | **DONE** | Call `ma.registry.get_instrument()` for lot sizes, `strategy_available()` for routing, `estimate_margin()` for sizing. |
+| CR14 | SaaS | Cache isolation | **DONE** | Verified: OptionQuoteService cache is per-instance. Each MarketAnalyzer instance is isolated. |
+| CR15 | SaaS | Lightweight init | **DONE** | Verified: MarketAnalyzer.__init__ only instantiates services. No data fetching, no network. Lazy. |
+| CR16 | SaaS | Token expiry | **DONE** | `TokenExpiredError` exception. `is_token_valid()` on BrokerSession + MarketDataProvider (default True). 2 tests. |
+| CR17 | SaaS | Rate limits | **DONE** | `rate_limit_per_second` + `supports_batch` on MarketDataProvider. Dhan=25, Zerodha=3. 3 tests. |
+| H1 | Hedging | Currency conversion + portfolio exposure | **DONE** | `convert_amount()`, `compute_portfolio_exposure()`. CurrencyPair, PositionExposure, PortfolioExposure models. 6 tests. |
+| H2 | Hedging | Same-ticker hedge assessment | **DONE** | `assess_hedge()` — regime-aware: R1=no hedge, R2=collar, R4=protective put/close. 5 position types. 8 tests. |
+| H3 | Hedging | Currency hedge assessment | **DONE** | `assess_currency_exposure()` — FX risk %, recommendation at 10%/30% thresholds. 2 tests. |
+| H4 | Hedging | Cross-market P&L decomposition | **DONE** | `compute_currency_pnl()` — trading P&L vs FX P&L breakdown. 4 tests. |
+| H5 | Hedging | CLI commands | **DONE** | `hedge TICKER [TYPE]`, `currency AMOUNT FROM TO`, `exposure`. 44 total CLI commands. |
+
+---
+
+## eTrading Pickup List
+
+Everything below is eTrading's responsibility. MA APIs are ready — eTrading must wire them.
+
+### Immediate (Wire Now — APIs Ready)
+
+| # | What eTrading Must Do | MA API | Priority |
+|---|----------------------|--------|----------|
+| E1 | Pass `iv_rank` to all assessor calls | `ma.quotes.get_metrics(ticker).iv_rank` → pass to `assess_*(iv_rank=)` | **HIGH** |
+| E2 | Pass `iv_rank_map` to ranking | Build `{ticker: iv_rank}` dict → `rank(iv_rank_map=...)` | **HIGH** |
+| E3 | Pass `time_of_day` to health check | `check_trade_health(..., time_of_day=datetime.now().time())` | **HIGH** |
+| E4 | Pass `debug=True` and store commentary | `detect(debug=True)`, store `result.commentary` in decision_lineage JSON | **HIGH** |
+| E5 | Read `data_gaps` and surface in UI | `result.data_gaps` on every RankedEntry/PlanTrade → discount confidence, show warnings | **HIGH** |
+| E6 | Call `validate_execution_quality()` before orders | `validate_execution_quality(spec, quotes)` → block if not GO | **HIGH** |
+| E7 | Respect `entry_window_start/end` on TradeSpec | Only submit orders within `spec.entry_window_start` to `spec.entry_window_end` | **MEDIUM** |
+| E8 | Read `entry_window_timezone` for India trades | Convert window times to local timezone for scheduler | **MEDIUM** |
+| E9 | Use `ma.registry` for lot sizes and strategy routing | `registry.get_instrument()` for lot_size, `strategy_available()` to skip LEAP in India | **HIGH** |
+| E10 | Check `regime.model_age_days` and retrain | If > 60 → call `ma.regime.fit(ticker)` | **MEDIUM** |
+| E11 | Pass `lot_size` correctly for India trades | TradeSpec.lot_size, monitor_exit_conditions(lot_size=) | **HIGH** |
+| E12 | Call `assess_hedge()` for open positions | Daily or on regime change → show hedge recommendation | **MEDIUM** |
+| E13 | Pass FX rates to `compute_currency_pnl()` | For cross-market P&L decomposition in dashboard | **MEDIUM** |
+
+### Build Pipeline (Requires DB + Scheduling)
+
+| # | What eTrading Must Build | MA API | Frequency |
+|---|-------------------------|--------|-----------|
+| E14 | TradeOutcome table + construction on close | `TradeOutcome` model — capture regime/IV/score at entry | On every close |
+| E15 | Bandit params table + update on close | `update_bandit(bandit, won)` | On every close |
+| E16 | Drift detection job | `detect_drift(outcomes)` → suspend/reduce | Daily pre-market |
+| E17 | Bandit strategy selection in daily plan | `select_strategies(bandits, regime)` → pass to `rank(strategies=)` | Daily plan |
+| E18 | Weight calibration job | `calibrate_weights(outcomes)` → apply overrides | Weekly |
+| E19 | POP factor calibration job | `calibrate_pop_factors(outcomes)` → store | Weekly |
+| E20 | Threshold optimization job | `optimize_thresholds(outcomes)` → apply as config | Monthly |
+| E21 | Performance dashboard | `compute_performance_report()`, `compute_sharpe()`, `compute_drawdown()`, `compute_regime_performance()` | Monthly |
+
+### SaaS Infrastructure
+
+| # | What eTrading Must Handle | MA Provides | Notes |
+|---|--------------------------|-------------|-------|
+| E22 | Per-user MarketAnalyzer instance | Cache is per-instance (CR-14 verified) | Don't share instances across users |
+| E23 | Token refresh for India brokers | `TokenExpiredError`, `is_token_valid()` | Dhan/Zerodha tokens expire daily |
+| E24 | Rate limiting for India brokers | `rate_limit_per_second` on provider | Zerodha: 3/sec, Dhan: 25/sec |
+| E25 | Broker connection UI per user | `connect_dhan_from_session()`, `connect_zerodha_from_session()` | Stubs ready, API impl pending |
+| E26 | Currency-aware P&L display | `compute_currency_pnl()`, `compute_portfolio_exposure()` | MA decomposes, eTrading displays |
+| E27 | Timezone-aware scheduling | `registry.get_market("INDIA").market_hours` | India 9:15-15:30 IST, US 9:30-16:00 ET |
 
 ---
 
@@ -327,3 +384,4 @@ save_threshold_config(optimized)
 | 2026-03-14 | SQ4-SQ10: Assessor overhauls, screening filters, IV ranking, pivot levels | +29 | 1219 |
 | 2026-03-14 | ML1-ML3: Drift detection, Thompson Sampling bandits, threshold optimization | +22 | 1241 |
 | 2026-03-14 | CR6-CR13: Multi-broker stubs, currency/timezone/lot_size, India data, MarketRegistry, analytics | +64 | 1305 |
+| 2026-03-14 | H1-H5 + CR14-17: Currency, hedging, SaaS isolation, token expiry, rate limits | +26 | 1331 |

@@ -3883,3 +3883,343 @@ class TestCR13MarketRegistry:
         assert "currency" in fields
         assert "method" in fields
         assert "notes" in fields
+
+
+# ── H1: Currency Conversion ──
+
+
+class TestH1CurrencyConversion:
+    """H1: CurrencyPair, convert_amount, compute_portfolio_exposure."""
+
+    def test_convert_same_currency(self):
+        """USD to USD = same amount, no rate needed."""
+        from market_analyzer.currency import convert_amount
+
+        result = convert_amount(1000.0, "USD", "USD", {})
+        assert result == 1000.0
+
+    def test_convert_usd_to_inr(self):
+        """1000 USD * 83.5 = 83500 INR."""
+        from market_analyzer.currency import CurrencyPair, convert_amount
+
+        rates = {
+            "USD/INR": CurrencyPair(base="USD", quote="INR", rate=83.5, as_of=date.today()),
+        }
+        result = convert_amount(1000.0, "USD", "INR", rates)
+        assert result == pytest.approx(83500.0)
+
+    def test_convert_inr_to_usd(self):
+        """83500 INR / 83.5 = 1000 USD (inverse lookup)."""
+        from market_analyzer.currency import CurrencyPair, convert_amount
+
+        rates = {
+            "USD/INR": CurrencyPair(base="USD", quote="INR", rate=83.5, as_of=date.today()),
+        }
+        result = convert_amount(83500.0, "INR", "USD", rates)
+        assert result == pytest.approx(1000.0)
+
+    def test_convert_missing_rate_raises(self):
+        """Unknown currency pair raises KeyError."""
+        from market_analyzer.currency import convert_amount
+
+        with pytest.raises(KeyError, match="No exchange rate found"):
+            convert_amount(100.0, "USD", "EUR", {})
+
+    def test_portfolio_exposure(self):
+        """2 USD positions + 1 INR position: computes total in USD and foreign pct."""
+        from market_analyzer.currency import (
+            CurrencyPair,
+            PositionExposure,
+            compute_portfolio_exposure,
+        )
+
+        positions = [
+            PositionExposure(ticker="SPY", market="US", currency="USD", notional_value=30000, unrealized_pnl=500),
+            PositionExposure(ticker="QQQ", market="US", currency="USD", notional_value=15000, unrealized_pnl=-200),
+            PositionExposure(ticker="RELIANCE", market="INDIA", currency="INR", notional_value=835000, unrealized_pnl=10000),
+        ]
+        rates = {
+            "USD/INR": CurrencyPair(base="USD", quote="INR", rate=83.5, as_of=date.today()),
+        }
+        result = compute_portfolio_exposure(positions, rates, base_currency="USD")
+
+        # USD: 30000 + 15000 = 45000
+        # INR: 835000 / 83.5 = 10000 USD
+        # Total: 55000
+        assert result.total_exposure == pytest.approx(55000.0, abs=1)
+        assert result.currency_risk_pct == pytest.approx(10000.0 / 55000.0, abs=0.001)
+        assert result.largest_foreign_exposure == "INR"
+
+    def test_portfolio_exposure_all_base(self):
+        """All USD positions -> currency_risk_pct = 0."""
+        from market_analyzer.currency import (
+            PositionExposure,
+            compute_portfolio_exposure,
+        )
+
+        positions = [
+            PositionExposure(ticker="SPY", market="US", currency="USD", notional_value=30000, unrealized_pnl=0),
+            PositionExposure(ticker="QQQ", market="US", currency="USD", notional_value=20000, unrealized_pnl=0),
+        ]
+        result = compute_portfolio_exposure(positions, {}, base_currency="USD")
+        assert result.currency_risk_pct == 0.0
+        assert result.largest_foreign_exposure is None
+
+
+# ── H3: Currency Hedge Assessment ──
+
+
+class TestH3CurrencyHedge:
+    """H3: assess_currency_exposure recommendations."""
+
+    def _make_positions(self, usd_amount: float, inr_amount: float):
+        from market_analyzer.currency import PositionExposure
+
+        positions = [
+            PositionExposure(ticker="SPY", market="US", currency="USD", notional_value=usd_amount, unrealized_pnl=0),
+        ]
+        if inr_amount > 0:
+            positions.append(
+                PositionExposure(ticker="RELIANCE", market="INDIA", currency="INR", notional_value=inr_amount, unrealized_pnl=0),
+            )
+        return positions
+
+    def _rates(self):
+        from market_analyzer.currency import CurrencyPair
+
+        return {
+            "USD/INR": CurrencyPair(base="USD", quote="INR", rate=83.5, as_of=date.today()),
+        }
+
+    def test_low_foreign_exposure(self):
+        """< 10% foreign -> natural hedge sufficient."""
+        from market_analyzer.currency import assess_currency_exposure
+
+        # INR 418K / 83.5 = ~5K USD. Total ~55K. Foreign ~9%
+        positions = self._make_positions(50000, 418000)
+        result = assess_currency_exposure(positions, self._rates())
+        assert "natural hedge sufficient" in result.recommendation
+
+    def test_high_foreign_exposure(self):
+        """> 30% foreign -> hedge recommended."""
+        from market_analyzer.currency import assess_currency_exposure
+
+        # INR 4,175,000 / 83.5 = 50K USD. Total ~80K. Foreign ~62%
+        positions = self._make_positions(30000, 4175000)
+        result = assess_currency_exposure(positions, self._rates())
+        assert "hedge recommended" in result.recommendation
+
+
+# ── H4: Currency P&L Decomposition ──
+
+
+class TestH4CurrencyPnL:
+    """H4: compute_currency_pnl decomposition."""
+
+    def test_same_currency_no_fx(self):
+        """USD position -> currency_pnl = 0."""
+        from market_analyzer.currency import compute_currency_pnl
+
+        result = compute_currency_pnl(
+            ticker="SPY", trading_pnl_local=500.0, position_value_local=30000.0,
+            local_currency="USD", base_currency="USD",
+            fx_rate_at_entry=1.0, fx_rate_current=1.0,
+        )
+        assert result.currency_pnl_base == 0.0
+        assert result.total_pnl_base == 500.0
+
+    def test_inr_weakens_hurts_usd_investor(self):
+        """INR weakens (rate goes from 83 to 85) -> negative currency P&L in USD."""
+        from market_analyzer.currency import compute_currency_pnl
+
+        result = compute_currency_pnl(
+            ticker="RELIANCE", trading_pnl_local=5000.0,
+            position_value_local=835000.0,
+            local_currency="INR", base_currency="USD",
+            fx_rate_at_entry=83.0, fx_rate_current=85.0,
+        )
+        # Position worth 835000/83 = 10060 at entry, 835000/85 = 9823 now
+        # Currency P&L = 9823 - 10060 = -237 (negative = INR weakened)
+        assert result.currency_pnl_base < 0
+        assert result.fx_change_pct > 0  # rate went up = base (USD) strengthened
+
+    def test_inr_strengthens_helps_usd_investor(self):
+        """INR strengthens (rate goes from 85 to 83) -> positive currency P&L."""
+        from market_analyzer.currency import compute_currency_pnl
+
+        result = compute_currency_pnl(
+            ticker="RELIANCE", trading_pnl_local=5000.0,
+            position_value_local=835000.0,
+            local_currency="INR", base_currency="USD",
+            fx_rate_at_entry=85.0, fx_rate_current=83.0,
+        )
+        # Position worth 835000/85 = 9823 at entry, 835000/83 = 10060 now
+        # Currency P&L = 10060 - 9823 = +237
+        assert result.currency_pnl_base > 0
+        assert result.fx_change_pct < 0  # rate went down = INR strengthened
+
+    def test_pnl_decomposition_sums(self):
+        """total_pnl = trading_pnl_base + currency_pnl_base."""
+        from market_analyzer.currency import compute_currency_pnl
+
+        result = compute_currency_pnl(
+            ticker="RELIANCE", trading_pnl_local=10000.0,
+            position_value_local=835000.0,
+            local_currency="INR", base_currency="USD",
+            fx_rate_at_entry=83.0, fx_rate_current=84.0,
+        )
+        assert result.total_pnl_base == pytest.approx(
+            result.trading_pnl_base + result.currency_pnl_base, abs=0.01,
+        )
+
+
+# ── H2: Hedge Assessment ──
+
+
+class TestH2HedgeAssessment:
+    """H2: assess_hedge regime-aware hedge recommendations."""
+
+    def _regime(self, regime_id: int, trend: str | None = None) -> RegimeResult:
+        from market_analyzer.models.regime import TrendDirection
+
+        td = None
+        if trend == "bullish":
+            td = TrendDirection.BULLISH
+        elif trend == "bearish":
+            td = TrendDirection.BEARISH
+
+        return RegimeResult(
+            ticker="SPY",
+            regime=RegimeID(regime_id),
+            confidence=0.85,
+            regime_probabilities={
+                RegimeID.R1_LOW_VOL_MR: 0.85 if regime_id == 1 else 0.05,
+                RegimeID.R2_HIGH_VOL_MR: 0.85 if regime_id == 2 else 0.05,
+                RegimeID.R3_LOW_VOL_TREND: 0.85 if regime_id == 3 else 0.05,
+                RegimeID.R4_HIGH_VOL_TREND: 0.85 if regime_id == 4 else 0.05,
+            },
+            as_of_date=date.today(),
+            model_version="test",
+            trend_direction=td,
+        )
+
+    def _tech(self, price: float = 580.0, atr: float = 8.0) -> TechnicalSnapshot:
+        return _make_technicals(price=price, atr=atr)
+
+    def test_long_equity_r1_no_hedge(self):
+        """R1 -> NO_HEDGE for long equity."""
+        from market_analyzer.hedging import HedgeType, assess_hedge
+
+        rec = assess_hedge("SPY", "long_equity", 50000.0, self._regime(1), self._tech())
+        assert rec.hedge_type == HedgeType.NO_HEDGE
+
+    def test_long_equity_r2_collar(self):
+        """R2 -> COLLAR for long equity."""
+        from market_analyzer.hedging import HedgeType, assess_hedge
+
+        rec = assess_hedge("SPY", "long_equity", 50000.0, self._regime(2), self._tech())
+        assert rec.hedge_type == HedgeType.COLLAR
+
+    def test_long_equity_r4_protective_put(self):
+        """R4 -> PROTECTIVE_PUT with IMMEDIATE urgency."""
+        from market_analyzer.hedging import HedgeType, HedgeUrgency, assess_hedge
+
+        rec = assess_hedge("SPY", "long_equity", 50000.0, self._regime(4), self._tech())
+        assert rec.hedge_type == HedgeType.PROTECTIVE_PUT
+        assert rec.urgency == HedgeUrgency.IMMEDIATE
+
+    def test_short_straddle_r4_close(self):
+        """R4 -> CLOSE_POSITION for short straddle (undefined risk)."""
+        from market_analyzer.hedging import HedgeType, assess_hedge
+
+        rec = assess_hedge("SPY", "short_straddle", 50000.0, self._regime(4), self._tech())
+        assert rec.hedge_type == HedgeType.CLOSE_POSITION
+
+    def test_short_straddle_r2_add_wing(self):
+        """R2 -> ADD_WING to convert undefined to defined risk."""
+        from market_analyzer.hedging import HedgeType, assess_hedge
+
+        rec = assess_hedge("SPY", "short_straddle", 50000.0, self._regime(2), self._tech())
+        assert rec.hedge_type == HedgeType.ADD_WING
+
+    def test_iron_condor_r1_no_hedge(self):
+        """R1 -> NO_HEDGE for iron condor (wings are the hedge)."""
+        from market_analyzer.hedging import HedgeType, assess_hedge
+
+        rec = assess_hedge("SPY", "iron_condor", 50000.0, self._regime(1), self._tech())
+        assert rec.hedge_type == HedgeType.NO_HEDGE
+
+    def test_iron_condor_r4_close(self):
+        """R4 -> CLOSE_POSITION for iron condor."""
+        from market_analyzer.hedging import HedgeType, assess_hedge
+
+        rec = assess_hedge("SPY", "iron_condor", 50000.0, self._regime(4), self._tech())
+        assert rec.hedge_type == HedgeType.CLOSE_POSITION
+
+    def test_unknown_position_type(self):
+        """Unknown position type -> NO_HEDGE with MONITOR."""
+        from market_analyzer.hedging import HedgeType, HedgeUrgency, assess_hedge
+
+        rec = assess_hedge("SPY", "exotic_butterfly", 50000.0, self._regime(2), self._tech())
+        assert rec.hedge_type == HedgeType.NO_HEDGE
+        assert rec.urgency == HedgeUrgency.MONITOR
+
+
+# ── CR-14: Cache Isolation ──
+
+
+class TestCR14CacheIsolation:
+    """CR-14: Per-instance quote cache isolation."""
+
+    def test_option_quote_cache_per_instance(self):
+        """Each OptionQuoteService instance has its own cache dict."""
+        from market_analyzer.service.option_quotes import OptionQuoteService
+
+        svc1 = OptionQuoteService()
+        svc2 = OptionQuoteService()
+        assert svc1._quote_cache is not svc2._quote_cache
+
+
+# ── CR-16: Token Expiry ──
+
+
+class TestCR16TokenExpiry:
+    """CR-16: TokenExpiredError and is_token_valid on providers."""
+
+    def test_token_expired_error_exists(self):
+        """TokenExpiredError is an Exception subclass."""
+        from market_analyzer.broker.base import TokenExpiredError
+
+        assert issubclass(TokenExpiredError, Exception)
+
+    def test_is_token_valid_default_true(self):
+        """MarketDataProvider.is_token_valid() defaults to True (via Dhan stub)."""
+        from market_analyzer.broker.dhan.market_data import DhanMarketData
+
+        md = DhanMarketData()
+        assert md.is_token_valid() is True
+
+
+# ── CR-17: Rate Limits ──
+
+
+class TestCR17RateLimits:
+    """CR-17: Broker-specific rate limits and batch support."""
+
+    def test_dhan_rate_limit(self):
+        """Dhan rate limit is 25 req/s."""
+        from market_analyzer.broker.dhan.market_data import DhanMarketData
+
+        assert DhanMarketData().rate_limit_per_second == 25
+
+    def test_zerodha_rate_limit(self):
+        """Zerodha rate limit is 3 req/s."""
+        from market_analyzer.broker.zerodha.market_data import ZerodhaMarketData
+
+        assert ZerodhaMarketData().rate_limit_per_second == 3
+
+    def test_supports_batch_default_false(self):
+        """Dhan supports_batch defaults to False."""
+        from market_analyzer.broker.dhan.market_data import DhanMarketData
+
+        assert DhanMarketData().supports_batch is False

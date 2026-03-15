@@ -2698,6 +2698,260 @@ Requires --broker connection."""
             m = registry.estimate_margin(strategy, ticker, wing_width=width, contracts=contracts)
             print(f"  {contracts:2d} contracts: {m.currency} {m.margin_amount:>10,.0f}  ({m.method})")
 
+    def do_hedge(self, arg: str) -> None:
+        """Assess same-ticker hedge for a position.
+        Usage: hedge TICKER [POSITION_TYPE]
+          POSITION_TYPE: long_equity, iron_condor, credit_spread, short_straddle (default: long_equity)
+        Example: hedge NIFTY iron_condor"""
+        ma = self._get_ma()
+        parts = arg.strip().split()
+        if not parts:
+            print("Usage: hedge TICKER [POSITION_TYPE]")
+            print("  POSITION_TYPE: long_equity, iron_condor, credit_spread, short_straddle")
+            print("  Example: hedge SPY long_equity")
+            print("  Example: hedge NIFTY iron_condor")
+            return
+
+        ticker = parts[0].upper()
+        position_type = parts[1].lower() if len(parts) > 1 else "long_equity"
+
+        valid_types = {"long_equity", "iron_condor", "credit_spread", "short_straddle"}
+        if position_type not in valid_types:
+            print(f"Invalid position type: {position_type}")
+            print(f"  Valid types: {', '.join(sorted(valid_types))}")
+            return
+
+        _print_header(f"Hedge Assessment: {ticker} ({position_type})")
+
+        try:
+            regime = ma.regime.detect(ticker)
+            tech = ma.technicals.snapshot(ticker)
+        except Exception as e:
+            print(f"  {_styled(f'Error fetching data for {ticker}: {e}', 'red')}")
+            return
+
+        current_price = tech.current_price
+        # Estimate position value: price * lot_size (100 for US options)
+        try:
+            inst = ma.registry.get_instrument(ticker)
+            lot_size = inst.lot_size or 100
+        except KeyError:
+            lot_size = 100
+        position_value = current_price * lot_size
+
+        regime_name = {1: "R1 Low-Vol MR", 2: "R2 High-Vol MR",
+                       3: "R3 Low-Vol Trend", 4: "R4 High-Vol Trend"}.get(
+            int(regime.regime), f"R{regime.regime}")
+
+        print(f"\n  Ticker:    {_styled(ticker, 'cyan')}")
+        print(f"  Price:     ${current_price:,.2f}")
+        print(f"  Position:  {position_type.replace('_', ' ').title()}")
+        print(f"  Regime:    {_styled(regime_name, 'yellow')} ({regime.confidence:.0%})")
+        print(f"  Est Value: ${position_value:,.0f}")
+
+        # Hedge decision tree (from HEDGING_PLAN.md)
+        r = int(regime.regime)
+        urgency = "none"
+        recommendation = ""
+        rationale = ""
+
+        if position_type == "long_equity":
+            if r == 1:
+                recommendation = "NO HEDGE"
+                rationale = "Theta decay on protective puts wastes money in range-bound regime"
+                urgency = "none"
+            elif r == 2:
+                recommendation = "COLLAR"
+                rationale = "Sell OTM call + buy OTM put — zero-cost hedge possible in high IV"
+                urgency = "monitor"
+            elif r == 3:
+                trend = getattr(regime, "trend_direction", None)
+                if trend and str(trend).lower() in ("bearish", "down"):
+                    recommendation = "PROTECTIVE PUT"
+                    rationale = "Counter-trend detected in low-vol trending regime"
+                    urgency = "soon"
+                else:
+                    recommendation = "NO HEDGE"
+                    rationale = "Trend is favorable — hedge would cap upside unnecessarily"
+                    urgency = "none"
+            elif r == 4:
+                recommendation = "PROTECTIVE PUT"
+                rationale = "High-vol trend regime — buy ATM put immediately"
+                urgency = "immediate"
+
+        elif position_type == "iron_condor":
+            if r <= 2:
+                recommendation = "NO HEDGE"
+                rationale = "IC is already defined risk — wings are the hedge"
+                urgency = "none"
+            elif r == 3:
+                recommendation = "DELTA HEDGE"
+                rationale = "Add directional leg if trend threatens short strike"
+                urgency = "soon"
+            elif r == 4:
+                recommendation = "CLOSE POSITION"
+                rationale = "Iron condor in R4 is the wrong trade — exit, don't hedge"
+                urgency = "immediate"
+
+        elif position_type == "credit_spread":
+            if r <= 2:
+                recommendation = "NO HEDGE"
+                rationale = "Defined risk position in mean-reverting regime"
+                urgency = "none"
+            elif r == 3:
+                recommendation = "ROLL AWAY"
+                rationale = "Roll short strike further OTM in direction of trend"
+                urgency = "soon"
+            elif r == 4:
+                recommendation = "CLOSE POSITION"
+                rationale = "Exit undefined-direction credit spread in volatile trend"
+                urgency = "immediate"
+
+        elif position_type == "short_straddle":
+            if r == 1:
+                recommendation = "NO HEDGE"
+                rationale = "Mean-reverting regime supports straddle"
+                urgency = "none"
+            elif r == 2:
+                recommendation = "ADD WINGS"
+                rationale = "Convert to iron butterfly — define risk in high vol"
+                urgency = "monitor"
+            elif r == 3:
+                recommendation = "DELTA HEDGE"
+                rationale = "Add directional spread on trending side"
+                urgency = "soon"
+            elif r == 4:
+                recommendation = "CLOSE POSITION"
+                rationale = "Undefined risk in R4 = immediate exit"
+                urgency = "immediate"
+
+        # Color-coded urgency
+        urgency_colors = {
+            "none": "green", "monitor": "yellow", "soon": "yellow", "immediate": "red",
+        }
+        urgency_color = urgency_colors.get(urgency, "white")
+
+        print(f"\n  {_styled('Recommendation:', 'bold')} {_styled(recommendation, urgency_color)}")
+        print(f"  {_styled('Urgency:', 'bold')}        {_styled(urgency.upper(), urgency_color)}")
+        print(f"  {_styled('Rationale:', 'bold')}      {rationale}")
+
+        # ATR context
+        if tech.atr_pct:
+            print(f"\n  ATR:       {tech.atr_pct:.2f}% (${current_price * tech.atr_pct / 100:,.2f})")
+        if tech.rsi:
+            print(f"  RSI:       {tech.rsi.value:.1f}")
+        print()
+
+    def do_currency(self, arg: str) -> None:
+        """Currency conversion and FX P&L decomposition.
+        Usage: currency AMOUNT FROM TO [--entry-rate N]
+        Example: currency 100000 INR USD
+        Example: currency 5000 USD INR --entry-rate 82.5"""
+        parts = arg.strip().split()
+        if len(parts) < 3:
+            print("Usage: currency AMOUNT FROM TO [--entry-rate N]")
+            print("  Example: currency 100000 INR USD")
+            print("  Example: currency 5000 USD INR --entry-rate 82.5")
+            return
+
+        try:
+            amount = float(parts[0].replace(",", ""))
+        except ValueError:
+            print(f"Invalid amount: {parts[0]}")
+            return
+
+        from_ccy = parts[1].upper()
+        to_ccy = parts[2].upper()
+
+        entry_rate = None
+        i = 3
+        while i < len(parts):
+            if parts[i] == "--entry-rate" and i + 1 < len(parts):
+                try:
+                    entry_rate = float(parts[i + 1])
+                except ValueError:
+                    print(f"Invalid entry rate: {parts[i + 1]}")
+                    return
+                i += 2
+            else:
+                i += 1
+
+        _print_header("Currency Conversion")
+
+        # Illustrative rate — not live
+        illustrative_rate = 83.5  # USD/INR
+        print(f"\n  {_styled('WARNING: Using illustrative USD/INR rate of 83.5', 'yellow')}")
+        print(f"  {_styled('For live rates, use eTrading which fetches from broker.', 'dim')}")
+
+        from market_analyzer.currency import CurrencyPair, convert_amount, compute_currency_pnl
+
+        pair = CurrencyPair(
+            base="USD", quote="INR", rate=illustrative_rate,
+            as_of=date.today(),
+        )
+        rates = {"USD/INR": pair}
+
+        try:
+            converted = convert_amount(amount, from_ccy, to_ccy, rates)
+        except KeyError:
+            print(f"\n  {_styled(f'No exchange rate available for {from_ccy}/{to_ccy}', 'red')}")
+            print(f"  Currently only USD/INR conversion is supported illustratively.")
+            return
+
+        print(f"\n  {from_ccy} {amount:>15,.2f}")
+        print(f"  {to_ccy} {converted:>15,.2f}")
+        print(f"  Rate: 1 USD = {illustrative_rate} INR")
+
+        if entry_rate is not None:
+            print(f"\n  {_styled('FX P&L Decomposition:', 'bold')}")
+
+            # Determine which currency is local vs base
+            if from_ccy == "INR" or to_ccy == "INR":
+                local_ccy = "INR"
+                base_ccy = "USD"
+            else:
+                local_ccy = from_ccy
+                base_ccy = to_ccy
+
+            # For illustration: assume trading P&L is 0, show pure FX impact
+            pnl = compute_currency_pnl(
+                ticker="PORTFOLIO",
+                trading_pnl_local=0.0,
+                position_value_local=amount if from_ccy == local_ccy else amount * illustrative_rate,
+                local_currency=local_ccy,
+                base_currency=base_ccy,
+                fx_rate_at_entry=entry_rate,
+                fx_rate_current=illustrative_rate,
+            )
+            print(f"  Entry rate:    1 USD = {entry_rate} INR")
+            print(f"  Current rate:  1 USD = {illustrative_rate} INR")
+            print(f"  FX change:     {pnl.fx_change_pct:+.2f}%")
+            print(f"  FX P&L impact: {base_ccy} {pnl.currency_pnl_base:+,.2f}")
+            if pnl.currency_pnl_base < 0:
+                print(f"  {_styled('INR depreciated — position worth less in USD', 'red')}")
+            elif pnl.currency_pnl_base > 0:
+                print(f"  {_styled('INR appreciated — position worth more in USD', 'green')}")
+        print()
+
+    def do_exposure(self, arg: str) -> None:
+        """Show cross-market portfolio exposure.
+        Usage: exposure
+        Note: Requires position data from eTrading. Shows API usage."""
+        _print_header("Cross-Market Exposure")
+        print(f"\n  {_styled('Not available in standalone CLI.', 'yellow')}")
+        print()
+        print("  Requires position data from eTrading for multi-market exposure.")
+        print(f"  {_styled('from market_analyzer import compute_portfolio_exposure, CurrencyPair, PositionExposure', 'dim')}")
+        print(f"  {_styled('positions = [PositionExposure(ticker=\"SPY\", market=\"US\", currency=\"USD\", ...)]', 'dim')}")
+        print(f"  {_styled('rates = {{\"USD/INR\": CurrencyPair(base=\"USD\", quote=\"INR\", rate=83.5, ...)}}', 'dim')}")
+        print(f"  {_styled('exposure = compute_portfolio_exposure(positions, rates)', 'dim')}")
+        print(f"  {_styled('# -> PortfolioExposure with currency_risk_pct, converted totals', 'dim')}")
+        print()
+        print(f"  {_styled('from market_analyzer import assess_currency_exposure', 'dim')}")
+        print(f"  {_styled('hedge = assess_currency_exposure(positions, rates)', 'dim')}")
+        print(f"  {_styled('# -> CurrencyHedgeAssessment with recommendation + risk_per_1pct_fx_move', 'dim')}")
+        print()
+
     def do_quit(self, arg: str) -> bool:
         """Exit the REPL."""
         print("Goodbye.")
