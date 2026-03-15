@@ -1022,8 +1022,11 @@ class TestAllStrategiesWired:
         result = svc.rank(["SPY"])
         assert result.total_assessed == 11
         assert len(result.top_trades) == 11
+        # Only options strategies have assess methods — equity/futures are fallback types
+        from market_analyzer.service.ranking import _ASSESS_METHODS
+        expected = set(_ASSESS_METHODS.keys())
         strategy_types = {e.strategy_type for e in result.top_trades}
-        assert strategy_types == set(StrategyType)
+        assert strategy_types == expected
 
     def test_all_strategies_have_scores(self):
         svc = self._build_full_service()

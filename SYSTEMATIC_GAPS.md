@@ -48,6 +48,18 @@
 | H3 | Hedging | Currency hedge assessment | **DONE** | `assess_currency_exposure()` — FX risk %, recommendation at 10%/30% thresholds. 2 tests. |
 | H4 | Hedging | Cross-market P&L decomposition | **DONE** | `compute_currency_pnl()` — trading P&L vs FX P&L breakdown. 4 tests. |
 | H5 | Hedging | CLI commands | **DONE** | `hedge TICKER [TYPE]`, `currency AMOUNT FROM TO`, `exposure`. 44 total CLI commands. |
+| IN1 | India | Equity/futures trade models | **DONE** | `StructureType.EQUITY_LONG/SHORT`, `FUTURES_LONG/SHORT`. `StrategyType.EQUITY_BREAKOUT/MOMENTUM/MEAN_REVERSION`, `FUTURES_DIRECTIONAL`. TradeSpec.order_data outputs `instrument_type: EQUITY/FUTURE`. |
+| IN2 | India | Cash equity trade spec builder | **DONE** | `build_equity_trade_spec()` — ATR-based stop (1.5 ATR) and target (2.0 ATR, R:R 1.33). Lot size, currency from registry. |
+| IN3 | India | Equity-first for India stocks | **DONE** | Setup assessors (breakout, momentum, MR) use `_should_use_equity(ticker)` — India stocks without weekly options get equity TradeSpec instead of options. NIFTY/BANKNIFTY still get options (weekly expiry). |
+| IN4 | India | Market-aware exit notes | **DONE** | Assignment warnings adjusted: European+cash → "no assignment risk". Physical+European → "no early assignment". Max DTE enforced in calendar/diagonal. |
+| IN5 | India | LEAP blocked for India | **DONE** | LEAP assessor checks `registry.strategy_available("leaps", ticker)` — hard stop for India tickers. |
+| CM1 | Cross-Market | US-India correlation + gap prediction | **DONE** | `analyze_cross_market()` — 20d/60d correlation, linear regression gap prediction, regime sync, crash/rally signals. CLI `crossmarket`, `india_context`. |
+| MC1 | Macro | Bond market indicators | **DONE** | `compute_bond_market()` — 10Y yield trend, TLT return, basis point changes. From TNX + TLT via yfinance. |
+| MC2 | Macro | Credit spread proxy | **DONE** | `compute_credit_spreads()` — HYG/TLT ratio, percentile, risk level. Spread widening = risk aversion. |
+| MC3 | Macro | Dollar strength | **DONE** | `compute_dollar_strength()` — UUP trend, India/US impact. Strong dollar = INR headwind. |
+| MC4 | Macro | Inflation expectations | **DONE** | `compute_inflation_expectations()` — TIP/TLT ratio, breakeven inflation proxy. |
+| MC5 | Macro | Macro dashboard | **DONE** | `compute_macro_dashboard()` — aggregates all indicators, overall risk level, trading impact guidance. CLI `macro_indicators`. |
+| TQ1 | Analysis | Trade quality scoring (POP + EV + R:R) | **DONE** | `POPEstimate` now has `max_profit`, `max_loss`, `risk_reward_ratio`, `trade_quality` (excellent/good/marginal/poor), `trade_quality_score` (0-1 composite). Combines POP (40%) + EV (30%) + R:R (30%). eTrading: gate on `trade_quality_score >= 0.50` for systematic trading. |
 
 ---
 
@@ -385,3 +397,5 @@ save_threshold_config(optimized)
 | 2026-03-14 | ML1-ML3: Drift detection, Thompson Sampling bandits, threshold optimization | +22 | 1241 |
 | 2026-03-14 | CR6-CR13: Multi-broker stubs, currency/timezone/lot_size, India data, MarketRegistry, analytics | +64 | 1305 |
 | 2026-03-14 | H1-H5 + CR14-17: Currency, hedging, SaaS isolation, token expiry, rate limits | +26 | 1331 |
+| 2026-03-14 | IN1-IN5: India equity-first, equity trade models, market-aware exit notes, LEAP blocking | +0 | 1331 |
+| 2026-03-14 | CM1 + MC1-MC5: Cross-market correlation, macro indicators (bonds, credit, dollar, inflation) | +0 | 1331 |

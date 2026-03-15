@@ -26,6 +26,12 @@ class StrategyType(StrEnum):
     EARNINGS = "earnings"
     MEAN_REVERSION = "mean_reversion"
 
+    # Non-options strategies (India cash/futures when options illiquid)
+    EQUITY_BREAKOUT = "equity_breakout"
+    EQUITY_MOMENTUM = "equity_momentum"
+    EQUITY_MEAN_REVERSION = "equity_mean_reversion"
+    FUTURES_DIRECTIONAL = "futures_directional"
+
 
 class ScoreBreakdown(BaseModel):
     """Component scores that compose the final ranking score."""

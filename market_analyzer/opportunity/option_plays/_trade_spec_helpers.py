@@ -1007,3 +1007,79 @@ def compute_max_entry_price_from_quotes(
         # Net debit — don't pay more than (1 + slippage) of broker mid
         return round(abs(net_price) * (1.0 + slippage_pct), 2)
     return None
+
+
+# --- Equity / futures fallback (India market) ---
+
+
+def _should_use_equity(ticker: str) -> bool:
+    """Check if this ticker should use cash equity instead of options.
+
+    Returns True for India stocks (not indices) that lack weekly options,
+    meaning options liquidity is typically poor for short-term strategies.
+    """
+    inst = _get_instrument_info(ticker)
+    if inst is None:
+        return False
+    return inst.market == "INDIA" and not inst.has_0dte and inst.asset_type == "equity"
+
+
+def build_equity_trade_spec(
+    ticker: str,
+    price: float,
+    atr: float,
+    direction: str,
+    setup_type: str,
+    regime_id: int,
+    lot_size: int = 1,
+    currency: str = "USD",
+) -> TradeSpec:
+    """Build a cash equity trade spec when options are illiquid.
+
+    Used for India stocks where options lack depth.  Builds a simple
+    directional equity position with ATR-based stop and target.
+    """
+    if direction == "bullish":
+        structure = StructureType.EQUITY_LONG
+        order_side = OrderSide.DEBIT
+        stop_price = round(price - 1.5 * atr, 2)
+        target_price = round(price + 2.0 * atr, 2)
+        profit_desc = f"Target {target_price:.2f} (+{2.0 * atr:.2f})"
+        loss_desc = f"Stop {stop_price:.2f} (-{1.5 * atr:.2f})"
+    else:
+        structure = StructureType.EQUITY_SHORT
+        order_side = OrderSide.CREDIT
+        stop_price = round(price + 1.5 * atr, 2)
+        target_price = round(price - 2.0 * atr, 2)
+        profit_desc = f"Target {target_price:.2f} (-{2.0 * atr:.2f})"
+        loss_desc = f"Stop {stop_price:.2f} (+{1.5 * atr:.2f})"
+
+    inst_fields = _populate_instrument_fields(ticker)
+
+    return TradeSpec(
+        ticker=ticker,
+        legs=[],
+        underlying_price=price,
+        target_dte=0,
+        target_expiration=date.today(),
+        spec_rationale=(
+            f"Cash equity {direction} — {setup_type} setup. "
+            f"Options illiquid for {ticker}."
+        ),
+        structure_type=structure,
+        order_side=order_side,
+        profit_target_pct=0.50,
+        stop_loss_pct=0.05,
+        max_profit_desc=profit_desc,
+        max_loss_desc=loss_desc,
+        exit_notes=[
+            f"Stop loss at {stop_price:.2f} (1.5 ATR)",
+            f"Target at {target_price:.2f} (2.0 ATR, R:R 1.33)",
+            "Trail stop by 1 ATR after 50% profit",
+            "Cash equity — no time decay, no expiry pressure",
+        ],
+        max_entry_price=price,
+        lot_size=lot_size,
+        currency=currency,
+        **inst_fields,
+    )

@@ -921,6 +921,103 @@ Requires --broker connection."""
         except Exception as exc:
             print(f"{_styled('ERROR:', 'red')} {exc}")
 
+    def do_macro_indicators(self, arg: str) -> None:
+        """Macro economic indicators — bonds, credit, dollar, inflation.
+        Usage: macro_indicators
+        Fetches TNX (10Y yield), TLT (long bond), HYG (high yield), UUP (dollar), TIP (TIPS)"""
+        try:
+            ma = self._get_ma()
+            ds = ma.data
+
+            if ds is None:
+                print("DataService required for macro indicators.")
+                return
+
+            _print_header("Macro Economic Indicators")
+
+            from market_analyzer.macro_indicators import compute_macro_dashboard
+
+            # Fetch macro tickers
+            tickers = {
+                "TNX": "TNX",
+                "TLT": "TLT",
+                "HYG": "HYG",
+                "UUP": "UUP",
+                "TIP": "TIP",
+            }
+            data: dict[str, object] = {}
+            for name, ticker in tickers.items():
+                try:
+                    data[name] = ds.get_ohlcv(ticker)
+                    print(f"  Fetched {name} ({ticker})")
+                except Exception as e:
+                    print(f"  {name} unavailable: {e}")
+                    data[name] = None
+
+            dashboard = compute_macro_dashboard(
+                tnx_ohlcv=data.get("TNX"),
+                tlt_ohlcv=data.get("TLT"),
+                hyg_ohlcv=data.get("HYG"),
+                uup_ohlcv=data.get("UUP"),
+                tip_ohlcv=data.get("TIP"),
+            )
+
+            print()
+            if dashboard.bond_market:
+                b = dashboard.bond_market
+                print("  Bond Market:")
+                color = (
+                    "red"
+                    if b.tnx_trend == "rising"
+                    else "green" if b.tnx_trend == "falling" else "yellow"
+                )
+                print(
+                    f"    10Y Yield: {b.tnx_yield:.2f}%"
+                    f" ({_styled(b.tnx_trend, color)}, {b.tnx_change_20d:+.0f}bp/20d)"
+                )
+                print(f"    TLT 20d:   {b.tlt_return_20d_pct:+.1f}% ({b.tlt_trend})")
+                print(f"    {b.interpretation}")
+
+            if dashboard.credit_spreads:
+                c = dashboard.credit_spreads
+                color = "red" if c.risk_level in ("elevated", "high") else "green"
+                print(f"\n  Credit Spreads:")
+                print(
+                    f"    HYG/TLT:   {c.hyg_tlt_ratio:.3f}"
+                    f" ({c.spread_trend}, {_styled(c.risk_level, color)})"
+                )
+                print(f"    Percentile: {c.ratio_percentile_60d:.0f}th (60d)")
+                print(f"    {c.interpretation}")
+
+            if dashboard.dollar_strength:
+                d = dashboard.dollar_strength
+                print(f"\n  Dollar Strength:")
+                print(
+                    f"    UUP 20d:   {d.uup_return_20d_pct:+.1f}% ({d.dollar_trend})"
+                )
+                print(f"    US impact: {d.impact_on_us}")
+                print(f"    India:     {d.impact_on_india}")
+
+            if dashboard.inflation_expectations:
+                i = dashboard.inflation_expectations
+                print(f"\n  Inflation Expectations:")
+                print(f"    TIP/TLT:   {i.tip_tlt_ratio:.3f} ({i.inflation_trend})")
+                print(f"    {i.interpretation}")
+
+            color = {
+                "low": "green",
+                "moderate": "yellow",
+                "elevated": "red",
+                "high": "red",
+            }[dashboard.overall_risk]
+            print(
+                f"\n  Overall Macro Risk: {_styled(dashboard.overall_risk.upper(), color)}"
+            )
+            print(f"  Trading Impact: {dashboard.trading_impact}")
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+
     def do_stress(self, arg: str) -> None:
         """Show black swan / tail-risk alert.\nUsage: stress"""
         try:
@@ -2950,6 +3047,154 @@ Requires --broker connection."""
         print(f"  {_styled('from market_analyzer import assess_currency_exposure', 'dim')}")
         print(f"  {_styled('hedge = assess_currency_exposure(positions, rates)', 'dim')}")
         print(f"  {_styled('# -> CurrencyHedgeAssessment with recommendation + risk_per_1pct_fx_move', 'dim')}")
+        print()
+
+    def do_crossmarket(self, arg: str) -> None:
+        """Cross-market correlation analysis (US -> India).
+        Usage: crossmarket [US_TICKER INDIA_TICKER]
+          Default: SPY NIFTY
+        Example: crossmarket SPY NIFTY
+                 crossmarket QQQ BANKNIFTY"""
+
+        ma = self._get_ma()
+        parts = arg.strip().split()
+        us_ticker = parts[0] if len(parts) > 0 else "SPY"
+        india_ticker = parts[1] if len(parts) > 1 else "NIFTY"
+
+        # Fetch OHLCV for both
+        try:
+            us_ohlcv = ma.data_service.get_ohlcv(us_ticker)
+        except Exception as e:
+            print(f"  {_styled(f'Failed to fetch {us_ticker}: {e}', 'red')}")
+            return
+        try:
+            india_ohlcv = ma.data_service.get_ohlcv(india_ticker)
+        except Exception as e:
+            print(f"  {_styled(f'Failed to fetch {india_ticker}: {e}', 'red')}")
+            return
+
+        # Get regimes
+        try:
+            us_regime = ma.regime.detect(us_ticker)
+        except Exception:
+            print(f"  {_styled(f'Failed to detect regime for {us_ticker}', 'yellow')}")
+            return
+        try:
+            india_regime = ma.regime.detect(india_ticker)
+        except Exception:
+            print(f"  {_styled(f'Failed to detect regime for {india_ticker}', 'yellow')}")
+            return
+
+        # Run analysis
+        from market_analyzer.cross_market import analyze_cross_market
+
+        result = analyze_cross_market(
+            us_ticker,
+            india_ticker,
+            us_ohlcv,
+            india_ohlcv,
+            int(us_regime.regime),
+            int(india_regime.regime),
+        )
+
+        # Display
+        _print_header(f"Cross-Market: {us_ticker} (US) -> {india_ticker} (India)")
+        print(f"\n  Correlation (20d): {result.correlation_20d:.2f}")
+        print(f"  Correlation (60d): {result.correlation_60d:.2f}")
+        print(f"  US last close:     {result.us_close_return_pct:+.2f}%")
+        print(
+            f"  India predicted gap: {result.predicted_india_gap_pct:+.2f}% "
+            f"(confidence R^2={result.prediction_confidence:.2f})"
+        )
+        print(
+            f"  Regime sync:       {result.sync_status} "
+            f"(US=R{result.source_regime}, India=R{result.target_regime})"
+        )
+
+        if result.signals:
+            print(f"\n  Signals:")
+            for s in result.signals:
+                color = (
+                    "green"
+                    if s.direction == "bullish"
+                    else "red"
+                    if s.direction == "bearish"
+                    else "yellow"
+                )
+                print(f"    [{_styled(s.direction.upper(), color)}] {s.description}")
+        else:
+            print(f"\n  No significant cross-market signals.")
+        print()
+
+    def do_india_context(self, arg: str) -> None:
+        """India market context with US lead-lag analysis.
+        Usage: india_context"""
+
+        ma = self._get_ma()
+
+        _print_header("India Market Context")
+
+        # Get US and India regimes
+        us_regime = None
+        try:
+            us_regime = ma.regime.detect("SPY")
+            print(f"\n  US (SPY):      R{us_regime.regime} ({us_regime.confidence:.0%})")
+        except Exception:
+            print(f"\n  US (SPY):      {_styled('unavailable', 'yellow')}")
+
+        nifty_regime = None
+        try:
+            nifty_regime = ma.regime.detect("NIFTY")
+            print(f"  India (NIFTY): R{nifty_regime.regime} ({nifty_regime.confidence:.0%})")
+        except Exception:
+            print(f"  India (NIFTY): {_styled('unavailable', 'yellow')}")
+
+        try:
+            bn_regime = ma.regime.detect("BANKNIFTY")
+            print(f"  BankNIFTY:     R{bn_regime.regime} ({bn_regime.confidence:.0%})")
+        except Exception:
+            pass
+
+        # Cross-market analysis
+        if us_regime and nifty_regime:
+            from market_analyzer.cross_market import analyze_cross_market
+
+            try:
+                us_ohlcv = ma.data_service.get_ohlcv("SPY")
+                nifty_ohlcv = ma.data_service.get_ohlcv("NIFTY")
+
+                cm = analyze_cross_market(
+                    "SPY",
+                    "NIFTY",
+                    us_ohlcv,
+                    nifty_ohlcv,
+                    int(us_regime.regime),
+                    int(nifty_regime.regime),
+                )
+
+                print(f"\n  US -> India Correlation: {cm.correlation_20d:.2f} (20d)")
+                print(f"  US last close: {cm.us_close_return_pct:+.2f}%")
+                print(f"  India predicted gap: {cm.predicted_india_gap_pct:+.2f}%")
+                print(f"  Regime sync: {cm.sync_status}")
+
+                for s in cm.signals:
+                    color = (
+                        "green"
+                        if s.direction == "bullish"
+                        else "red"
+                        if s.direction == "bearish"
+                        else "yellow"
+                    )
+                    print(f"  [{_styled(s.direction.upper(), color)}] {s.description}")
+            except Exception as e:
+                print(f"\n  {_styled(f'Cross-market analysis failed: {e}', 'yellow')}")
+
+        # India-specific checks
+        print(f"\n  India Market Rules:")
+        print(f"  Settlement: Cash (index), Physical (stocks)")
+        print(f"  Exercise: European (no early assignment)")
+        print(f"  Weekly expiry: NIFTY=Thu, BANKNIFTY=Wed, FINNIFTY=Tue")
+        print(f"  Max DTE: ~90 days (no LEAPs)")
         print()
 
     def do_quit(self, arg: str) -> bool:

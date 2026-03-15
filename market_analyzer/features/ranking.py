@@ -71,6 +71,26 @@ REGIME_STRATEGY_ALIGNMENT: dict[tuple[int, StrategyType], float] = {
     (2, StrategyType.MEAN_REVERSION): 1.0,
     (3, StrategyType.MEAN_REVERSION): 0.3,
     (4, StrategyType.MEAN_REVERSION): 0.1,
+    # Equity breakout: R3 ideal (trending), R1 ok for range breakout
+    (1, StrategyType.EQUITY_BREAKOUT): 0.5,
+    (2, StrategyType.EQUITY_BREAKOUT): 0.3,
+    (3, StrategyType.EQUITY_BREAKOUT): 1.0,
+    (4, StrategyType.EQUITY_BREAKOUT): 0.7,
+    # Equity momentum: R3 ideal
+    (1, StrategyType.EQUITY_MOMENTUM): 0.2,
+    (2, StrategyType.EQUITY_MOMENTUM): 0.3,
+    (3, StrategyType.EQUITY_MOMENTUM): 1.0,
+    (4, StrategyType.EQUITY_MOMENTUM): 0.6,
+    # Equity mean reversion: R1/R2 ideal
+    (1, StrategyType.EQUITY_MEAN_REVERSION): 0.9,
+    (2, StrategyType.EQUITY_MEAN_REVERSION): 1.0,
+    (3, StrategyType.EQUITY_MEAN_REVERSION): 0.2,
+    (4, StrategyType.EQUITY_MEAN_REVERSION): 0.1,
+    # Futures directional: R3/R4 ideal
+    (1, StrategyType.FUTURES_DIRECTIONAL): 0.3,
+    (2, StrategyType.FUTURES_DIRECTIONAL): 0.4,
+    (3, StrategyType.FUTURES_DIRECTIONAL): 1.0,
+    (4, StrategyType.FUTURES_DIRECTIONAL): 0.8,
 }
 
 # Phase x Strategy alignment (P1=1, P2=2, P3=3, P4=4)
@@ -127,6 +147,26 @@ PHASE_STRATEGY_ALIGNMENT: dict[tuple[int, StrategyType], float] = {
     (2, StrategyType.MEAN_REVERSION): 0.6,
     (3, StrategyType.MEAN_REVERSION): 0.8,
     (4, StrategyType.MEAN_REVERSION): 1.0,
+    # Equity breakout: P1 accumulation ideal (breakout from base)
+    (1, StrategyType.EQUITY_BREAKOUT): 1.0,
+    (2, StrategyType.EQUITY_BREAKOUT): 0.5,
+    (3, StrategyType.EQUITY_BREAKOUT): 0.3,
+    (4, StrategyType.EQUITY_BREAKOUT): 0.2,
+    # Equity momentum: P2 markup ideal (trend continuation)
+    (1, StrategyType.EQUITY_MOMENTUM): 0.3,
+    (2, StrategyType.EQUITY_MOMENTUM): 1.0,
+    (3, StrategyType.EQUITY_MOMENTUM): 0.4,
+    (4, StrategyType.EQUITY_MOMENTUM): 0.6,
+    # Equity mean reversion: P3/P4 overextended phases
+    (1, StrategyType.EQUITY_MEAN_REVERSION): 0.4,
+    (2, StrategyType.EQUITY_MEAN_REVERSION): 0.6,
+    (3, StrategyType.EQUITY_MEAN_REVERSION): 0.8,
+    (4, StrategyType.EQUITY_MEAN_REVERSION): 1.0,
+    # Futures directional: P2 markup ideal (strong trend)
+    (1, StrategyType.FUTURES_DIRECTIONAL): 0.4,
+    (2, StrategyType.FUTURES_DIRECTIONAL): 1.0,
+    (3, StrategyType.FUTURES_DIRECTIONAL): 0.5,
+    (4, StrategyType.FUTURES_DIRECTIONAL): 0.7,
 }
 
 

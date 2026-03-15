@@ -209,7 +209,7 @@ class TradeRankingService:
             TradeRankingResult with ranked entries.
         """
         as_of = as_of or date.today()
-        strategies = strategies or list(StrategyType)
+        strategies = strategies or [s for s in StrategyType if s in _ASSESS_METHODS]
 
         # 1. Black swan gate check
         black_swan_level = AlertLevel.NORMAL

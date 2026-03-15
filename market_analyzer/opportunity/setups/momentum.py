@@ -87,11 +87,25 @@ def assess_momentum(
     # --- Trade spec ---
     trade_spec = None
     if verdict != Verdict.NO_GO and momentum_strategy != MomentumStrategy.NO_TRADE:
-        from market_analyzer.opportunity.option_plays._trade_spec_helpers import build_setup_trade_spec
-        trade_spec = build_setup_trade_spec(
-            ticker, technicals.current_price, technicals.atr,
-            momentum_dir.value, int(regime.regime), vol_surface,
+        from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
+            build_equity_trade_spec,
+            build_setup_trade_spec,
+            _should_use_equity,
         )
+        # India stocks: prefer equity (options illiquid for most stocks)
+        if _should_use_equity(ticker):
+            from market_analyzer.registry import MarketRegistry
+            inst = MarketRegistry().get_instrument(ticker)
+            trade_spec = build_equity_trade_spec(
+                ticker, technicals.current_price, technicals.atr,
+                momentum_dir.value, "momentum", int(regime.regime),
+                lot_size=inst.lot_size, currency="INR",
+            )
+        else:
+            trade_spec = build_setup_trade_spec(
+                ticker, technicals.current_price, technicals.atr,
+                momentum_dir.value, int(regime.regime), vol_surface,
+            )
 
     # --- Summary ---
     summary = _build_summary(

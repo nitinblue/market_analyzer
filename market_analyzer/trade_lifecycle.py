@@ -424,17 +424,69 @@ def align_strikes_to_levels(
 
 
 class POPEstimate(BaseModel):
-    """Regime-based probability of profit estimate.
+    """Regime-based probability of profit estimate with R:R and trade quality.
 
     Uses historical regime-specific return distributions, not Black-Scholes.
+    Combines POP + Expected Value + Risk:Reward into a single trade quality score.
     """
 
-    pop_pct: float  # Probability of profit (0-1)
-    expected_value: float  # EV = POP × max_profit - (1-POP) × max_loss
-    method: str  # "regime_historical" or "simple_distance"
+    pop_pct: float               # Probability of profit (0-1)
+    expected_value: float        # EV = POP × max_profit - (1-POP) × max_loss
+    max_profit: float = 0.0     # Max profit in dollars
+    max_loss: float = 0.0       # Max loss in dollars (positive number)
+    risk_reward_ratio: float = 0.0  # max_loss / max_profit (lower = better)
+    trade_quality: str = ""      # "excellent" / "good" / "marginal" / "poor"
+    trade_quality_score: float = 0.0  # 0-1 composite of POP + EV + R:R
+    method: str                  # "regime_historical" or "simple_distance"
     regime_id: int
     notes: str
     data_gaps: list[DataGap] = []
+
+
+def _trade_quality(pop: float, ev: float, rr: float, max_profit: float) -> tuple[str, float]:
+    """Compute trade quality from POP + EV + R:R combined.
+
+    Scoring:
+    - POP component (40%): higher POP = better
+    - EV component (30%): positive EV = better, weighted by magnitude
+    - R:R component (30%): lower R:R = better (less risk per unit reward)
+
+    Returns (quality_label, quality_score 0-1).
+    """
+    # POP score: 0.5 POP = 0, 1.0 POP = 1.0
+    pop_score = max(0, (pop - 0.3) / 0.7)  # 30% floor
+
+    # EV score: positive = good, normalized by max_profit
+    if max_profit > 0:
+        ev_score = max(0, min(1, (ev / max_profit + 0.5)))  # -50% to +50% range
+    else:
+        ev_score = 0.5 if ev >= 0 else 0
+
+    # R:R score: 1:1 = excellent, 5:1 = poor, 10:1+ = terrible
+    if rr <= 1.0:
+        rr_score = 1.0
+    elif rr <= 3.0:
+        rr_score = 1.0 - (rr - 1.0) / 4.0  # Linear decay from 1.0 to 0.5
+    elif rr <= 10.0:
+        rr_score = 0.5 - (rr - 3.0) / 14.0  # Linear decay from 0.5 to 0
+    else:
+        rr_score = 0.0
+
+    # Weighted composite
+    score = pop_score * 0.40 + ev_score * 0.30 + rr_score * 0.30
+    score = max(0, min(1, score))
+
+    # Quality label
+    if score >= 0.70:
+        label = "excellent"
+    elif score >= 0.50:
+        label = "good"
+    elif score >= 0.30:
+        label = "marginal"
+    else:
+        label = "poor"
+
+    return label, score
 
 
 def estimate_pop(
@@ -536,9 +588,17 @@ def estimate_pop(
                 affects="POP estimate may be 10-15% off without IV calibration",
             ))
 
+        rr = round(max_loss / max_profit, 2) if max_profit > 0 else 99.0
+        quality, qscore = _trade_quality(pop, ev, rr, max_profit)
+
         return POPEstimate(
             pop_pct=round(pop, 4),
             expected_value=round(ev, 2),
+            max_profit=round(max_profit, 2),
+            max_loss=round(max_loss, 2),
+            risk_reward_ratio=rr,
+            trade_quality=quality,
+            trade_quality_score=round(qscore, 3),
             method="regime_historical",
             regime_id=regime_id,
             notes=notes,
@@ -590,9 +650,17 @@ def estimate_pop(
                 affects="POP estimate may be 10-15% off without IV calibration",
             ))
 
+        rr = round(max_loss / max_profit, 2) if max_profit > 0 else 99.0
+        quality, qscore = _trade_quality(pop, ev, rr, max_profit)
+
         return POPEstimate(
             pop_pct=round(pop, 4),
             expected_value=round(ev, 2),
+            max_profit=round(max_profit, 2),
+            max_loss=round(max_loss, 2),
+            risk_reward_ratio=rr,
+            trade_quality=quality,
+            trade_quality_score=round(qscore, 3),
             method="regime_historical",
             regime_id=regime_id,
             notes=f"Directional: needs ${adjusted_move:.1f} move to profit",

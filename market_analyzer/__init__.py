@@ -102,6 +102,18 @@ from market_analyzer.fundamentals.fetch import fetch_fundamentals
 from market_analyzer.models.macro import MacroCalendar, MacroEvent, MacroEventType
 from market_analyzer.macro.calendar import get_macro_calendar
 
+# Macro indicators (bond market, credit, dollar, inflation)
+from market_analyzer.macro_indicators import (
+    BondMarketIndicator,
+    CreditSpreadIndicator,
+    DollarStrengthIndicator,
+    InflationExpectationIndicator,
+    MacroIndicatorDashboard,
+    MacroRiskLevel,
+    MacroTrend,
+    compute_macro_dashboard,
+)
+
 # Quotes (broker-agnostic)
 from market_analyzer.models.quotes import AccountBalance, MarketMetrics, OptionQuote, QuoteSnapshot
 
@@ -287,6 +299,16 @@ from market_analyzer.hedging import (
     assess_hedge,
 )
 
+# Cross-market correlation
+from market_analyzer.cross_market import (
+    CrossMarketAnalysis,
+    CrossMarketSignal,
+    MarketSyncStatus,
+    analyze_cross_market,
+    compute_cross_market_correlation,
+    predict_gap,
+)
+
 # Execution quality validation
 from market_analyzer.execution_quality import (
     ExecutionQuality,
@@ -437,6 +459,15 @@ __all__ = [
     "MacroEvent",
     "MacroEventType",
     "get_macro_calendar",
+    # Macro indicators (bond market, credit, dollar, inflation)
+    "BondMarketIndicator",
+    "CreditSpreadIndicator",
+    "DollarStrengthIndicator",
+    "InflationExpectationIndicator",
+    "MacroIndicatorDashboard",
+    "MacroRiskLevel",
+    "MacroTrend",
+    "compute_macro_dashboard",
     # Levels models
     "LevelRole",
     "LevelSource",
@@ -607,6 +638,13 @@ __all__ = [
     "ExecutionVerdict",
     "LegQuality",
     "validate_execution_quality",
+    # Cross-market correlation
+    "CrossMarketAnalysis",
+    "CrossMarketSignal",
+    "MarketSyncStatus",
+    "analyze_cross_market",
+    "compute_cross_market_correlation",
+    "predict_gap",
     # Transparency
     "DataGap",
     # Performance feedback

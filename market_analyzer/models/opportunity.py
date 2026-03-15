@@ -35,6 +35,12 @@ class StructureType(StrEnum):
     LONG_OPTION = "long_option"  # Single long call/put
     PMCC = "pmcc"
 
+    # Non-options structures (for markets with limited options depth)
+    EQUITY_LONG = "equity_long"       # Buy stock
+    EQUITY_SHORT = "equity_short"     # Short stock (if allowed)
+    FUTURES_LONG = "futures_long"     # Buy futures contract
+    FUTURES_SHORT = "futures_short"   # Short futures contract
+
 
 class OrderSide(StrEnum):
     """Net order side — credit (receive premium) or debit (pay premium)."""
@@ -86,6 +92,11 @@ _PROFILES: dict[str, tuple[str, str, RiskProfile, str]] = {
     "double_calendar": ("/‾‾\\",  "neutral",  RiskProfile.DEFINED,   "4-leg double time spread · defined risk"),
     "diagonal":        ("_/\\",   "neutral",  RiskProfile.DEFINED,   "2-leg time+strike spread · defined risk"),
     "pmcc":            ("_/\\",   "bullish",  RiskProfile.DEFINED,   "poor man's covered call · defined risk"),
+    # Non-options structures
+    "equity_long":     ("__/",   "bullish",  RiskProfile.DEFINED,   "cash equity long"),
+    "equity_short":    ("\\__",  "bearish",  RiskProfile.UNDEFINED, "cash equity short"),
+    "futures_long":    ("__/",   "bullish",  RiskProfile.UNDEFINED, "futures long"),
+    "futures_short":   ("\\__",  "bearish",  RiskProfile.UNDEFINED, "futures short"),
 }
 
 # Direction-dependent structures
@@ -512,7 +523,23 @@ class TradeSpec(BaseModel):
 
         Each dict: {action, quantity, symbol, option_type, strike, expiration,
                      osi_symbol, instrument_type}
+        For equity/futures: {action, quantity, symbol, instrument_type, price}
         """
+        _equity_structures = {"equity_long", "equity_short", "futures_long", "futures_short"}
+
+        if self.structure_type in _equity_structures:
+            # Cash equity or futures — single instrument, no legs
+            action = "BUY" if self.structure_type in ("equity_long", "futures_long") else "SELL"
+            inst_type = "EQUITY" if "equity" in self.structure_type else "FUTURE"
+            return [{
+                "action": action,
+                "quantity": 1,  # Shares/lots — caller scales
+                "symbol": self.ticker,
+                "instrument_type": inst_type,
+                "price": self.underlying_price,
+            }]
+
+        # Options (existing logic)
         padded = f"{self.ticker:<6}"
         return [
             {
@@ -615,6 +642,10 @@ class TradeSpec(BaseModel):
             "strangle": "STRG",
             "long_option": "LO",
             "pmcc": "PMCC",
+            "equity_long": "EQ\u2191",
+            "equity_short": "EQ\u2193",
+            "futures_long": "FUT\u2191",
+            "futures_short": "FUT\u2193",
         }
         return _map.get(self.structure_type or "", self.structure_type or "?")
 
@@ -630,6 +661,8 @@ class TradeSpec(BaseModel):
             "credit_spread": "directional", "debit_spread": "directional",
             "diagonal": "directional", "ratio_spread": "directional",
             "long_option": "directional", "pmcc": "bullish",
+            "equity_long": "bullish", "equity_short": "bearish",
+            "futures_long": "bullish", "futures_short": "bearish",
         }
         direction = _dir_map.get(self.structure_type or "", "neutral")
         # Risk
@@ -641,6 +674,8 @@ class TradeSpec(BaseModel):
             "long_option": "defined", "pmcc": "defined",
             "straddle": "undefined", "strangle": "undefined",
             "ratio_spread": "undefined",
+            "equity_long": "defined", "equity_short": "undefined",
+            "futures_long": "undefined", "futures_short": "undefined",
         }
         risk = _risk_map.get(self.structure_type or "", "defined")
         return f"{sym} {direction} · {risk}"
