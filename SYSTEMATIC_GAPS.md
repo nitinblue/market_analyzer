@@ -59,6 +59,9 @@
 | MC3 | Macro | Dollar strength | **DONE** | `compute_dollar_strength()` — UUP trend, India/US impact. Strong dollar = INR headwind. |
 | MC4 | Macro | Inflation expectations | **DONE** | `compute_inflation_expectations()` — TIP/TLT ratio, breakeven inflation proxy. |
 | MC5 | Macro | Macro dashboard | **DONE** | `compute_macro_dashboard()` — aggregates all indicators, overall risk level, trading impact guidance. CLI `macro_indicators`. |
+| ZRD | Broker | Zerodha Kite Connect — full integration | **DONE** | Live option chains (bid/ask/OI/volume), underlying price, intraday candles, account balance, IV rank (computed), instrument master. `connect_zerodha(api_key, token)`. eTrading: handle daily OAuth token refresh, pass session via `connect_zerodha_from_session()`. |
+| LEG1 | Execution | India leg execution sequencing | **DONE** | `plan_leg_execution(trade_spec, market)` — safest leg order for single-leg markets. BUY protective legs FIRST, then SELL. Risk assessment per intermediate state. Abort rules. Slippage budget. CLI `leg_plan`. eTrading: follow the sequence, abort on partial fill per abort_rule. |
+| UV1 | Universe | Broker-independent scanning universes | **DONE** | `registry.get_universe(preset, market, sector)` — 10 presets, 85+ instruments. CLI `scan_universe`. eTrading: store preset names per desk in YAML config. Call `get_universe(preset)` → pass to `rank()`. Use `add_instrument()` for custom tickers. |
 | TQ1 | Analysis | Trade quality scoring (POP + EV + R:R) | **DONE** | `POPEstimate` now has `max_profit`, `max_loss`, `risk_reward_ratio`, `trade_quality` (excellent/good/marginal/poor), `trade_quality_score` (0-1 composite). Combines POP (40%) + EV (30%) + R:R (30%). eTrading: gate on `trade_quality_score >= 0.50` for systematic trading. |
 
 ---

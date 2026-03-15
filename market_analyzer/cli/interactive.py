@@ -101,10 +101,13 @@ class AnalyzerCLI(cmd.Cmd):
         return self._ma
 
     def _resolve_tickers(self, arg: str, allow_watchlist: bool = True) -> list[str]:
-        """Parse tickers from arg, supporting --watchlist NAME.
+        """Parse tickers from arg, supporting --watchlist, --preset, and auto-default.
 
-        If --watchlist NAME is given and broker is connected, pulls tickers
-        from the named TastyTrade watchlist. Can combine with explicit tickers.
+        Sources (in priority order):
+        1. Explicit tickers: ``rank SPY GLD QQQ``
+        2. ``--watchlist NAME``: pull from broker watchlist (requires broker)
+        3. ``--preset NAME``: pull from registry universe (no broker needed)
+        4. Auto-default: if nothing specified, use registry default for current market
         """
         parts = arg.strip().split()
         tickers: list[str] = []
@@ -122,11 +125,30 @@ class AnalyzerCLI(cmd.Cmd):
                     else:
                         print(_styled(f"Watchlist '{wl_name}' not found or empty", "yellow"))
                 i += 2
+            elif parts[i] == "--preset" and i + 1 < len(parts):
+                preset_name = parts[i + 1].lower()
+                ma = self._get_ma()
+                preset_tickers = ma.registry.get_universe(preset=preset_name, market=self._market)
+                if preset_tickers:
+                    print(f"  Loaded {len(preset_tickers)} tickers from preset '{preset_name}' ({self._market})")
+                    tickers.extend(preset_tickers)
+                else:
+                    print(_styled(f"Preset '{preset_name}' returned no tickers for {self._market}", "yellow"))
+                i += 2
             elif parts[i].startswith("--"):
                 break  # Stop at other flags
             else:
                 tickers.append(parts[i].upper())
                 i += 1
+
+        # Auto-default: if no tickers from any source, use market default
+        if not tickers:
+            ma = self._get_ma()
+            default_preset = "income" if self._market.upper() == "US" else "india_fno"
+            tickers = ma.registry.get_universe(preset=default_preset, market=self._market)
+            if tickers:
+                print(f"  Using default '{default_preset}' universe ({len(tickers)} tickers)")
+
         return tickers
 
     def _parse_tickers(self, arg: str) -> list[str]:
@@ -3196,6 +3218,127 @@ Requires --broker connection."""
         print(f"  Weekly expiry: NIFTY=Thu, BANKNIFTY=Wed, FINNIFTY=Tue")
         print(f"  Max DTE: ~90 days (no LEAPs)")
         print()
+
+    def do_scan_universe(self, arg: str) -> None:
+        """Browse built-in scanning universes — no broker needed.\nUsage: scan_universe [PRESET] [--market US|INDIA]\n  Presets: income, directional, us_etf, us_mega, sector_etf, india_fno, india_index, nifty50, macro, all\n  Example: scan_universe income\n           scan_universe nifty50\n           scan_universe directional --market INDIA"""
+        ma = self._get_ma()
+        parts = arg.strip().split()
+        preset = None
+        market = None
+
+        i = 0
+        while i < len(parts):
+            if parts[i] == "--market" and i + 1 < len(parts):
+                market = parts[i + 1].upper()
+                i += 2
+            else:
+                preset = parts[i].lower()
+                i += 1
+
+        registry = ma.registry
+        presets = ["income", "directional", "us_etf", "us_mega", "sector_etf",
+                   "india_fno", "india_index", "nifty50", "macro", "all"]
+
+        if not preset:
+            _print_header("Scanning Universes (Built-in)")
+            print("\n  No broker needed — curated instrument lists.\n")
+            for p in presets:
+                tickers = registry.get_universe(preset=p, market=market)
+                print(f"  {p:15s}  {len(tickers):3d} tickers  {', '.join(tickers[:6])}{'...' if len(tickers) > 6 else ''}")
+            print(f"\n  Usage: scan_universe PRESET [--market US|INDIA]")
+            return
+
+        tickers = registry.get_universe(preset=preset, market=market)
+        mkt_label = f" ({market})" if market else ""
+        _print_header(f"Universe: {preset}{mkt_label} — {len(tickers)} tickers")
+
+        if not tickers:
+            print(f"\n  No tickers match preset '{preset}'{mkt_label}.")
+            return
+
+        for ticker in tickers:
+            try:
+                inst = registry.get_instrument(ticker)
+                liq = {"high": _styled("HIGH", "green"), "medium": _styled("MED", "yellow"),
+                       "low": _styled("LOW", "red"), "none": _styled("NONE", "dim"),
+                       "unknown": "?"}.get(inst.options_liquidity, "?")
+                print(f"  {ticker:12s} {inst.market:5s} {inst.asset_type:7s} {inst.sector:18s} "
+                      f"lot={inst.lot_size:5d}  opts={liq}")
+            except KeyError:
+                print(f"  {ticker:12s} (no registry data)")
+
+        print(f"\n  To scan these: screen {' '.join(tickers[:5])}...")
+        print(f"  To rank these: rank {' '.join(tickers[:5])}...")
+
+    def do_leg_plan(self, arg: str) -> None:
+        """Plan leg execution order for India single-leg markets.\nUsage: leg_plan TICKER [STRATEGY]\n  Example: leg_plan NIFTY ic\n           leg_plan BANKNIFTY straddle"""
+        ma = self._get_ma()
+        parts = arg.strip().split()
+        if not parts:
+            print("Usage: leg_plan TICKER [STRATEGY]")
+            print("  Shows the safest execution order for multi-leg trades in India.")
+            print("  India brokers execute one leg at a time — order matters!")
+            return
+
+        ticker = parts[0].upper()
+        strategy = parts[1].lower() if len(parts) > 1 else "ic"
+        strategy_map = {"ic": "iron_condor", "ifly": "iron_butterfly",
+                        "cs": "credit_spread", "str": "straddle", "strg": "strangle"}
+        strategy = strategy_map.get(strategy, strategy)
+
+        # Get a trade spec
+        assess_map = {
+            "iron_condor": "assess_iron_condor",
+            "iron_butterfly": "assess_iron_butterfly",
+            "straddle": "assess_mean_reversion",  # Proxy
+        }
+        method = assess_map.get(strategy)
+        if method is None:
+            print(f"  Strategy '{strategy}' not supported for leg planning.")
+            return
+
+        try:
+            result = getattr(ma.opportunity, method)(ticker)
+            spec = result.trade_spec
+            if spec is None:
+                print(f"  No trade spec generated for {ticker} {strategy} (verdict: {result.verdict})")
+                return
+        except Exception as e:
+            print(f"  Failed: {e}")
+            return
+
+        from market_analyzer.leg_execution import plan_leg_execution
+
+        # Detect market
+        market = "INDIA"
+        try:
+            inst = ma.registry.get_instrument(ticker)
+            market = inst.market
+        except KeyError:
+            pass
+
+        plan = plan_leg_execution(spec, market=market)
+
+        _print_header(f"Leg Execution Plan: {ticker} {spec.strategy_badge}")
+        print(f"\n  Market: {plan.market} ({'single-leg execution' if plan.market == 'INDIA' else 'multi-leg native'})")
+        print(f"  Total legs: {plan.total_legs}")
+        print(f"  Estimated slippage: {plan.total_estimated_slippage_pct:.1f}%")
+
+        print(f"\n  Execution Order:")
+        for el in plan.execution_order:
+            risk_color = {"safe": "green", "moderate": "yellow", "high": "red", "critical": "red"}
+            color = risk_color.get(el.risk_after, "white")
+            print(f"    {el.sequence}. {el.action_desc:30s} [{_styled(el.risk_after.upper(), color)}]")
+            print(f"       {el.risk_description}")
+
+        print(f"\n  Max exposure: {plan.max_naked_exposure}")
+        print(f"\n  Abort rule:")
+        print(f"    {plan.abort_rule}")
+
+        if plan.notes:
+            print(f"\n  Notes:")
+            for note in plan.notes:
+                print(f"    - {note}")
 
     def do_quit(self, arg: str) -> bool:
         """Exit the REPL."""

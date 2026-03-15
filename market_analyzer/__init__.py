@@ -309,6 +309,14 @@ from market_analyzer.cross_market import (
     predict_gap,
 )
 
+# Leg execution sequencing (India single-leg markets)
+from market_analyzer.leg_execution import (
+    ExecutionLeg,
+    ExecutionPlan,
+    LegRisk,
+    plan_leg_execution,
+)
+
 # Execution quality validation
 from market_analyzer.execution_quality import (
     ExecutionQuality,
@@ -633,6 +641,11 @@ __all__ = [
     "HedgeUrgency",
     "HedgeRecommendation",
     "assess_hedge",
+    # Leg execution sequencing
+    "ExecutionLeg",
+    "ExecutionPlan",
+    "LegRisk",
+    "plan_leg_execution",
     # Execution quality validation
     "ExecutionQuality",
     "ExecutionVerdict",

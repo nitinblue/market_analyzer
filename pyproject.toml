@@ -24,6 +24,7 @@ dependencies = [
 [project.optional-dependencies]
 plot = ["matplotlib>=3.5"]
 tastytrade = ["tastytrade>=12.0"]
+zerodha = ["kiteconnect>=5.0"]
 fred = ["fredapi>=0.5"]
 dev = [
     "pytest>=7.0",

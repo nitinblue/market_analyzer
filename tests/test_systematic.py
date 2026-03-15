@@ -3356,11 +3356,13 @@ class TestCR6MultiBroker:
         with pytest.raises(NotImplementedError):
             md.get_option_chain("NIFTY")
 
-    def test_zerodha_stubs_raise_not_implemented(self):
+    def test_zerodha_is_real_implementation(self):
+        """Zerodha is a real implementation — returns empty without credentials."""
         from market_analyzer.broker.zerodha.market_data import ZerodhaMarketData
         md = ZerodhaMarketData()
-        with pytest.raises(NotImplementedError):
-            md.get_option_chain("NIFTY")
+        # Without valid API key, returns empty (not NotImplementedError)
+        result = md.get_option_chain("NIFTY")
+        assert isinstance(result, list)
 
 
 # ── CR-7: Currency, Timezone, LotSize on Models and Providers ──
