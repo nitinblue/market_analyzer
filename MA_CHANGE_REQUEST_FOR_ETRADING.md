@@ -4,7 +4,25 @@
 
 ## Context
 
-MA is stateless. Every function is pure computation — accepts data, returns results. But for the system to be **truly robust**, eTrading must pass the right data at the right time. This document catalogs every MA function that needs external state, what eTrading must provide, and the critical integration for position-aware, risk-limited trading.
+MA is stateless. Every function is pure computation — accepts data, returns results. But for the system to be **truly robust**, eTrading must pass the right data at the right time.
+
+**CRITICAL WARNING: `rank()` output is NOT safe to execute directly.**
+
+`rank()` scores trades on market merit only — regime alignment, IV rank, technicals. It has ZERO knowledge of open positions, portfolio concentration, or risk limits. eTrading MUST run the following pipeline before any trade reaches execution:
+
+```
+rank()                          → Market merit scoring (no position awareness)
+   ↓
+filter_trades_with_portfolio()  → Position limits, ticker/sector concentration, risk budget
+   ↓
+evaluate_trade_gates()          → BLOCK/SCALE/WARN classification (17 gates)
+   ↓
+validate_execution_quality()    → Bid-ask spread, OI, volume check
+   ↓
+ONLY THEN → submit order
+```
+
+Skipping any step = risk of uncontrolled position accumulation, concentration, or poor fills.
 
 ---
 

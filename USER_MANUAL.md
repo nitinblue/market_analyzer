@@ -1429,6 +1429,18 @@ Every field includes `educational_notes` — beginner-friendly explanations of w
 **Macro Indicators (5 functions):**
 `compute_macro_dashboard`, `compute_bond_market`, `compute_credit_spreads`, `compute_dollar_strength`, `compute_inflation_expectations`
 
+**Pre-Market Scanner (2 functions):**
+`scan_premarket`, `fetch_premarket_data` (gap detection, volume spikes, 4 strategies)
+
+**Option Pricing (3 functions):**
+`compute_theoretical_price` (BS, market-mechanics-aware: American/European, lot size), `check_put_call_parity`, `scan_arbitrage`
+
+**Vol History (2 functions):**
+`compute_iv_percentiles`, `build_iv_snapshot_from_surface` (historical IV context for calendar/diagonal)
+
+**Wheel Strategy (1 function):**
+`decide_wheel_action` (state machine decision engine — eTrading owns state)
+
 **Currency (4 functions):**
 `convert_amount`, `compute_portfolio_exposure`, `compute_currency_pnl`, `assess_currency_exposure`
 
@@ -1438,7 +1450,7 @@ Every field includes `educational_notes` — beginner-friendly explanations of w
 **Market Registry (8 methods):**
 `get_market`, `get_instrument`, `list_instruments`, `get_universe`, `strategy_available`, `to_yfinance`, `estimate_margin`, `add_instrument`
 
-### CLI Commands (59 total)
+### CLI Commands (61 total)
 
 | Category | Commands |
 |----------|----------|
@@ -1452,7 +1464,7 @@ Every field includes `educational_notes` — beginner-friendly explanations of w
 | Risk | `risk`, `stress_test`, `hedge`, `currency`, `exposure` |
 | Performance | `performance`, `sharpe`, `drawdown`, `drift`, `bandit` |
 | Equity Research | `stock`, `stock_screen` |
-| Capital Deployment | `valuation`, `deploy`, `allocate`, `rebalance` |
+| Capital Deployment | `valuation`, `deploy`, `allocate`, `rebalance`, `leap_vs_stock`, `wheel` |
 | Registry | `registry`, `margin` |
 | Broker | `broker`, `balance`, `quotes` |
 
@@ -1633,5 +1645,6 @@ The system never hides what it doesn't know. If broker is down, IV rank is missi
 ---
 
 *market_analyzer — capital preservation first, income second, growth third.*
-*1331 tests. 59 CLI commands. US + India markets. Zerodha + TastyTrade brokers.*
-*Options + equities + capital deployment. 5 investment strategies. 13 stress test scenarios.*
+*1331 tests. 61 CLI commands. US + India markets. Zerodha + TastyTrade brokers.*
+*Options + equities + futures + capital deployment. 75 position-aware functions.*
+*5 investment strategies. 13 stress test scenarios. 17 trade gates. 22 macro assets tracked.*

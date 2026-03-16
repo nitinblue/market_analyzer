@@ -101,6 +101,7 @@ This data feeds back into model improvement — retrain HMM weights, adjust scor
 - **Update SYSTEMATIC_GAPS.md after any gap-related work.** Mark status, add implementation details, update test counts. This is the single source of truth for what's done vs open.
 - **Every gap must have an eTrading Integration column.** When building a new MA API, document what eTrading needs to do to consume it (pass iv_rank, store outcomes, schedule calibration, etc.). If no eTrading action needed, say so explicitly.
 - **Always update USER_MANUAL.md after building new features.** This is the trader's single source of truth. Every new capability, CLI command, or API must be documented there.
+- **`rank()` output is NOT safe to execute directly.** It ranks on market merit only — no position awareness. eTrading MUST call `filter_trades_with_portfolio()` and `evaluate_trade_gates()` before execution. Document this in every integration guide.
 
 ---
 
