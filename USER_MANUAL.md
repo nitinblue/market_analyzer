@@ -19,6 +19,8 @@ This manual follows a trader's day — what you do first in the morning, how you
 9. [After Close: Review and Learn](#9-after-close-review-and-learn)
 10. [Weekend: Plan and Calibrate](#10-weekend-plan-and-calibrate)
 11. [Equity Research: Stock Selection for Core Holdings](#11-equity-research)
+11b. [Capital Deployment: Systematic Long-Term Investing](#11b-capital-deployment)
+11c. [Futures Trading Guide](#11c-futures-trading-guide)
 12. [Capability Reference](#12-capability-reference)
 13. [Multi-Market: US + India](#13-multi-market-us--india)
 14. [Appendix: Models & Data Structures](#14-appendix-models--data-structures)
@@ -60,6 +62,43 @@ ctx = ma.context.assess(debug=True)
 | `environment_label` | "risk-on", "cautious", "defensive", "crisis" |
 | `trading_allowed` | False if black swan critical — DON'T TRADE |
 | `position_size_factor` | 1.0 (normal), 0.75 (elevated), 0.50 (high), 0.0 (crisis) |
+| `tradeable` | What instruments are available today (options/stocks/futures + strategies) |
+
+### Tradeable Instruments — What Can You Trade Today?
+
+Every `context.assess()` now publishes exactly which instruments and strategies are viable:
+
+```python
+ctx = ma.context.assess()
+t = ctx.tradeable
+
+# Options
+t.options_available     # True/False
+t.options_note          # "R2 high-vol MR — rich premiums. Wider strikes, defined risk."
+t.options_strategies    # ["iron_condor", "iron_butterfly", "credit_spread", ...]
+
+# Stocks
+t.stocks_available      # True/False
+t.stocks_strategies     # ["value", "growth", "dividend", ...]
+
+# Futures
+t.futures_available     # True/False
+t.futures_strategies    # ["futures options (iron condor)", "calendar spread", ...]
+
+# India
+t.india_weekly_expiry_today  # True if expiry day
+t.india_expiry_instrument    # "NIFTY" (Thu), "BANKNIFTY" (Wed), "FINNIFTY" (Tue)
+```
+
+**Regime determines what's available:**
+
+| Regime | Options | Stocks | Futures |
+|--------|---------|--------|---------|
+| R1 (calm) | Full suite (8 strategies) | All 5 | All strategies |
+| R2 (high vol) | Defined risk (5) | All 5 | Premium selling |
+| R3 (trending) | Directional only (3) | All 5 | Trend-following |
+| R4 (explosive) | Defined risk ONLY | Value + turnaround | EXTREME CAUTION |
+| Black Swan | **NO OPTIONS** | **NO STOCKS** | **NO FUTURES** |
 
 **CLI:** `context`
 
@@ -1123,6 +1162,83 @@ rebalance = check_rebalance(
 
 **CLI:** `rebalance`
 
+### LEAP vs Buying Stock (US Only)
+
+For core US holdings, compare buying 100 shares outright vs a deep ITM LEAP call:
+
+```python
+from market_analyzer import compare_leap_vs_stock
+leap = compare_leap_vs_stock("SPY", current_price=662.0, dividend_yield_pct=1.3, iv=0.20)
+```
+
+| Factor | Buy 100 SPY Shares | Buy 1 LEAP Call (80Δ, 12mo) |
+|--------|-------------------|----------------------------|
+| Capital | $66,200 | ~$18,500 |
+| Upside | 100% | ~85% (delta) |
+| Max loss | Unlimited below entry | Premium paid only |
+| Dividends | YES (~$860/yr) | NO |
+| Theta decay | None | ~$15/day |
+| Tax | Simple LTCG | Complex (each roll taxable) |
+
+**When LEAP wins:** Capital efficiency > 5x AND net annual cost < 2% of stock cost. You want exposure with less capital tied up.
+
+**When stock wins:** You want dividends, simplicity, no expiry pressure, and clean tax treatment. For most core holdings, **stock is preferred**.
+
+**Not available for India** — max DTE ~90 days (no LEAPs).
+
+**CLI:** `leap_vs_stock SPY` or `leap_vs_stock AAPL --iv 0.25 --div-yield 0.5`
+
+### The Wheel Strategy (US — Income from Stock Ownership)
+
+The Wheel: sell put → get assigned → sell covered call → called away → repeat.
+
+```python
+from market_analyzer import analyze_wheel_strategy
+wheel = analyze_wheel_strategy("AAPL", current_price=227.0, iv=0.25, regime_id=1)
+# → put yield 37%/yr, call yield 36%/yr, effective basis 7% below market
+```
+
+**How it works:**
+
+```
+STEP 1: SELL CASH-SECURED PUT
+  You want to buy AAPL at $222 (5% below market)
+  Sell $222 put, collect $7.91 premium
+  If AAPL stays above $222 → put expires, keep premium, repeat
+  If AAPL drops below $222 → you buy 100 shares at $222 (you wanted to anyway)
+  Your effective cost: $222 - $7.91 = $214.09
+
+STEP 2: SELL COVERED CALL (if assigned)
+  You now own 100 AAPL at $214.09 effective basis
+  Sell $227 call, collect $7.72 premium
+  If AAPL stays below $227 → call expires, keep premium, sell another call
+  If AAPL rises above $227 → stock called away at $227 + $7.72 = effective $234.72
+  Profit: $234.72 - $214.09 = $20.63 per share
+
+STEP 3: REPEAT
+  Stock called away → back to Step 1
+```
+
+**Wheel State Machine — MA decides, eTrading executes:**
+
+```python
+from market_analyzer import decide_wheel_action, WheelPosition, WheelState
+position = WheelPosition(
+    ticker="AAPL", state=WheelState.ASSIGNED,
+    stock_entry_price=222.0, stock_quantity=100,
+    effective_cost_basis=214.09,
+    current_underlying_price=225.0,
+)
+decision = decide_wheel_action(position, regime_id=1)
+# → SELL_CALL at $227 for ~$7.72 premium (35d)
+```
+
+eTrading builds the state machine (persistence, transitions). MA provides the decision on every state change.
+
+**Best in R1/R2** (mean-reverting, rich premiums). **Avoid in R4** (explosive moves = assignment at bad prices).
+
+**CLI:** `wheel AAPL` or `wheel SPY --iv 0.20 --regime 1`
+
 ### 7 Principles for Deployment
 
 1. **Never deploy all at once** — systematic over 6-18 months
@@ -1132,6 +1248,135 @@ rebalance = check_rebalance(
 5. **Rebalance mechanically** — quarterly, don't predict
 6. **Keep cash reserve** — always 10% minimum (5% in deep value)
 7. **Ignore daily noise** — review monthly, act quarterly, think in decades
+
+---
+
+## 11c. Futures Trading Guide
+
+### What is a Futures Contract?
+
+A **binding agreement** to buy/sell an asset at a fixed price on a future date. Unlike stocks (you own a piece of a company), futures are **contracts** — promises to transact later.
+
+**Why trade futures?**
+- **Leverage:** Control $66,000 of S&P 500 with $3,300 margin (20x leverage)
+- **Hedging:** Lock in prices for commodities, currencies, interest rates
+- **Nearly 24-hour trading:** Futures trade almost around the clock (unlike stocks)
+- **No uptick rule:** Can go short as easily as long
+
+**Key risks:** Leverage amplifies losses. A 1% adverse move on 20x leverage = 20% loss on your margin. **Daily mark-to-market** means losses are deducted from your account every day.
+
+### Futures Basics — What MA Tracks
+
+| Concept | What it is | MA API |
+|---------|-----------|--------|
+| **Basis** | Futures price - Spot price. Positive = contango, negative = backwardation. | `analyze_futures_basis()` |
+| **Term Structure** | How futures prices change across expiry months. Curve shape = carry cost. | `analyze_term_structure()` |
+| **Roll** | Closing expiring contract, opening next month. Has a cost in contango. | `decide_futures_roll()` |
+| **Calendar Spread** | Buy one expiry, sell another. Profits from curve shape changes. | `analyze_calendar_spread()` |
+| **Margin** | Performance bond deposit (not borrowing). Typically 3-12% of contract value. | `estimate_futures_margin()` |
+
+### Contango vs Backwardation (The Most Important Concept)
+
+```
+CONTANGO (normal):
+  Spot: $100  |  Mar: $101  |  Jun: $103  |  Sep: $106
+  Curve slopes UP. Each month costs more.
+  YOU PAY to hold longs (negative roll yield).
+  Most markets are in contango most of the time.
+
+BACKWARDATION (stress):
+  Spot: $100  |  Mar: $98  |  Jun: $95  |  Sep: $92
+  Curve slopes DOWN. Near-term costs more than far-term.
+  YOU EARN by holding longs (positive roll yield).
+  Signals supply shortage or panic demand.
+```
+
+**Trading implication:** In contango, long futures positions lose ~5-15%/year just from rolling costs. In backwardation, you get PAID to hold. Knowing the term structure is essential before entering a futures position.
+
+### Rolling — Why and When
+
+Futures expire. To maintain a position, you "roll" — close the expiring contract, open the next month.
+
+**When to roll:** 3-5 days before expiry (watch open interest shift to next month)
+
+**Roll cost example (contango):**
+```
+You're long March oil at $68.00
+June oil trades at $69.50
+Roll cost: $1.50 per barrel (you sell low, buy high)
+On a 1,000-barrel contract: $1,500 lost to rolling
+```
+
+```python
+from market_analyzer import decide_futures_roll
+roll = decide_futures_roll("CL", current_dte=4, current_price=68.0, next_month_price=69.5)
+# → ROLL_FORWARD, cost +2.2%, urgency "soon"
+```
+
+### Futures Options — Key Differences from Stock Options
+
+| Aspect | Stock Options | Futures Options |
+|--------|-------------|----------------|
+| **Underlying** | Stock (shares) | Futures contract |
+| **Settlement** | Cash or stock delivery | **Settles into a futures position** |
+| **Assignment** | Get 100 shares | Get 1 futures contract (leveraged!) |
+| **Margin** | Reg-T (20% of underlying) | SPAN (portfolio-based, often lower) |
+| **Size** | 100 shares × price | 1 futures contract × multiplier |
+| **Expiry** | Monthly + weeklies | Varies — often before futures expiry |
+| **Trading hours** | Market hours only | Nearly 24 hours |
+| **Exercise** | American (equity), European (index) | Varies by product |
+
+**CRITICAL:** If you sell a put on ES futures and get assigned, you now have a **long ES futures position** — controlling $330,000 of S&P 500 with ~$16,000 margin. This is NOT like getting 100 shares of a stock. The leverage is extreme.
+
+**Expiry timing:** Futures options typically expire **before** the underlying futures contract. For ES options, they expire on the 3rd Friday of the month. The underlying ES futures expire on the 3rd Friday of the quarter month. Make sure you know BOTH expiry dates.
+
+### Premium Selling on Futures
+
+Same theta-harvesting philosophy as stock options, but with more leverage:
+
+```python
+from market_analyzer import analyze_futures_options
+opts = analyze_futures_options("ES", futures_price=5200, iv=0.15, regime_id=1)
+# → Put: sell 5100P at $45 (35%/yr)
+#   Call: sell 5300C at $42 (33%/yr)
+#   Strangle: $87/contract (34%/yr combined)
+#   Margin: ~$26,000 per strangle
+```
+
+**Always use defined risk on futures** (iron condors, not naked strangles) unless you have significant experience and capital. A 5% overnight gap in ES = $13,000 P&L per contract.
+
+### 13 Futures Instruments in MA
+
+| Ticker | Name | Multiplier | Approx Margin | Market |
+|--------|------|-----------|---------------|--------|
+| ES | S&P 500 E-mini | $50/point | 5% | US |
+| NQ | Nasdaq 100 E-mini | $20/point | 6% | US |
+| YM | Dow E-mini | $5/point | 5% | US |
+| RTY | Russell 2000 | $50/point | 6% | US |
+| CL | Crude Oil | $1,000/barrel | 8% | US |
+| GC | Gold | $100/oz | 7% | US |
+| SI | Silver | $5,000/oz | 10% | US |
+| ZB | 30Y Treasury Bond | $1,000/point | 3% | US |
+| ZN | 10Y Treasury Note | $1,000/point | 2% | US |
+| NG | Natural Gas | $10,000/mmBtu | 12% | US |
+| NIFTY_FUT | NIFTY 50 | ₹25/point | 12% | India |
+| BANKNIFTY_FUT | Bank NIFTY | ₹15/point | 12% | India |
+| FINNIFTY_FUT | Fin NIFTY | ₹40/point | 12% | India |
+
+### Complete Futures Research Report
+
+```python
+from market_analyzer import generate_futures_report
+report = generate_futures_report("CL", spot_price=68.0, futures_price=69.5,
+                                  futures_dte=25, iv=0.30, regime_id=2)
+# → FuturesResearchReport with:
+#   basis analysis, term structure, roll decision, options opportunities,
+#   margin requirements, educational notes
+```
+
+Every field includes `educational_notes` — beginner-friendly explanations of what each number means and why it matters.
+
+**CLI:** `futures ES` (when implemented) — eTrading will expose via trading platform
 
 ---
 
@@ -1163,8 +1408,11 @@ rebalance = check_rebalance(
 **Equity Research (3 functions):**
 `analyze_stock`, `screen_stocks`, `fetch_fundamental_profile` (5 strategies, 2 horizons)
 
-**Capital Deployment (5 functions):**
-`compute_market_valuation`, `plan_deployment`, `compute_asset_allocation`, `recommend_core_portfolio`, `check_rebalance`
+**Capital Deployment (8 functions):**
+`compute_market_valuation`, `plan_deployment`, `compute_asset_allocation`, `recommend_core_portfolio`, `check_rebalance`, `compare_leap_vs_stock`, `analyze_wheel_strategy`, `decide_wheel_action`
+
+**Futures Analysis (7 functions):**
+`analyze_futures_basis`, `analyze_term_structure`, `decide_futures_roll`, `analyze_calendar_spread`, `analyze_futures_options`, `estimate_futures_margin`, `generate_futures_report`
 
 **Hedging & Execution (5 functions):**
 `assess_hedge`, `validate_execution_quality`, `assess_currency_exposure`, `compute_portfolio_exposure`, `plan_leg_execution`

@@ -42,7 +42,7 @@ from market_analyzer.models.features import FeatureConfig, FeatureInspection
 from market_analyzer.models.technicals import TechnicalSnapshot, TechnicalSignal
 
 # New workflow models
-from market_analyzer.models.context import IntermarketDashboard, IntermarketEntry, MarketContext
+from market_analyzer.models.context import InstrumentAvailability, IntermarketDashboard, IntermarketEntry, MarketContext
 from market_analyzer.models.instrument import InstrumentAnalysis
 from market_analyzer.models.entry import EntryConfirmation, EntryCondition, EntryTriggerType
 from market_analyzer.models.strategy import (
@@ -158,6 +158,27 @@ from market_analyzer.wheel_strategy import (
     WheelPosition,
     WheelState,
     decide_wheel_action,
+)
+
+# Futures analysis
+from market_analyzer.futures_analysis import (
+    FUTURES_INSTRUMENTS,
+    CalendarSpreadAnalysis,
+    FuturesBasisAnalysis,
+    FuturesMarginEstimate,
+    FuturesOptionAnalysis,
+    FuturesResearchReport,
+    FuturesRollDecision,
+    FuturesTermStructureAnalysis,
+    RollAction,
+    TermStructure,
+    analyze_calendar_spread,
+    analyze_futures_basis,
+    analyze_futures_options,
+    analyze_term_structure,
+    decide_futures_roll,
+    estimate_futures_margin,
+    generate_futures_report,
 )
 
 # Quotes (broker-agnostic)

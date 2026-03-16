@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from market_analyzer.config import get_settings
 from market_analyzer.models.black_swan import AlertLevel
 from market_analyzer.models.context import (
+    InstrumentAvailability,
     IntermarketDashboard,
     IntermarketEntry,
     MarketContext,
@@ -89,6 +90,11 @@ class MarketContextService:
         if intermarket.divergence:
             summary_parts.append("Intermarket divergence detected")
 
+        # Compute tradeable instruments
+        tradeable = self._compute_tradeable(
+            environment_label, black_swan.alert_level, intermarket, today,
+        )
+
         result = MarketContext(
             as_of_date=today,
             market=self._market,
@@ -98,6 +104,7 @@ class MarketContextService:
             environment_label=environment_label,
             trading_allowed=trading_allowed,
             position_size_factor=size_factor,
+            tradeable=tradeable,
             summary=" | ".join(summary_parts),
         )
 
@@ -111,6 +118,133 @@ class MarketContextService:
             ])
 
         return result
+
+    def _compute_tradeable(
+        self,
+        environment: str,
+        alert_level: AlertLevel,
+        intermarket: IntermarketDashboard,
+        today: date,
+    ) -> InstrumentAvailability:
+        """Determine what instruments/strategies are viable today."""
+
+        # Dominant regime drives strategy availability
+        regime = intermarket.dominant_regime
+        regime_id = int(regime) if regime else 2
+
+        # === OPTIONS ===
+        if alert_level == AlertLevel.CRITICAL:
+            opt_available = False
+            opt_note = "HALTED — black swan critical. No options trading."
+            opt_strategies = []
+        elif regime_id == 4:
+            opt_available = True
+            opt_note = "R4 explosive — defined risk ONLY. No naked premium selling."
+            opt_strategies = ["protective_put", "debit_spread", "iron_condor (wide)"]
+        elif regime_id == 3:
+            opt_available = True
+            opt_note = "R3 trending — directional spreads preferred. Light theta."
+            opt_strategies = ["debit_spread", "credit_spread (with trend)", "diagonal"]
+        elif regime_id == 2:
+            opt_available = True
+            opt_note = "R2 high-vol MR — rich premiums. Wider strikes, defined risk."
+            opt_strategies = ["iron_condor", "iron_butterfly", "credit_spread", "calendar", "strangle (with wings)"]
+        else:
+            opt_available = True
+            opt_note = "R1 ideal — full options suite. Premium selling favored."
+            opt_strategies = ["iron_condor", "iron_butterfly", "credit_spread", "calendar",
+                              "diagonal", "straddle", "strangle", "ratio_spread"]
+
+        # === STOCKS ===
+        if alert_level == AlertLevel.CRITICAL:
+            stock_available = False
+            stock_note = "HALTED — protect capital. No new equity positions."
+            stock_strategies = []
+        elif environment == "crisis":
+            stock_available = False
+            stock_note = "Crisis — no new stock positions. Monitor existing only."
+            stock_strategies = []
+        elif environment == "defensive":
+            stock_available = True
+            stock_note = "Defensive — small positions only. Value + dividend strategies."
+            stock_strategies = ["value", "dividend"]
+        elif regime_id == 4:
+            stock_available = True
+            stock_note = "R4 volatile — only deep value with wide stops. Smaller size."
+            stock_strategies = ["value", "turnaround (small size)"]
+        else:
+            stock_available = True
+            stock_note = "Normal — all equity strategies available."
+            stock_strategies = ["value", "growth", "dividend", "quality_momentum", "turnaround"]
+
+        # === FUTURES ===
+        if alert_level == AlertLevel.CRITICAL:
+            fut_available = False
+            fut_note = "HALTED — no futures. Leverage + crisis = catastrophic."
+            fut_strategies = []
+        elif regime_id == 4:
+            fut_available = True
+            fut_note = "R4 — futures with EXTREME CAUTION. Reduce size 50%. Tight stops."
+            fut_strategies = ["hedging only", "micro contracts"]
+        elif regime_id == 3:
+            fut_available = True
+            fut_note = "R3 trending — directional futures viable. Follow the trend."
+            fut_strategies = ["directional (with trend)", "calendar spread", "futures options (defined risk)"]
+        elif regime_id == 2:
+            fut_available = True
+            fut_note = "R2 high-vol — futures options premium selling. Wider strikes."
+            fut_strategies = ["futures options (iron condor)", "calendar spread", "directional (small)"]
+        else:
+            fut_available = True
+            fut_note = "R1 calm — all futures strategies. Premium selling ideal."
+            fut_strategies = ["futures options (strangle/IC)", "calendar spread", "directional", "basis trade"]
+
+        # === INDIA WEEKLY EXPIRY ===
+        india_expiry_today = False
+        india_expiry_inst = ""
+        if self._market.upper() in ("INDIA", "IN"):
+            weekday = today.weekday()  # 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri
+            if weekday == 3:  # Thursday
+                india_expiry_today = True
+                india_expiry_inst = "NIFTY"
+            elif weekday == 2:  # Wednesday
+                india_expiry_today = True
+                india_expiry_inst = "BANKNIFTY"
+            elif weekday == 1:  # Tuesday
+                india_expiry_today = True
+                india_expiry_inst = "FINNIFTY"
+
+        # Summary
+        parts = []
+        if opt_available:
+            parts.append(f"Options: YES ({len(opt_strategies)} strategies)")
+        else:
+            parts.append("Options: NO")
+        if stock_available:
+            parts.append(f"Stocks: YES ({len(stock_strategies)} strategies)")
+        else:
+            parts.append("Stocks: NO")
+        if fut_available:
+            parts.append(f"Futures: YES ({len(fut_strategies)} strategies)")
+        else:
+            parts.append("Futures: NO")
+        if india_expiry_today:
+            parts.append(f"India expiry: {india_expiry_inst}")
+
+        return InstrumentAvailability(
+            options_available=opt_available,
+            options_note=opt_note,
+            options_strategies=opt_strategies,
+            stocks_available=stock_available,
+            stocks_note=stock_note,
+            stocks_strategies=stock_strategies,
+            futures_available=fut_available,
+            futures_note=fut_note,
+            futures_strategies=fut_strategies,
+            india_weekly_expiry_today=india_expiry_today,
+            india_expiry_instrument=india_expiry_inst,
+            summary=" | ".join(parts),
+        )
 
     def intermarket(self) -> IntermarketDashboard:
         """Read regimes of market reference tickers.
