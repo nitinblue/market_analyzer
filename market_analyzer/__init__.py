@@ -203,6 +203,33 @@ from market_analyzer.models.vol_surface import (
 from market_analyzer.service.vol_surface import VolSurfaceService
 from market_analyzer.features.vol_surface import compute_vol_surface
 
+# Vol history (IV percentile layer)
+from market_analyzer.vol_history import (
+    DailyIVSnapshot,
+    IVPercentiles,
+    compute_iv_percentiles,
+    build_iv_snapshot_from_surface,
+)
+
+# Option pricing + arbitrage detection
+from market_analyzer.arbitrage import (
+    ArbitrageOpportunity,
+    ArbitrageScanResult,
+    TheoreticalPrice,
+    compute_theoretical_price,
+    check_put_call_parity,
+    scan_arbitrage,
+)
+
+# Pre-market scanner
+from market_analyzer.premarket_scanner import (
+    PremarketAlert,
+    PremarketScanResult,
+    GapStrategy,
+    scan_premarket,
+    fetch_premarket_data,
+)
+
 # Market registry
 from market_analyzer.registry import MarketRegistry, MarketInfo, InstrumentInfo, MarginEstimate
 
@@ -653,6 +680,11 @@ __all__ = [
     "TermStructurePoint",
     "SkewSlice",
     "compute_vol_surface",
+    # Vol history (IV percentile layer)
+    "DailyIVSnapshot",
+    "IVPercentiles",
+    "compute_iv_percentiles",
+    "build_iv_snapshot_from_surface",
     # Opportunity models
     "LegAction",
     "LegSpec",

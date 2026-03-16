@@ -79,6 +79,7 @@ def assess_calendar(
     fundamentals: FundamentalsSnapshot | None = None,
     as_of: date | None = None,
     iv_rank: float | None = None,
+    iv_percentiles: object | None = None,  # IVPercentiles from vol_history
 ) -> CalendarOpportunity:
     """Assess calendar spread opportunity for a single instrument.
 
@@ -134,6 +135,69 @@ def assess_calendar(
             weight=0.10,
             description=f"IV rank {iv_rank:.0f}% — {'elevated IV supports calendar' if iv_favorable else 'low IV reduces calendar edge'}",
         ))
+
+    # IV percentile signals (historical context — is this setup extreme?)
+    if iv_percentiles is not None:
+        pctl = iv_percentiles
+
+        # Term structure percentile — is this backwardation/contango RARE?
+        term_pctl = getattr(pctl, 'term_slope_percentile', 50)
+        term_extreme = getattr(pctl, 'term_structure_extreme', False)
+        if term_extreme and term_pctl > 80:
+            signals.append(OpportunitySignal(
+                name="term_structure_extreme_high",
+                favorable=True,
+                weight=0.15,
+                description=f"Term structure at {term_pctl:.0f}th percentile (RARE) — historically attractive calendar setup",
+            ))
+        elif term_extreme and term_pctl < 20:
+            signals.append(OpportunitySignal(
+                name="term_structure_extreme_low",
+                favorable=True,
+                weight=0.12,
+                description=f"Term structure at {term_pctl:.0f}th percentile (extreme backwardation) — strong front IV selling opportunity",
+            ))
+        elif term_pctl > 60:
+            signals.append(OpportunitySignal(
+                name="term_structure_elevated",
+                favorable=True,
+                weight=0.08,
+                description=f"Term structure at {term_pctl:.0f}th percentile — above average, moderate calendar edge",
+            ))
+        else:
+            signals.append(OpportunitySignal(
+                name="term_structure_normal",
+                favorable=False,
+                weight=0.10,
+                description=f"Term structure at {term_pctl:.0f}th percentile — normal, no special calendar edge",
+            ))
+
+        # Front IV percentile — is front IV elevated enough to sell?
+        front_pctl = getattr(pctl, 'front_iv_percentile', 50)
+        front_elevated = front_pctl > 60
+        signals.append(OpportunitySignal(
+            name="front_iv_percentile",
+            favorable=front_elevated,
+            weight=0.12,
+            description=f"Front IV at {front_pctl:.0f}th percentile — {'elevated, good for selling front month' if front_elevated else 'not elevated, less edge in selling front'}",
+        ))
+
+        # Calendar opportunity from percentile analysis
+        cal_opp = getattr(pctl, 'calendar_opportunity', 'unknown')
+        if cal_opp == 'strong':
+            signals.append(OpportunitySignal(
+                name="iv_history_calendar",
+                favorable=True,
+                weight=0.15,
+                description=f"IV history says STRONG calendar opportunity: {getattr(pctl, 'calendar_rationale', '')}",
+            ))
+        elif cal_opp == 'moderate':
+            signals.append(OpportunitySignal(
+                name="iv_history_calendar",
+                favorable=True,
+                weight=0.08,
+                description=f"IV history says MODERATE calendar: {getattr(pctl, 'calendar_rationale', '')}",
+            ))
 
     # --- Confidence ---
     raw = sum(s.weight for s in signals if s.favorable)

@@ -77,6 +77,9 @@ service-identity==24.2.0
 txaio==25.12.2
 zope.interface==8.2
 
+# Optional: FRED economic data (free API key from fred.stlouisfed.org)
+fredapi==0.5.2
+
 # Optional: PDF support
 PyMuPDF==1.27.1
 

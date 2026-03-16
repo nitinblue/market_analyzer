@@ -78,6 +78,7 @@ def assess_diagonal(
     phase: PhaseResult | None = None,
     fundamentals: FundamentalsSnapshot | None = None,
     as_of: date | None = None,
+    iv_percentiles: object | None = None,  # IVPercentiles from vol_history
 ) -> DiagonalOpportunity:
     """Assess diagonal spread opportunity for a single instrument.
 
@@ -129,6 +130,52 @@ def assess_diagonal(
 
     # --- Signals ---
     signals = _score_signals(regime, technicals, vol_surface, phase, days_to_earnings, trend_dir, cfg)
+
+    # IV percentile signals (historical context for diagonal edge)
+    if iv_percentiles is not None:
+        pctl = iv_percentiles
+
+        # Skew percentile — extreme skew = diagonal edge
+        skew_pctl = getattr(pctl, 'skew_percentile', 50)
+        skew_extreme = getattr(pctl, 'skew_extreme', False)
+        if skew_extreme and skew_pctl > 80:
+            signals.append(OpportunitySignal(
+                name="skew_extreme_high",
+                favorable=True,
+                weight=0.15,
+                description=f"Skew at {skew_pctl:.0f}th percentile (EXTREME) — puts expensive, bull diagonal benefits",
+            ))
+        elif skew_extreme and skew_pctl < 20:
+            signals.append(OpportunitySignal(
+                name="skew_extreme_low",
+                favorable=True,
+                weight=0.12,
+                description=f"Skew at {skew_pctl:.0f}th percentile (compressed) — calls expensive, bear diagonal benefits",
+            ))
+        else:
+            signals.append(OpportunitySignal(
+                name="skew_normal",
+                favorable=False,
+                weight=0.08,
+                description=f"Skew at {skew_pctl:.0f}th percentile — normal, no special diagonal edge",
+            ))
+
+        # Diagonal opportunity from percentile analysis
+        diag_opp = getattr(pctl, 'diagonal_opportunity', 'unknown')
+        if diag_opp == 'strong':
+            signals.append(OpportunitySignal(
+                name="iv_history_diagonal",
+                favorable=True,
+                weight=0.15,
+                description=f"IV history: STRONG diagonal setup — {getattr(pctl, 'diagonal_rationale', '')}",
+            ))
+        elif diag_opp == 'moderate':
+            signals.append(OpportunitySignal(
+                name="iv_history_diagonal",
+                favorable=True,
+                weight=0.08,
+                description=f"IV history: MODERATE diagonal — {getattr(pctl, 'diagonal_rationale', '')}",
+            ))
 
     # --- Confidence ---
     raw = sum(s.weight for s in signals if s.favorable)
