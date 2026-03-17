@@ -233,8 +233,8 @@ def estimate_portfolio_loss(
     """
     if not positions:
         return VaRResult(
-            var_1d_95=0, var_1d_99=0, var_5d_95=0,
-            var_pct_of_nlv=0, method="parametric_atr",
+            expected_loss_1d=0, expected_loss_5d=0, severe_loss_1d=0,
+            loss_pct_of_nlv=0, total_max_loss=0, method="parametric_atr",
             per_position=[], commentary="No open positions.",
         )
 
@@ -310,11 +310,14 @@ def estimate_portfolio_loss(
     else:
         commentary = "Portfolio VaR is HIGH. Reduce exposure immediately."
 
+    total_max_loss = sum(p.max_loss for p in positions if p.max_loss > 0)
+
     return VaRResult(
-        var_1d_95=round(var_1d_95, 2),
-        var_1d_99=round(var_1d_99, 2),
-        var_5d_95=round(var_5d_95, 2),
-        var_pct_of_nlv=round(var_pct, 2),
+        expected_loss_1d=round(var_1d_95, 2),
+        expected_loss_5d=round(var_5d_95, 2),
+        severe_loss_1d=round(var_1d_99, 2),
+        loss_pct_of_nlv=round(var_pct, 2),
+        total_max_loss=round(total_max_loss, 2),
         method="parametric_atr",
         per_position=per_position,
         commentary=commentary,
