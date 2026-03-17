@@ -769,10 +769,7 @@ def compute_risk_dashboard(
             regime_by_ticker=regime_by_ticker,
             correlation_data=correlation_data,
         )
-        if var_result.var_pct_of_nlv > 10:
-            alerts.append(f"VaR is {var_result.var_pct_of_nlv:.1f}% of NLV — dangerously high")
-        elif var_result.var_pct_of_nlv > 5:
-            alerts.append(f"VaR is {var_result.var_pct_of_nlv:.1f}% of NLV — elevated")
+        # VaR alerts removed — use stress scenarios for risk assessment
         commentary.append(var_result.commentary)
 
     # ── RM2: Greeks ──
@@ -857,9 +854,9 @@ def compute_risk_dashboard(
         risk_score += 20
     elif portfolio_risk_pct > 15:
         risk_score += 10
-    if var_result and var_result.var_pct_of_nlv > 10:
+    if var_result and var_result.loss_pct_of_nlv > 10:
         risk_score += 20
-    elif var_result and var_result.var_pct_of_nlv > 5:
+    elif var_result and var_result.loss_pct_of_nlv > 5:
         risk_score += 10
     if greeks_result and not greeks_result.within_limits:
         risk_score += 15
@@ -904,7 +901,7 @@ def compute_risk_dashboard(
         size_pct = min(size_pct, 0.75)
     if drawdown.drawdown_pct > circuit_breaker_pct * 0.7:
         size_pct = min(size_pct, 0.50)
-    if var_result and var_result.var_pct_of_nlv > 5:
+    if var_result and var_result.loss_pct_of_nlv > 5:
         size_pct = min(size_pct, 0.75)
     if not can_open:
         size_pct = 0.0

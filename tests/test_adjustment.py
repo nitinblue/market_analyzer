@@ -284,7 +284,7 @@ class TestNoBrokerCostsAreNone:
         tech = _make_technicals(583.0)
 
         result = svc.analyze(ic, regime, tech)
-        assert result.pnl_estimate is None
+        assert result.mark_pnl is None
 
     def test_no_broker_adjustment_costs_are_none(self):
         svc = AdjustmentService()
@@ -295,11 +295,11 @@ class TestNoBrokerCostsAreNone:
         result = svc.analyze(ic, regime, tech)
         for adj in result.adjustments:
             if adj.adjustment_type == AdjustmentType.DO_NOTHING:
-                assert adj.estimated_cost == 0.0  # DO_NOTHING always 0
+                assert adj.mid_cost == 0.0  # DO_NOTHING always 0
             else:
-                assert adj.estimated_cost is None, (
+                assert adj.mid_cost is None, (
                     f"{adj.adjustment_type}: expected None cost without broker, "
-                    f"got {adj.estimated_cost}"
+                    f"got {adj.mid_cost}"
                 )
 
     def test_summary_shows_no_broker(self):

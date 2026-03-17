@@ -121,7 +121,7 @@ class AdjustmentService:
             tested_side=tested_side,
             distance_to_short_put_pct=dist_put,
             distance_to_short_call_pct=dist_call,
-            pnl_estimate=pnl,
+            mark_pnl=pnl,
             remaining_dte=remaining_dte,
             regime_id=regime.regime,
             adjustments=adjustments,
@@ -482,7 +482,7 @@ class AdjustmentService:
             description="Hold position — no adjustment needed",
             new_legs=[],
             close_legs=[],
-            estimated_cost=0.0,
+            mid_cost=0.0,
             risk_change=0.0,
             efficiency=None,
             urgency=urgency,
@@ -511,7 +511,7 @@ class AdjustmentService:
             description=f"Close entire position (P&L: {pnl_str})",
             new_legs=[],
             close_legs=list(trade_spec.legs),
-            estimated_cost=round(cost, 2) if cost is not None else None,
+            mid_cost=round(cost, 2) if cost is not None else None,
             risk_change=round(risk_removed, 2),
             efficiency=round(eff, 2) if eff is not None else None,
             urgency=close_urgency,
@@ -552,7 +552,7 @@ class AdjustmentService:
                     new_legs=[self._make_leg("short_put", LegAction.SELL_TO_OPEN, "put",
                                              new_strike, exp, remaining_dte, avg_iv)],
                     close_legs=list(short_puts),
-                    estimated_cost=round(roll_credit, 2) if roll_credit is not None else None,
+                    mid_cost=round(roll_credit, 2) if roll_credit is not None else None,
                     risk_change=-round(strike_diff * 100, 2),
                     efficiency=(
                         None if roll_credit is None or roll_credit <= 0
@@ -579,7 +579,7 @@ class AdjustmentService:
                     new_legs=[self._make_leg("short_call", LegAction.SELL_TO_OPEN, "call",
                                              new_strike, exp, remaining_dte, avg_iv)],
                     close_legs=list(short_calls),
-                    estimated_cost=round(roll_credit, 2) if roll_credit is not None else None,
+                    mid_cost=round(roll_credit, 2) if roll_credit is not None else None,
                     risk_change=-round(strike_diff * 100, 2),
                     efficiency=(
                         None if roll_credit is None or roll_credit <= 0
@@ -607,7 +607,7 @@ class AdjustmentService:
                         new_legs=[self._make_leg("short_call", LegAction.SELL_TO_OPEN, "call",
                                                  new_call, exp, remaining_dte, avg_iv)],
                         close_legs=list(short_calls),
-                        estimated_cost=round(credit, 2) if credit is not None else None,
+                        mid_cost=round(credit, 2) if credit is not None else None,
                         risk_change=-round(abs(old_call - new_call) * 100, 2),
                         efficiency=None,
                         urgency="monitor",
@@ -631,7 +631,7 @@ class AdjustmentService:
                         new_legs=[self._make_leg("short_put", LegAction.SELL_TO_OPEN, "put",
                                                  new_put, exp, remaining_dte, avg_iv)],
                         close_legs=list(short_puts),
-                        estimated_cost=round(credit, 2) if credit is not None else None,
+                        mid_cost=round(credit, 2) if credit is not None else None,
                         risk_change=-round(abs(new_put - old_put) * 100, 2),
                         efficiency=None,
                         urgency="monitor",
@@ -665,7 +665,7 @@ class AdjustmentService:
                 description="Convert to butterfly — collapse untested side to tested",
                 new_legs=[],
                 close_legs=untested_legs,
-                estimated_cost=convert_credit,
+                mid_cost=convert_credit,
                 risk_change=-round((trade_spec.wing_width_points or 5.0) * 50, 2),
                 efficiency=None,
                 urgency=urgency,
@@ -682,7 +682,7 @@ class AdjustmentService:
                 description=f"Roll tested side out 7 days to {new_exp}",
                 new_legs=[],
                 close_legs=[],
-                estimated_cost=roll_cost,
+                mid_cost=roll_cost,
                 risk_change=0.0,
                 efficiency=None,
                 urgency=urgency,
@@ -728,7 +728,7 @@ class AdjustmentService:
                     short.option_type, new_strike, exp, remaining_dte, avg_iv,
                 )],
                 close_legs=[short],
-                estimated_cost=round(roll_credit, 2) if roll_credit is not None else None,
+                mid_cost=round(roll_credit, 2) if roll_credit is not None else None,
                 risk_change=-round(strike_diff * 100, 2),
                 efficiency=(
                     None if roll_credit is None or roll_credit <= 0
@@ -749,7 +749,7 @@ class AdjustmentService:
                     description=f"Roll out 7 days to {new_exp}",
                     new_legs=[],
                     close_legs=[],
-                    estimated_cost=roll_cost,
+                    mid_cost=roll_cost,
                     risk_change=0.0,
                     efficiency=None,
                     urgency=urgency,
@@ -811,7 +811,7 @@ class AdjustmentService:
                 description="Roll front leg to next monthly expiry",
                 new_legs=[],
                 close_legs=[],
-                estimated_cost=roll_cost,
+                mid_cost=roll_cost,
                 risk_change=0.0,
                 efficiency=None,
                 urgency=urgency,
@@ -859,7 +859,7 @@ class AdjustmentService:
                 description=f"Buy {wing_strike:.0f}{short.option_type[0].upper()} to cap naked risk",
                 new_legs=[wing_leg],
                 close_legs=[],
-                estimated_cost=round(wing_cost, 2) if wing_cost is not None else None,
+                mid_cost=round(wing_cost, 2) if wing_cost is not None else None,
                 risk_change=-round(strike_diff * 100, 2),
                 efficiency=(
                     round(strike_diff * 100 / wing_cost, 2)
@@ -888,7 +888,7 @@ class AdjustmentService:
                 description=f"Take profit at ${pnl:+.2f}",
                 new_legs=[],
                 close_legs=list(trade_spec.legs),
-                estimated_cost=round(-pnl, 2),
+                mid_cost=round(-pnl, 2),
                 risk_change=-round((trade_spec.wing_width_points or 5.0) * 100, 2),
                 efficiency=None,
                 urgency="monitor",
@@ -940,7 +940,7 @@ class AdjustmentService:
                         description=f"Buy {wing_strike:.0f}{opt_type[0].upper()} wing to define risk",
                         new_legs=[wing_leg],
                         close_legs=[],
-                        estimated_cost=round(wing_cost, 2) if wing_cost is not None else None,
+                        mid_cost=round(wing_cost, 2) if wing_cost is not None else None,
                         risk_change=-round(strike_diff * 100, 2),
                         efficiency=(
                             round(strike_diff * 100 / wing_cost, 2)
@@ -977,7 +977,7 @@ class AdjustmentService:
                     description=f"Close tested {side} side only",
                     new_legs=[],
                     close_legs=tested_legs,
-                    estimated_cost=close_cost,
+                    mid_cost=close_cost,
                     risk_change=-round((trade_spec.wing_width_points or 5.0) * 50, 2),
                     efficiency=None,
                     urgency=urgency,
@@ -1002,15 +1002,15 @@ class AdjustmentService:
             if adj.adjustment_type == AdjustmentType.DO_NOTHING:
                 return (0, 0.0)
             if adj.adjustment_type == AdjustmentType.CLOSE_FULL and adj.urgency != "immediate":
-                return (4, adj.estimated_cost or 0.0)
-            if adj.estimated_cost is None:
+                return (4, adj.mid_cost or 0.0)
+            if adj.mid_cost is None:
                 # Unknown cost — after priced adjustments, before CLOSE_FULL
                 return (3, 0.0)
-            if adj.estimated_cost <= 0 and adj.risk_change < 0:
-                return (1, adj.estimated_cost)
+            if adj.mid_cost <= 0 and adj.risk_change < 0:
+                return (1, adj.mid_cost)
             if adj.efficiency is not None and adj.efficiency > 0:
                 return (2, -adj.efficiency)
-            return (3, adj.estimated_cost)
+            return (3, adj.mid_cost)
 
         return sorted(adjustments, key=sort_key)
 

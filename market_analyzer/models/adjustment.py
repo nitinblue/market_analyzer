@@ -47,7 +47,7 @@ class AdjustmentOption(BaseModel):
     description: str
     new_legs: list[LegSpec]
     close_legs: list[LegSpec]
-    estimated_cost: float | None  # None = no broker, cost unknown
+    mid_cost: float | None  # Net cost from broker mid prices. None = DXLink fetch failed
     risk_change: float
     efficiency: float | None
     urgency: str
@@ -81,7 +81,7 @@ class AdjustmentAnalysis(BaseModel):
     tested_side: TestedSide
     distance_to_short_put_pct: float | None
     distance_to_short_call_pct: float | None
-    pnl_estimate: float | None  # None = no broker, P&L unknown
+    mark_pnl: float | None  # P&L at current broker mid (mark-to-market). None = DXLink fetch failed
     remaining_dte: int
     regime_id: int
     adjustments: list[AdjustmentOption]

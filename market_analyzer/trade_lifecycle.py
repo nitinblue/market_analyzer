@@ -1352,7 +1352,7 @@ def check_trade_health(
             adj_options.append({
                 "type": adj.adjustment_type.value,
                 "description": adj.description,
-                "estimated_cost": adj.estimated_cost,
+                "mid_cost": adj.mid_cost,
                 "risk_change": adj.risk_change,
                 "urgency": adj.urgency,
                 "rationale": adj.rationale,

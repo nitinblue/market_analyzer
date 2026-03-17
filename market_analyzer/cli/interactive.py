@@ -2207,7 +2207,7 @@ Requires --broker connection."""
             if result.distance_to_short_call_pct is not None:
                 print(f"  |  Short call: {result.distance_to_short_call_pct:+.1f}%", end="")
             print()
-            pnl_str = f"${result.pnl_estimate:+.2f}" if result.pnl_estimate is not None else "N/A (no broker)"
+            pnl_str = f"${result.mark_pnl:+.2f}" if result.mark_pnl is not None else _styled("N/A (DXLink fetch failed)", "yellow")
             print(f"  P&L: {pnl_str}  |  Regime: R{result.regime_id}")
 
             # Adjustments
@@ -2215,14 +2215,14 @@ Requires --broker connection."""
             for i, adj in enumerate(result.adjustments, 1):
                 type_label = adj.adjustment_type.value.upper().replace("_", " ")
                 print(f"  #{i}  {_styled(type_label, 'bold')} — {adj.rationale}")
-                if adj.estimated_cost is not None:
-                    cost_str = f"${adj.estimated_cost:+.2f}" if adj.estimated_cost != 0 else "$0"
+                if adj.mid_cost is not None:
+                    cost_str = f"${adj.mid_cost:+.2f}" if adj.mid_cost != 0 else "$0"
                 else:
-                    cost_str = _styled("N/A", "dim")
+                    cost_str = _styled("N/A (DXLink fetch failed)", "yellow")
                 risk_str = f"${adj.risk_change:+.0f}" if adj.risk_change != 0 else "unchanged"
                 if adj.efficiency is not None:
                     eff_str = f"{adj.efficiency:.2f}"
-                elif adj.estimated_cost is not None and adj.estimated_cost <= 0 and adj.risk_change < 0:
+                elif adj.mid_cost is not None and adj.mid_cost <= 0 and adj.risk_change < 0:
                     eff_str = "∞"
                 else:
                     eff_str = "—"
@@ -2233,10 +2233,10 @@ Requires --broker connection."""
                 if adj.description and adj.description != adj.rationale:
                     print(f"      {_styled(adj.description, 'dim')}")
                 # Warn on poor cost/risk ratio for paid adjustments
-                if adj.estimated_cost is not None and adj.estimated_cost > 0 and adj.risk_change < 0:
-                    ratio = abs(adj.risk_change) / adj.estimated_cost
+                if adj.mid_cost is not None and adj.mid_cost > 0 and adj.risk_change < 0:
+                    ratio = abs(adj.risk_change) / adj.mid_cost
                     if ratio < 1.0:
-                        print(f"      {_styled(f'⚠ POOR — paying ${adj.estimated_cost:.2f} to reduce ${abs(adj.risk_change):.0f} risk', 'yellow')}")
+                        print(f"      {_styled(f'⚠ POOR — paying ${adj.mid_cost:.2f} to reduce ${abs(adj.risk_change):.0f} risk', 'yellow')}")
                 print()
 
             # Exit monitoring signals
@@ -2608,15 +2608,15 @@ Requires --broker connection."""
             print(f"    Breaker:    {dd.circuit_breaker_pct:.0%} "
                   f"({'TRIGGERED' if dd.is_triggered else 'OK'})")
 
-            # VaR
+            # Expected Loss (ATR-based — not VaR)
             if dashboard.var:
                 v = dashboard.var
-                var_color = "red" if v.var_pct_of_nlv > 5 else ("yellow" if v.var_pct_of_nlv > 2 else "green")
-                print(f"\n  {_styled('Value at Risk', 'bold')}")
-                print(f"    1-day 95%:  {_styled(f'${v.var_1d_95:,.0f}', var_color)} "
-                      f"({v.var_pct_of_nlv:.1f}% of NLV)")
-                print(f"    1-day 99%:  ${v.var_1d_99:,.0f}")
-                print(f"    5-day 95%:  ${v.var_5d_95:,.0f}")
+                loss_color = "red" if v.loss_pct_of_nlv > 5 else ("yellow" if v.loss_pct_of_nlv > 2 else "green")
+                print(f"\n  {_styled('Expected Loss (ATR-based)', 'bold')}")
+                print(f"    1-day expected:  {_styled(f'${v.expected_loss_1d:,.0f}', loss_color)} "
+                      f"({v.loss_pct_of_nlv:.1f}% of NLV)")
+                print(f"    1-day severe:    ${v.severe_loss_1d:,.0f}")
+                print(f"    Total max loss:  ${v.total_max_loss:,.0f}")
 
             # Greeks
             if dashboard.greeks:
