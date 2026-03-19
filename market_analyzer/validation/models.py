@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 
 try:
     from enum import StrEnum
@@ -41,22 +41,27 @@ class ValidationReport(BaseModel):
     as_of: date
     checks: list[CheckResult]
 
+    @computed_field
     @property
     def passed(self) -> int:
         return sum(1 for c in self.checks if c.severity == Severity.PASS)
 
+    @computed_field
     @property
     def warnings(self) -> int:
         return sum(1 for c in self.checks if c.severity == Severity.WARN)
 
+    @computed_field
     @property
     def failures(self) -> int:
         return sum(1 for c in self.checks if c.severity == Severity.FAIL)
 
+    @computed_field
     @property
     def is_ready(self) -> bool:
         return self.failures == 0
 
+    @computed_field
     @property
     def summary(self) -> str:
         status = "READY TO TRADE" if self.is_ready else "NOT READY"

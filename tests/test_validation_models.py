@@ -46,3 +46,19 @@ def test_validation_report_summary_not_ready() -> None:
     )
     assert report.is_ready is False
     assert "NOT READY" in report.summary
+
+
+def test_validation_report_serializes_computed_fields() -> None:
+    """model_dump() must include is_ready and summary for MCP consumers."""
+    report = ValidationReport(
+        ticker="SPY",
+        suite=Suite.DAILY,
+        as_of=date(2026, 3, 18),
+        checks=[
+            CheckResult(name="a", severity=Severity.PASS, message="ok"),
+        ],
+    )
+    d = report.model_dump()
+    assert "is_ready" in d
+    assert "summary" in d
+    assert d["is_ready"] is True
