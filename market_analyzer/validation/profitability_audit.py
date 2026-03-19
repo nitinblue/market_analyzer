@@ -26,9 +26,9 @@ def check_commission_drag(
         commission_per_contract: Cost per leg per direction, default $0.65.
 
     Returns:
-        PASS if fees < 5% of gross credit.
-        WARN if fees are 5–15% of gross credit.
-        FAIL if fees exceed 15% or net credit <= 0.
+        PASS if commission_drag_pct < 10%.
+        WARN if commission_drag_pct >= 10% and < 25%.
+        FAIL if net_credit_dollars <= 0 OR commission_drag_pct >= 25%.
     """
     leg_count = len(trade_spec.legs)
     round_trip_cost = commission_per_contract * leg_count * 2  # open + close
@@ -46,13 +46,13 @@ def check_commission_drag(
     commission_drag_pct = (round_trip_cost / gross_credit_dollars) * 100
     net_credit_dollars = gross_credit_dollars - round_trip_cost
 
-    if net_credit_dollars <= 0 or commission_drag_pct >= 15.0:
+    if net_credit_dollars <= 0 or commission_drag_pct >= 25.0:
         sev = Severity.FAIL
         msg = (
             f"Fees ${round_trip_cost:.2f} eat {commission_drag_pct:.0f}% of "
             f"${gross_credit_dollars:.0f} credit — trade is not viable after commissions"
         )
-    elif commission_drag_pct >= 5.0:
+    elif commission_drag_pct >= 10.0:
         sev = Severity.WARN
         msg = (
             f"Fees ${round_trip_cost:.2f} ({commission_drag_pct:.0f}% of credit) — "
@@ -112,16 +112,16 @@ def check_margin_efficiency(income_yield: IncomeYield) -> CheckResult:
         income_yield: IncomeYield from compute_income_yield().
 
     Returns:
-        PASS if annualized ROC >= 5%, WARN if 3–5%, FAIL if < 3%.
+        PASS if annualized ROC >= 15%, WARN if 10–15%, FAIL if < 10%.
     """
     roc = income_yield.annualized_roc_pct
 
-    if roc < 3.0:
+    if roc < 10.0:
         sev = Severity.FAIL
-        msg = f"Annualized ROC {roc:.1f}% — below 3% minimum for small account viability"
-    elif roc < 5.0:
+        msg = f"Annualized ROC {roc:.1f}% — below 10% minimum for small account viability"
+    elif roc < 15.0:
         sev = Severity.WARN
-        msg = f"Annualized ROC {roc:.1f}% — marginal (target ≥5%)"
+        msg = f"Annualized ROC {roc:.1f}% — marginal (target ≥15%)"
     else:
         sev = Severity.PASS
         msg = f"Annualized ROC {roc:.1f}% — capital deployed efficiently"
@@ -131,5 +131,5 @@ def check_margin_efficiency(income_yield: IncomeYield) -> CheckResult:
         severity=sev,
         message=msg,
         value=round(roc, 1),
-        threshold=5.0,
+        threshold=15.0,
     )

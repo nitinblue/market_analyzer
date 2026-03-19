@@ -30,8 +30,8 @@ class TestCommissionDrag:
         assert result.name == "commission_drag"
 
     def test_thin_credit_warns(self) -> None:
-        """$0.60 credit — fees eat ~22% of credit."""
-        result = check_commission_drag(_ic_spec(), entry_credit=0.60)
+        """$0.40 credit on 4-leg IC — fees eat ~13% of credit (10–25% → WARN)."""
+        result = check_commission_drag(_ic_spec(), entry_credit=0.40)
         assert result.severity == Severity.WARN
 
     def test_microscopic_credit_fails(self) -> None:
@@ -67,29 +67,24 @@ class TestFillQuality:
 
 class TestMarginEfficiency:
     def test_good_roc_passes(self) -> None:
+        # $3.00 credit on a 5-wide IC → ~18% annualized ROC → PASS (≥15%)
         spec = _ic_spec()
-        income = compute_income_yield(spec, entry_credit=1.50, contracts=1)
+        income = compute_income_yield(spec, entry_credit=3.00, contracts=1)
         assert income is not None, "compute_income_yield returned None for standard IC"
         result = check_margin_efficiency(income)
         assert result.severity == Severity.PASS
 
     def test_marginal_roc_warns(self) -> None:
+        # $2.50 credit on a 5-wide IC → ~12% annualized ROC → WARN (10–15%)
         spec = _ic_spec()
-        # Narrow wings + low credit → low ROC
-        exp = date.today() + timedelta(days=30)
-        narrow_spec = build_iron_condor(
-            ticker="SPY", underlying_price=580.0,
-            short_put=579.0, long_put=578.0,
-            short_call=581.0, long_call=582.0,
-            expiration=exp.isoformat(),
-        )
-        income = compute_income_yield(narrow_spec, entry_credit=0.25, contracts=1)
+        income = compute_income_yield(spec, entry_credit=2.50, contracts=1)
+        assert income is not None, "compute_income_yield returned None for standard IC"
         result = check_margin_efficiency(income)
-        assert result.severity in (Severity.WARN, Severity.FAIL)
+        assert result.severity == Severity.WARN
 
     def test_result_shows_annualized_roc(self) -> None:
         spec = _ic_spec()
-        income = compute_income_yield(spec, entry_credit=1.50)
+        income = compute_income_yield(spec, entry_credit=3.00)
         assert income is not None, "compute_income_yield returned None for standard IC"
         result = check_margin_efficiency(income)
         assert result.value is not None   # annualized ROC %
