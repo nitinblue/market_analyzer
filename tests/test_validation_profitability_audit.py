@@ -1,0 +1,96 @@
+"""Tests for profitability audit checks."""
+from datetime import date, timedelta
+import pytest
+
+from market_analyzer.trade_spec_factory import build_iron_condor
+from market_analyzer.validation.models import Severity
+from market_analyzer.validation.profitability_audit import (
+    check_commission_drag,
+    check_fill_quality,
+    check_margin_efficiency,
+)
+from market_analyzer.trade_lifecycle import compute_income_yield
+
+
+def _ic_spec():
+    exp = date.today() + timedelta(days=30)
+    return build_iron_condor(
+        ticker="SPY", underlying_price=580.0,
+        short_put=570.0, long_put=565.0,
+        short_call=590.0, long_call=595.0,
+        expiration=exp.isoformat(),
+    )
+
+
+class TestCommissionDrag:
+    def test_healthy_credit_passes(self) -> None:
+        """$1.50 credit on 4-leg IC — fees are ~3.5% of credit."""
+        result = check_commission_drag(_ic_spec(), entry_credit=1.50)
+        assert result.severity == Severity.PASS
+        assert result.name == "commission_drag"
+
+    def test_thin_credit_warns(self) -> None:
+        """$0.60 credit — fees eat ~22% of credit."""
+        result = check_commission_drag(_ic_spec(), entry_credit=0.60)
+        assert result.severity == Severity.WARN
+
+    def test_microscopic_credit_fails(self) -> None:
+        """$0.20 credit on 4-leg IC — fees exceed credit entirely."""
+        result = check_commission_drag(_ic_spec(), entry_credit=0.20)
+        assert result.severity == Severity.FAIL
+
+    def test_result_includes_values(self) -> None:
+        result = check_commission_drag(_ic_spec(), entry_credit=1.50)
+        assert result.value is not None   # net credit after fees
+        assert result.threshold is not None  # commission drag amount
+
+
+class TestFillQuality:
+    def test_tight_spread_passes(self) -> None:
+        result = check_fill_quality(avg_bid_ask_spread_pct=0.8)
+        assert result.severity == Severity.PASS
+
+    def test_moderate_spread_warns(self) -> None:
+        result = check_fill_quality(avg_bid_ask_spread_pct=2.0)
+        assert result.severity == Severity.WARN
+
+    def test_wide_spread_fails(self) -> None:
+        result = check_fill_quality(avg_bid_ask_spread_pct=4.0)
+        assert result.severity == Severity.FAIL
+
+    def test_boundary_at_3pct(self) -> None:
+        at_boundary = check_fill_quality(avg_bid_ask_spread_pct=3.0)
+        above_boundary = check_fill_quality(avg_bid_ask_spread_pct=3.1)
+        assert at_boundary.severity == Severity.WARN
+        assert above_boundary.severity == Severity.FAIL
+
+
+class TestMarginEfficiency:
+    def test_good_roc_passes(self) -> None:
+        spec = _ic_spec()
+        income = compute_income_yield(spec, entry_credit=1.50, contracts=1)
+        assert income is not None, "compute_income_yield returned None for standard IC"
+        result = check_margin_efficiency(income)
+        assert result.severity == Severity.PASS
+
+    def test_marginal_roc_warns(self) -> None:
+        spec = _ic_spec()
+        # Narrow wings + low credit → low ROC
+        exp = date.today() + timedelta(days=30)
+        narrow_spec = build_iron_condor(
+            ticker="SPY", underlying_price=580.0,
+            short_put=579.0, long_put=578.0,
+            short_call=581.0, long_call=582.0,
+            expiration=exp.isoformat(),
+        )
+        income = compute_income_yield(narrow_spec, entry_credit=0.25, contracts=1)
+        result = check_margin_efficiency(income)
+        assert result.severity in (Severity.WARN, Severity.FAIL)
+
+    def test_result_shows_annualized_roc(self) -> None:
+        spec = _ic_spec()
+        income = compute_income_yield(spec, entry_credit=1.50)
+        assert income is not None, "compute_income_yield returned None for standard IC"
+        result = check_margin_efficiency(income)
+        assert result.value is not None   # annualized ROC %
+        assert "%" in result.message
