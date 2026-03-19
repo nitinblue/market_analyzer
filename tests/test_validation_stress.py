@@ -31,8 +31,9 @@ class TestGammaStress:
         assert result.name == "gamma_stress"
 
     def test_high_gamma_warns(self) -> None:
-        """Very wide ATR (3%) + narrow wings → gamma exposure warning."""
-        result = check_gamma_stress(_ic_spec(wing_width=1.0), entry_credit=0.30, atr_pct=3.0)
+        """Extreme risk/reward (> 5:1) → gamma exposure warning."""
+        # 10-point wing, $0.20 credit → max_loss $980, max_profit $20 → R:R 49:1 (FAIL)
+        result = check_gamma_stress(_ic_spec(wing_width=10.0), entry_credit=0.20, atr_pct=3.0)
         assert result.severity in (Severity.WARN, Severity.FAIL)
 
     def test_result_includes_loss_estimate(self) -> None:

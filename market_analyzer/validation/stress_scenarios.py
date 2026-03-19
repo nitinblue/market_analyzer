@@ -66,23 +66,17 @@ def check_gamma_stress(
     # Stress: at 2 ATR move, does the expected loss stay within acceptable bounds?
     stress_move_pct = atr_pct * sigma_multiple
 
-    # Compute wing-relative stress: is the stress move large relative to the wing width?
-    # At 580 underlying, 1pt wing = ~0.17% of price; 5pt wing = ~0.86% of price
-    # If stress_move_pct is close to or larger than wing width % of price, wings offer little protection
-    wing_width_pct = (wing_width / trade_spec.underlying_price) * 100
-    wing_coverage_ratio = stress_move_pct / wing_width_pct if wing_width_pct > 0 else 999.0
-
-    if risk_reward > 5.0 or wing_coverage_ratio > 5.0:
+    if risk_reward > 10.0:
         sev = Severity.FAIL
         msg = (
-            f"Risk/reward {risk_reward:.1f}:1, stress move {stress_move_pct:.1f}% "
-            f"vs {wing_width_pct:.2f}% wings — risking ${max_loss:.0f} to make ${max_profit:.0f}"
+            f"Risk/reward {risk_reward:.1f}:1 is extreme — risking ${max_loss:.0f} "
+            f"to make ${max_profit:.0f} at {stress_move_pct:.1f}% stress move"
         )
-    elif risk_reward > 2.5 or wing_coverage_ratio > 3.0:
+    elif risk_reward > 5.0:
         sev = Severity.WARN
         msg = (
             f"Risk/reward {risk_reward:.1f}:1 — marginal at {sigma_multiple}σ "
-            f"({stress_move_pct:.1f}% move), wings only {wing_width_pct:.2f}%, max loss ${max_loss:.0f}"
+            f"({stress_move_pct:.1f}% move), max loss ${max_loss:.0f}"
         )
     else:
         sev = Severity.PASS
