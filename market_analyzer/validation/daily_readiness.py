@@ -1,0 +1,220 @@
+"""Daily readiness and adversarial check orchestrators.
+
+run_daily_checks() — 7-check pre-trade validation.
+run_adversarial_checks() — 3-check stress test.
+
+Both return a ValidationReport that is consumed by the CLI and functional tests.
+"""
+from __future__ import annotations
+
+from datetime import date, time
+
+from market_analyzer.models.opportunity import TradeSpec
+from market_analyzer.trade_lifecycle import (
+    check_income_entry,
+    compute_income_yield,
+    estimate_pop,
+)
+from market_analyzer.validation.models import CheckResult, Severity, Suite, ValidationReport
+from market_analyzer.validation.profitability_audit import (
+    check_commission_drag,
+    check_fill_quality,
+    check_margin_efficiency,
+)
+from market_analyzer.validation.stress_scenarios import (
+    check_breakeven_spread,
+    check_gamma_stress,
+    check_vega_shock,
+)
+
+
+def run_daily_checks(
+    ticker: str,
+    trade_spec: TradeSpec,
+    entry_credit: float,
+    regime_id: int,
+    atr_pct: float,
+    current_price: float,
+    avg_bid_ask_spread_pct: float,
+    dte: int,
+    rsi: float,
+    iv_rank: float | None = None,
+    iv_percentile: float | None = None,
+    time_of_day: time | None = None,
+    contracts: int = 1,
+) -> ValidationReport:
+    """Run the 7-check daily pre-trade validation suite.
+
+    Checks (in order):
+      1. commission_drag    — fees vs credit
+      2. fill_quality       — bid-ask spread viability
+      3. margin_efficiency  — annualized ROC
+      4. pop_gate           — probability of profit >= 65%
+      5. ev_positive        — expected value is positive
+      6. entry_quality      — IV rank, DTE, RSI, regime confirmation
+      7. exit_discipline    — trade spec has profit target, stop loss, exit DTE
+
+    Args:
+        ticker: Underlying symbol.
+        trade_spec: The proposed trade.
+        entry_credit: Net credit per spread (dollars per share, e.g., 1.50).
+        regime_id: Current regime (1=R1, 2=R2, 3=R3, 4=R4).
+        atr_pct: ATR as % of underlying price.
+        current_price: Current underlying price.
+        avg_bid_ask_spread_pct: Average bid-ask spread of the options chain.
+        dte: Days to expiration of the front/target leg.
+        rsi: Current RSI value.
+        iv_rank: IV rank 0–100 (optional, improves POP accuracy).
+        iv_percentile: IV percentile 0–100 (optional).
+        time_of_day: Current time in ET (for entry window check).
+        contracts: Number of contracts for yield computation.
+    """
+    checks: list[CheckResult] = []
+
+    # 1. Commission drag
+    checks.append(check_commission_drag(trade_spec, entry_credit))
+
+    # 2. Fill quality
+    checks.append(check_fill_quality(avg_bid_ask_spread_pct))
+
+    # 3. Margin efficiency — informational in daily suite (FAIL → WARN, doesn't block trade)
+    income = compute_income_yield(trade_spec, entry_credit, contracts)
+    if income is not None:
+        margin_check = check_margin_efficiency(income)
+        if margin_check.severity == Severity.FAIL:
+            # Downgrade to WARN — low ROC is a flag but should not block an otherwise-valid trade
+            margin_check = CheckResult(
+                name=margin_check.name,
+                severity=Severity.WARN,
+                message=margin_check.message + " (informational — check wing width or credit size)",
+                value=margin_check.value,
+                threshold=margin_check.threshold,
+            )
+        checks.append(margin_check)
+    else:
+        checks.append(CheckResult(
+            name="margin_efficiency",
+            severity=Severity.WARN,
+            message="Cannot compute ROC — trade structure not supported by yield calculator",
+        ))
+
+    # 4 & 5. POP and EV
+    pop_estimate = estimate_pop(
+        trade_spec=trade_spec,
+        entry_price=entry_credit,
+        regime_id=regime_id,
+        atr_pct=atr_pct,
+        current_price=current_price,
+        contracts=contracts,
+        iv_rank=iv_rank,
+    )
+    if pop_estimate is not None:
+        # pop_pct is stored as a fraction (0.70 = 70%) — convert to percentage for display/compare
+        pop_pct = pop_estimate.pop_pct * 100.0
+        pop_sev = Severity.PASS if pop_pct >= 65.0 else (
+            Severity.WARN if pop_pct >= 55.0 else Severity.FAIL
+        )
+        checks.append(CheckResult(
+            name="pop_gate",
+            severity=pop_sev,
+            message=f"POP {pop_pct:.1f}% "
+                    f"({'≥' if pop_pct >= 65 else '<'} 65% threshold)",
+            value=round(pop_pct, 1),
+            threshold=65.0,
+        ))
+
+        ev = pop_estimate.expected_value
+        ev_sev = Severity.PASS if ev > 0 else (Severity.WARN if ev > -10 else Severity.FAIL)
+        checks.append(CheckResult(
+            name="ev_positive",
+            severity=ev_sev,
+            message=f"EV {'+' if ev >= 0 else ''}${ev:.0f} per contract "
+                    f"({'positive edge' if ev > 0 else 'negative edge — avoid'})",
+            value=round(ev, 0),
+            threshold=0.0,
+        ))
+    else:
+        checks.append(CheckResult(
+            name="pop_gate",
+            severity=Severity.WARN,
+            message="POP not computable for this structure — skip EV gate",
+        ))
+
+    # 6. Entry quality (IV rank, RSI, regime, DTE)
+    entry_check = check_income_entry(
+        iv_rank=iv_rank,
+        iv_percentile=iv_percentile,
+        dte=dte,
+        rsi=rsi,
+        atr_pct=atr_pct,
+        regime_id=regime_id,
+    )
+    entry_sev = Severity.PASS if entry_check.confirmed else (
+        Severity.WARN if entry_check.score >= 0.45 else Severity.FAIL
+    )
+    checks.append(CheckResult(
+        name="entry_quality",
+        severity=entry_sev,
+        message=entry_check.summary,
+        value=round(entry_check.score, 2),
+        threshold=0.60,
+    ))
+
+    # 7. Exit discipline — does the trade spec have an exit plan?
+    has_exit = (
+        trade_spec.profit_target_pct is not None
+        and trade_spec.stop_loss_pct is not None
+        and trade_spec.exit_dte is not None
+    )
+    exit_sev = Severity.PASS if has_exit else Severity.WARN
+    exit_msg = (
+        f"TP {trade_spec.profit_target_pct:.0%} | "
+        f"SL {trade_spec.stop_loss_pct}× | "
+        f"exit ≤{trade_spec.exit_dte} DTE"
+        if has_exit else "Trade spec missing exit rules — add profit_target_pct, stop_loss_pct, exit_dte"
+    )
+    checks.append(CheckResult(
+        name="exit_discipline",
+        severity=exit_sev,
+        message=exit_msg,
+    ))
+
+    return ValidationReport(
+        ticker=ticker,
+        suite=Suite.DAILY,
+        as_of=date.today(),
+        checks=checks,
+    )
+
+
+def run_adversarial_checks(
+    ticker: str,
+    trade_spec: TradeSpec,
+    entry_credit: float,
+    atr_pct: float,
+) -> ValidationReport:
+    """Run the 3-check adversarial stress test suite.
+
+    Checks:
+      1. gamma_stress     — max loss at 2σ move
+      2. vega_shock       — IV spike impact
+      3. breakeven_spread — edge survival at natural fills
+
+    Args:
+        ticker: Underlying symbol.
+        trade_spec: The proposed trade.
+        entry_credit: Net credit per spread (dollars per share).
+        atr_pct: ATR as % of underlying price.
+    """
+    checks = [
+        check_gamma_stress(trade_spec, entry_credit, atr_pct),
+        check_vega_shock(trade_spec, entry_credit),
+        check_breakeven_spread(trade_spec, entry_credit, atr_pct),
+    ]
+
+    return ValidationReport(
+        ticker=ticker,
+        suite=Suite.ADVERSARIAL,
+        as_of=date.today(),
+        checks=checks,
+    )
