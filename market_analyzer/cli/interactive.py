@@ -1633,6 +1633,175 @@ Requires --broker connection."""
         except Exception as exc:
             print(f"{_styled('ERROR:', 'red')} {exc}")
 
+    def do_validate(self, arg: str) -> None:
+        """Run profitability validation using live broker data.
+
+        Usage:
+            validate TICKER [--suite daily|adversarial|full]
+            validate SPY
+            validate SPY --suite adversarial
+            validate SPY --suite full
+
+        Suites:
+            daily       7-check pre-trade validation (default)
+                        commission_drag, fill_quality, margin_efficiency,
+                        pop_gate, ev_positive, entry_quality, exit_discipline
+            adversarial Stress tests: gamma_stress, vega_shock, breakeven_spread
+            full        Both suites combined (10 checks)
+
+        Data sources:
+            Regime, ATR, RSI      — yfinance OHLCV (always available)
+            Vol surface, spread   — yfinance options chain (always available)
+            TradeSpec strikes     — assess_iron_condor() with real vol + levels
+            Entry credit          — DXLink real mid prices (broker required)
+                                    Falls back to IV-based estimate if no broker.
+            IV rank               — TastyTrade REST API (broker required)
+
+        Output is MCP-consumable: structured PASS/WARN/FAIL per check.
+        Run pre-market before trading.
+        """
+        from market_analyzer.models.opportunity import LegAction, Verdict
+        from market_analyzer.opportunity.option_plays.iron_condor import assess_iron_condor
+        from market_analyzer.validation import run_adversarial_checks, run_daily_checks
+        from market_analyzer.validation.models import Severity
+
+        # ── Argument parsing ──────────────────────────────────────────────────
+        parts = arg.strip().split()
+        if not parts or parts[0].startswith("-"):
+            print("Usage: validate TICKER [--suite daily|adversarial|full]")
+            return
+
+        ticker = parts[0].upper()
+        suite_arg = "daily"
+        for i, p in enumerate(parts[1:], 1):
+            if p == "--suite" and i + 1 < len(parts):
+                suite_arg = parts[i + 1]
+
+        if suite_arg not in ("daily", "adversarial", "full"):
+            print(f"Unknown suite '{suite_arg}'. Use: daily, adversarial, full")
+            return
+
+        try:
+            ma = self._get_ma()
+
+            # ── Step 1: Fetch real market data ────────────────────────────────
+            regime = ma.regime.detect(ticker)
+            tech   = ma.technicals.snapshot(ticker)
+            vol    = ma.vol_surface.compute(ticker)   # VolatilitySurface | None
+
+            regime_id     = int(regime.regime)
+            current_price = tech.current_price
+            atr_pct       = tech.atr_pct
+            rsi           = tech.rsi.value
+            avg_spread_pct = vol.avg_bid_ask_spread_pct if vol else 2.0
+
+            # IV rank from broker metrics (None if not connected)
+            metrics  = ma.quotes.get_metrics(ticker) if ma.quotes else None
+            iv_rank  = metrics.iv_rank if metrics else None
+
+            _print_header(f"VALIDATION — {ticker} — {suite_arg.upper()} SUITE")
+
+            # ── Step 2: Run assessor → real TradeSpec ─────────────────────────
+            ic_result = assess_iron_condor(ticker, regime, tech, vol)
+
+            if ic_result.verdict == Verdict.NO_GO:
+                stop_msg = ic_result.hard_stops[0].description if ic_result.hard_stops else "hard stop"
+                print(f"  {_styled('✗ FAIL', 'red')}  {'assessor_gate':<22s}  {stop_msg}")
+                print()
+                print(f"  {_styled('NOT READY', 'red')}  (hard stopped — no trade possible in current regime)")
+                print(f"  Regime: R{regime_id} | ATR: {atr_pct:.2f}% | RSI: {rsi:.0f}")
+                return
+
+            spec = ic_result.trade_spec
+            if spec is None:
+                print(f"  {_styled('ERROR:', 'red')} Assessor returned GO but no TradeSpec")
+                return
+
+            # ── Step 3: Get real entry credit from DXLink ─────────────────────
+            entry_credit: float | None = None
+            credit_source = "none"
+
+            if ma.quotes and ma.quotes.has_broker:
+                try:
+                    leg_quotes = ma.quotes.get_leg_quotes(spec.legs)
+                    if leg_quotes and len(leg_quotes) == len(spec.legs):
+                        entry_credit = sum(
+                            q.mid * (1 if leg.action == LegAction.SELL_TO_OPEN else -1)
+                            for leg, q in zip(spec.legs, leg_quotes)
+                            if q is not None and q.mid is not None
+                        )
+                        credit_source = f"DXLink ({ma.quotes.source})"
+                except Exception:
+                    pass  # fall through to estimate
+
+            if entry_credit is None or entry_credit <= 0:
+                # Fallback: estimate from IV — approximate IC credit ≈ front_iv × price × 0.05
+                front_iv = vol.front_iv if vol else 0.20
+                entry_credit = round(front_iv * current_price * 0.05, 2)
+                credit_source = "IV estimate (no broker quotes)"
+                print(f"  {_styled('⚠ WARN', 'yellow')}  {'broker_quotes':<22s}  "
+                      f"No live quotes — using credit estimate ${entry_credit:.2f} ({credit_source})")
+
+            # ── Step 4: Run validation with real data ─────────────────────────
+            reports = []
+
+            if suite_arg in ("daily", "full"):
+                report = run_daily_checks(
+                    ticker=ticker,
+                    trade_spec=spec,
+                    entry_credit=entry_credit,
+                    regime_id=regime_id,
+                    atr_pct=atr_pct,
+                    current_price=current_price,
+                    avg_bid_ask_spread_pct=avg_spread_pct,
+                    dte=spec.target_dte,
+                    rsi=rsi,
+                    iv_rank=iv_rank,
+                    iv_percentile=metrics.iv_percentile if metrics else None,
+                )
+                reports.append(report)
+
+            if suite_arg in ("adversarial", "full"):
+                report_adv = run_adversarial_checks(
+                    ticker=ticker,
+                    trade_spec=spec,
+                    entry_credit=entry_credit,
+                    atr_pct=atr_pct,
+                )
+                reports.append(report_adv)
+
+            # ── Step 5: Display results ────────────────────────────────────────
+            for report in reports:
+                if len(reports) > 1:
+                    print(f"\n  [{report.suite.upper()}]")
+                for check in report.checks:
+                    icon  = "✓" if check.severity == Severity.PASS else (
+                            "⚠" if check.severity == Severity.WARN else "✗")
+                    color = "green" if check.severity == Severity.PASS else (
+                            "yellow" if check.severity == Severity.WARN else "red")
+                    label = _styled(f"{icon} {check.severity.upper():4s}", color)
+                    print(f"  {label}  {check.name:<22s}  {check.message}")
+
+            print()
+            all_checks = [c for r in reports for c in r.checks]
+            passed   = sum(1 for c in all_checks if c.severity == Severity.PASS)
+            warnings = sum(1 for c in all_checks if c.severity == Severity.WARN)
+            failures = sum(1 for c in all_checks if c.severity == Severity.FAIL)
+            is_ready = failures == 0
+
+            status_text  = "READY TO TRADE" if is_ready else "NOT READY"
+            status_color = "green" if is_ready else "red"
+            print("  " + "─" * 60)
+            print(f"  {_styled(status_text, status_color)}  "
+                  f"({passed}/{len(all_checks)} passed, {warnings} warnings, {failures} failures)")
+            print(f"  Regime: R{regime_id} ({regime.confidence:.0%}) | "
+                  f"ATR: {atr_pct:.2f}% | RSI: {rsi:.0f} | "
+                  f"IV Rank: {f'{iv_rank:.0f}' if iv_rank else 'N/A'} | "
+                  f"Credit: ${entry_credit:.2f} [{credit_source}]")
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+
     def do_parse(self, arg: str) -> None:
         """Parse DXLink symbols into a TradeSpec.\nUsage: parse .GLD260417P455 .GLD260417P450 STO BTO [PRICE]\n  Symbols first, then actions (STO/BTO) in same order, optional price last."""
         parts = arg.strip().split()
@@ -2507,7 +2676,7 @@ Requires --broker connection."""
             from market_analyzer.risk import (
                 PortfolioPosition,
                 GreeksLimits,
-                compute_portfolio_var,
+                estimate_portfolio_loss,
                 check_portfolio_greeks,
                 check_strategy_concentration,
                 check_directional_concentration,
@@ -2608,9 +2777,9 @@ Requires --broker connection."""
             print(f"    Breaker:    {dd.circuit_breaker_pct:.0%} "
                   f"({'TRIGGERED' if dd.is_triggered else 'OK'})")
 
-            # Expected Loss (ATR-based — not VaR)
-            if dashboard.var:
-                v = dashboard.var
+            # Expected Loss (ATR-based)
+            if dashboard.expected_loss:
+                v = dashboard.expected_loss
                 loss_color = "red" if v.loss_pct_of_nlv > 5 else ("yellow" if v.loss_pct_of_nlv > 2 else "green")
                 print(f"\n  {_styled('Expected Loss (ATR-based)', 'bold')}")
                 print(f"    1-day expected:  {_styled(f'${v.expected_loss_1d:,.0f}', loss_color)} "
