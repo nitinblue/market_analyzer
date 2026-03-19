@@ -77,20 +77,10 @@ def run_daily_checks(
     # 2. Fill quality
     checks.append(check_fill_quality(avg_bid_ask_spread_pct))
 
-    # 3. Margin efficiency — informational in daily suite (FAIL → WARN, doesn't block trade)
+    # 3. Margin efficiency
     income = compute_income_yield(trade_spec, entry_credit, contracts)
     if income is not None:
-        margin_check = check_margin_efficiency(income)
-        if margin_check.severity == Severity.FAIL:
-            # Downgrade to WARN — low ROC is a flag but should not block an otherwise-valid trade
-            margin_check = CheckResult(
-                name=margin_check.name,
-                severity=Severity.WARN,
-                message=margin_check.message + " (informational — check wing width or credit size)",
-                value=margin_check.value,
-                threshold=margin_check.threshold,
-            )
-        checks.append(margin_check)
+        checks.append(check_margin_efficiency(income))
     else:
         checks.append(CheckResult(
             name="margin_efficiency",

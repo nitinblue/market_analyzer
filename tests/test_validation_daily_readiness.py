@@ -39,11 +39,11 @@ class TestRunDailyChecks:
         assert len(report.checks) >= 5
 
     def test_ideal_conditions_is_ready(self) -> None:
-        """R1 + good IV + centered RSI + tight spread → READY."""
+        """R1 + good IV + centered RSI + tight spread + good credit → READY."""
         report = run_daily_checks(
             ticker="SPY",
             trade_spec=_ic_spec(),
-            entry_credit=1.50,
+            entry_credit=3.00,   # $3.00 credit → 18% annualized ROC → PASS
             regime_id=1,
             atr_pct=1.0,
             current_price=580.0,
