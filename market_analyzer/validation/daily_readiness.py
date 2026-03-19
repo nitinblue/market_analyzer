@@ -7,7 +7,7 @@ Both return a ValidationReport that is consumed by the CLI and functional tests.
 """
 from __future__ import annotations
 
-from datetime import date, time
+from datetime import date
 
 from market_analyzer.models.opportunity import TradeSpec
 from market_analyzer.trade_lifecycle import (
@@ -40,7 +40,6 @@ def run_daily_checks(
     rsi: float,
     iv_rank: float | None = None,
     iv_percentile: float | None = None,
-    time_of_day: time | None = None,
     contracts: int = 1,
 ) -> ValidationReport:
     """Run the 7-check daily pre-trade validation suite.
@@ -66,7 +65,6 @@ def run_daily_checks(
         rsi: Current RSI value.
         iv_rank: IV rank 0–100 (optional, improves POP accuracy).
         iv_percentile: IV percentile 0–100 (optional).
-        time_of_day: Current time in ET (for entry window check).
         contracts: Number of contracts for yield computation.
     """
     checks: list[CheckResult] = []
@@ -127,7 +125,12 @@ def run_daily_checks(
         checks.append(CheckResult(
             name="pop_gate",
             severity=Severity.WARN,
-            message="POP not computable for this structure — skip EV gate",
+            message="POP not computable for this structure",
+        ))
+        checks.append(CheckResult(
+            name="ev_positive",
+            severity=Severity.WARN,
+            message="EV not computable — POP unavailable for this structure",
         ))
 
     # 6. Entry quality (IV rank, RSI, regime, DTE)
