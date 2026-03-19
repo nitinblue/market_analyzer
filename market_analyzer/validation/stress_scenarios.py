@@ -8,20 +8,15 @@ from __future__ import annotations
 from market_analyzer.models.opportunity import StructureType, TradeSpec
 from market_analyzer.validation.models import CheckResult, Severity
 
-# Structures that are short vega (harmed by IV spikes)
-_SHORT_VEGA_STRUCTURES = {
-    StructureType.IRON_CONDOR,
-    StructureType.IRON_BUTTERFLY,
-    StructureType.CREDIT_SPREAD,
-    StructureType.STRANGLE,
-    StructureType.STRADDLE,
-}
-
-# Structures that are long vega (helped by IV spikes)
+# Structures that are long vega (benefit from IV spikes)
 _LONG_VEGA_STRUCTURES = {
     StructureType.CALENDAR,
     StructureType.DOUBLE_CALENDAR,
     StructureType.DIAGONAL,
+    StructureType.DEBIT_SPREAD,
+    StructureType.LONG_OPTION,
+    StructureType.IRON_MAN,
+    StructureType.PMCC,
 }
 
 
