@@ -5033,6 +5033,85 @@ Requires --broker connection."""
         except Exception as exc:
             print(f"{_styled('ERROR:', 'red')} {exc}")
 
+    def do_optimal_dte(self, arg: str) -> None:
+        """Find optimal DTE for a ticker: optimal_dte TICKER
+
+        Compares theta/IV ratio across expirations and recommends the best DTE
+        for the current regime.
+        """
+        ticker = arg.strip().upper() or "SPY"
+        try:
+            regime = self.ma.regime.detect(ticker)
+            vol = self.ma.vol_surface.compute(ticker)
+            if vol is None:
+                print(f"No vol surface data for {ticker}")
+                return
+
+            from market_analyzer.features.dte_optimizer import select_optimal_dte
+            result = select_optimal_dte(vol, regime.regime.value, "iron_condor")
+
+            print(f"\nOPTIMAL DTE — {ticker} — R{regime.regime.value}")
+            print("-" * 50)
+            print(f"Recommended: {result.recommended_dte} DTE ({result.recommended_expiration})")
+            print(f"IV at expiry: {result.iv_at_expiration:.1%}")
+            print(f"Theta proxy:  {result.theta_proxy:.4f}")
+            print(f"Regime pref:  {result.regime_preference}")
+            print()
+            if result.all_candidates:
+                print("All candidates:")
+                for c in result.all_candidates:
+                    marker = " <-- BEST" if c.get("dte") == result.recommended_dte else ""
+                    print(f"  {c.get('dte', '?'):3d} DTE | IV {c.get('iv', 0):.1%} | theta_proxy {c.get('theta_proxy', 0):.4f}{marker}")
+            print("-" * 50)
+        except Exception as e:
+            print(f"Error: {e}")
+
+    def do_exit_intelligence(self, arg: str) -> None:
+        """Exit intelligence for a hypothetical position: exit_intelligence TICKER [DAYS_HELD] [PROFIT_PCT]
+
+        Shows regime stop, time-adjusted target, and theta decay analysis.
+
+        Examples:
+            exit_intelligence SPY
+            exit_intelligence SPY 10 0.30
+        """
+        parts = arg.strip().split()
+        ticker = parts[0].upper() if parts else "SPY"
+        days_held = int(parts[1]) if len(parts) > 1 else 10
+        profit_pct = float(parts[2]) if len(parts) > 2 else 0.25
+
+        try:
+            regime = self.ma.regime.detect(ticker)
+
+            from market_analyzer.features.exit_intelligence import (
+                compute_regime_stop,
+                compute_time_adjusted_target,
+                compute_remaining_theta_value,
+            )
+
+            # Regime stop
+            stop = compute_regime_stop(regime.regime.value, "iron_condor")
+            print(f"\nEXIT INTELLIGENCE — {ticker} — R{regime.regime.value}")
+            print("-" * 50)
+            print(f"Regime Stop:    {stop.base_multiplier:.1f}x credit ({stop.rationale})")
+
+            # Time-adjusted target (assuming 30 DTE entry)
+            dte_at_entry = 30
+            target = compute_time_adjusted_target(days_held, dte_at_entry, profit_pct)
+            if target.acceleration_reason:
+                print(f"Profit Target:  {target.adjusted_target_pct:.0%} (was {target.original_target_pct:.0%}) — {target.acceleration_reason}")
+            else:
+                print(f"Profit Target:  {target.adjusted_target_pct:.0%} (standard, no acceleration)")
+
+            # Theta decay
+            dte_remaining = max(0, dte_at_entry - days_held)
+            theta = compute_remaining_theta_value(dte_remaining, dte_at_entry, profit_pct)
+            print(f"Theta Status:   {theta.recommendation.upper()} — {theta.rationale}")
+
+            print("-" * 50)
+        except Exception as e:
+            print(f"Error: {e}")
+
     def do_quit(self, arg: str) -> bool:
         """Exit the REPL."""
         print("Goodbye.")

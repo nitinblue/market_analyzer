@@ -396,3 +396,36 @@ class TestMonitorExitWithTimeAdjustedTarget:
         target_signals = [s for s in result.signals if s.rule == "profit_target"]
         assert len(target_signals) == 1
         assert target_signals[0].triggered
+
+
+class TestReformExports:
+    def test_exit_models_importable(self) -> None:
+        from market_analyzer import RegimeStop, TimeAdjustedTarget, ThetaDecayResult
+        assert RegimeStop is not None
+
+    def test_exit_functions_importable(self) -> None:
+        from market_analyzer import (
+            compute_regime_stop, compute_time_adjusted_target, compute_remaining_theta_value,
+        )
+        assert callable(compute_regime_stop)
+
+    def test_dte_optimizer_importable(self) -> None:
+        from market_analyzer import DTERecommendation, select_optimal_dte
+        assert callable(select_optimal_dte)
+
+    def test_sizing_extensions_importable(self) -> None:
+        from market_analyzer import (
+            CorrelationAdjustment, RegimeMarginEstimate,
+            compute_pairwise_correlation, adjust_kelly_for_correlation,
+            compute_regime_adjusted_bp, compute_position_size,
+            analyze_adjustment_effectiveness,
+        )
+        assert callable(compute_position_size)
+
+    def test_iv_rank_importable(self) -> None:
+        from market_analyzer import IVRankQuality, compute_iv_rank_quality
+        assert callable(compute_iv_rank_quality)
+
+    def test_adjustment_tracking_importable(self) -> None:
+        from market_analyzer import AdjustmentOutcome, AdjustmentEffectiveness
+        assert AdjustmentOutcome is not None

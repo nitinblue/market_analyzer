@@ -442,6 +442,45 @@ from market_analyzer.hedging import (
     assess_hedge,
 )
 
+# Exit intelligence (regime stops, time-adjusted targets, theta decay)
+from market_analyzer.models.exit import (
+    RegimeStop,
+    TimeAdjustedTarget,
+    ThetaDecayResult,
+)
+from market_analyzer.features.exit_intelligence import (
+    compute_regime_stop,
+    compute_time_adjusted_target,
+    compute_remaining_theta_value,
+)
+
+# DTE optimizer
+from market_analyzer.features.dte_optimizer import (
+    DTERecommendation,
+    select_optimal_dte,
+)
+
+# IV rank quality (entry gating)
+from market_analyzer.models.entry import IVRankQuality
+from market_analyzer.features.entry_levels import compute_iv_rank_quality
+
+# Adjustment outcome tracking
+from market_analyzer.models.adjustment import (
+    AdjustmentOutcome,
+    AdjustmentEffectiveness,
+)
+
+# Extended position sizing (correlation + regime margin)
+from market_analyzer.features.position_sizing import (
+    CorrelationAdjustment,
+    RegimeMarginEstimate,
+    compute_pairwise_correlation,
+    adjust_kelly_for_correlation,
+    compute_regime_adjusted_bp,
+    compute_position_size,
+    analyze_adjustment_effectiveness,
+)
+
 # Cross-market correlation
 from market_analyzer.cross_market import (
     CrossMarketAnalysis,
@@ -998,4 +1037,28 @@ __all__ = [
     "compare_leap_vs_stock",
     "analyze_wheel_strategy",
     "analyze_core_holding_entry",
+    # Exit intelligence (reform)
+    "RegimeStop",
+    "TimeAdjustedTarget",
+    "ThetaDecayResult",
+    "compute_regime_stop",
+    "compute_time_adjusted_target",
+    "compute_remaining_theta_value",
+    # DTE optimizer (reform)
+    "DTERecommendation",
+    "select_optimal_dte",
+    # IV rank quality (reform)
+    "IVRankQuality",
+    "compute_iv_rank_quality",
+    # Adjustment outcome tracking (reform)
+    "AdjustmentOutcome",
+    "AdjustmentEffectiveness",
+    # Extended position sizing (reform)
+    "CorrelationAdjustment",
+    "RegimeMarginEstimate",
+    "compute_pairwise_correlation",
+    "adjust_kelly_for_correlation",
+    "compute_regime_adjusted_bp",
+    "compute_position_size",
+    "analyze_adjustment_effectiveness",
 ]
