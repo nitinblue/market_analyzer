@@ -625,9 +625,9 @@ Requires --broker connection."""
             ma = self._get_ma()
             if not ma.quotes.has_broker:
                 print(_styled(
-                    "WARNING: No broker connected — options pricing unavailable. "
-                    "Ranking uses historical data only (no live quotes/Greeks).\n"
-                    "For full data: analyzer-cli --broker\n", "yellow",
+                    "  *** ESTIMATED DATA — No broker connected. Credits, POP, and sizing are approximate. ***\n"
+                    "  *** Connect broker (--broker) for real DXLink quotes and accurate analysis.         ***",
+                    "yellow",
                 ))
             result = ma.ranking.rank(tickers, debug=debug)
             source = ma.quotes.source
@@ -1684,6 +1684,13 @@ Requires --broker connection."""
         try:
             ma = self._get_ma()
 
+            if not getattr(ma, 'market_data', None):
+                print(_styled(
+                    "  *** ESTIMATED DATA — No broker connected. Credits, POP, and sizing are approximate. ***\n"
+                    "  *** Connect broker (--broker) for real DXLink quotes and accurate analysis.         ***",
+                    "yellow",
+                ))
+
             # ── Step 1: Fetch real market data ────────────────────────────────
             regime = ma.regime.detect(ticker)
             tech   = ma.technicals.snapshot(ticker)
@@ -1807,6 +1814,30 @@ Requires --broker connection."""
                   f"IV Rank: {f'{iv_rank:.0f}' if iv_rank else 'N/A'} | "
                   f"Credit: ${entry_credit:.2f} [{credit_source}]")
 
+            # ── No-trade playbook ─────────────────────────────────────────────
+            if not is_ready:
+                print(f"\n  {_styled('NO TRADE PLAYBOOK:', 'yellow')}")
+                # Suggest pullback alert levels
+                try:
+                    from market_analyzer.features.entry_levels import compute_pullback_levels
+                    levels = ma.levels.analyze(ticker)
+                    pullbacks = compute_pullback_levels(current_price, levels, atr=current_price * atr_pct / 100)
+                    if pullbacks:
+                        best = pullbacks[0]
+                        print(f"    Set alert at ${best.alert_price:.0f} ({best.level_source}) — "
+                              f"+{best.roc_improvement_pct:.1f}% ROC improvement at that level")
+                    else:
+                        print(f"    No nearby S/R pullback levels within 2 ATR — wait for IV expansion")
+                except Exception:
+                    pass  # Levels are optional — don't let this block the playbook
+                print(f"    Re-check after 14:00 ET for intraday stabilization")
+                if not (ma.quotes and ma.quotes.has_broker):
+                    print(f"    Connect broker (--broker) for real quotes — estimated credits may be off by 2-3x")
+                # Show failing check names for quick diagnosis
+                fail_names = [c.name for c in all_checks if c.severity == Severity.FAIL]
+                if fail_names:
+                    print(f"    Blocking checks: {', '.join(fail_names)}")
+
         except Exception as exc:
             print(f"{_styled('ERROR:', 'red')} {exc}")
 
@@ -1824,6 +1855,14 @@ Requires --broker connection."""
 
         try:
             ma = self._get_ma()
+
+            if not getattr(ma, 'market_data', None):
+                print(_styled(
+                    "  *** ESTIMATED DATA — No broker connected. Credits, POP, and sizing are approximate. ***\n"
+                    "  *** Connect broker (--broker) for real DXLink quotes and accurate analysis.         ***",
+                    "yellow",
+                ))
+
             regime = ma.regime.detect(ticker)
             tech = ma.technicals.snapshot(ticker)
             levels = ma.levels.analyze(ticker)
@@ -2348,6 +2387,14 @@ Requires --broker connection."""
 
         try:
             ma = self._get_ma()
+
+            if not getattr(ma, 'market_data', None):
+                print(_styled(
+                    "  *** ESTIMATED DATA — No broker connected. Credits, POP, and sizing are approximate. ***\n"
+                    "  *** Connect broker (--broker) for real DXLink quotes and accurate analysis.         ***",
+                    "yellow",
+                ))
+
             regime = ma.regime.detect(ticker)
             tech = ma.technicals.snapshot(ticker)
             vol = ma.vol_surface.compute(ticker)

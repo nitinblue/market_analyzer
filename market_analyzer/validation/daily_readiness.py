@@ -82,6 +82,29 @@ def run_daily_checks(
     """
     checks: list[CheckResult] = []
 
+    # 0. Minimum credit pre-filter — must be checked first before any other analysis.
+    # Below $0.50/contract the trade is not viable after commissions (~$1.30/contract
+    # round-trip on a 2-leg spread). This prevents nonsense trades from passing later gates.
+    _MIN_VIABLE_CREDIT = 0.50
+    if entry_credit < _MIN_VIABLE_CREDIT:
+        return ValidationReport(
+            ticker=ticker,
+            suite=Suite.DAILY,
+            as_of=date.today(),
+            checks=[
+                CheckResult(
+                    name="minimum_credit",
+                    severity=Severity.FAIL,
+                    message=(
+                        f"Credit too low (${entry_credit:.2f}) — minimum ${_MIN_VIABLE_CREDIT:.2f} "
+                        f"for viability after commissions"
+                    ),
+                    value=round(entry_credit, 2),
+                    threshold=_MIN_VIABLE_CREDIT,
+                )
+            ],
+        )
+
     # 1. Commission drag
     checks.append(check_commission_drag(trade_spec, entry_credit))
 

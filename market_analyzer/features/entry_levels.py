@@ -224,6 +224,29 @@ def score_entry_level(
         + level_score * 0.10
     )
 
+    # Momentum safety: if MACD histogram is extreme against the entry direction,
+    # cap the score to prevent "catching a falling knife" when selling is accelerating.
+    macd_hist = technicals.macd.histogram if technicals.macd else 0.0
+    atr_for_norm = atr if atr > 0 else 1.0
+    momentum_z = abs(macd_hist) / atr_for_norm
+    momentum_cap = 1.0
+    momentum_override_note: str | None = None
+
+    if direction == "bullish" and macd_hist < 0 and momentum_z > 1.0:
+        # Strong selling momentum — cap score at "wait" threshold
+        momentum_cap = 0.65
+        momentum_override_note = (
+            f"Momentum override: MACD hist {macd_hist:.2f} ({momentum_z:.1f}x ATR) — selling accelerating"
+        )
+    elif direction == "bearish" and macd_hist > 0 and momentum_z > 1.0:
+        # Strong buying momentum — cap score at "wait" threshold
+        momentum_cap = 0.65
+        momentum_override_note = (
+            f"Momentum override: MACD hist {macd_hist:.2f} ({momentum_z:.1f}x ATR) — buying accelerating"
+        )
+
+    overall = min(overall, momentum_cap)
+
     if overall >= 0.70:
         action = "enter_now"
     elif overall >= 0.40:
@@ -232,6 +255,8 @@ def score_entry_level(
         action = "not_yet"
 
     rationale_parts = []
+    if momentum_override_note:
+        rationale_parts.append(momentum_override_note)
     if rsi_score > 0.5:
         rationale_parts.append(f"RSI {rsi:.0f} extremity ({rsi_score:.2f})")
     if bb_score > 0.5:
