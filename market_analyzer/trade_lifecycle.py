@@ -22,7 +22,7 @@ no data fetching. eTrading provides the data, market_analyzer computes the answe
 from __future__ import annotations
 
 import math
-from datetime import date, time as dt_time
+from datetime import date, datetime, time as dt_time
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
@@ -83,12 +83,18 @@ def compute_income_yield(
     wing = trade_spec.wing_width_points
     if not wing or wing <= 0:
         return None
+    if entry_credit <= 0:
+        # Filled at debit on a credit structure — entry is invalid, never compute positive yield
+        return None
 
     lot_size = trade_spec.lot_size
     max_profit = entry_credit * lot_size * contracts
     max_loss = (wing - entry_credit) * lot_size * contracts
+    if max_loss <= 0:
+        # Credit exceeds wing width — data error, reject
+        return None
     credit_to_width = entry_credit / wing
-    roc = max_profit / max_loss if max_loss > 0 else 0.0
+    roc = max_profit / max_loss
 
     dte = trade_spec.target_dte or 30
     annual_factor = 365.0 / max(dte, 1)
@@ -687,10 +693,16 @@ def estimate_pop(
     st = trade_spec.structure_type or ""
     dte = trade_spec.target_dte or 30
 
+    # Regime-adjusted ATR→sigma conversion.
+    # In MR regimes ATR is compressed relative to true sigma; in trending regimes it's inflated.
+    # Using a fixed /1.25 overstates POP in R4 (danger) and understates it in R1 (overly conservative).
+    _ATR_SIGMA_FACTORS = {1: 1.15, 2: 1.25, 3: 1.30, 4: 1.40}
+    _atr_sigma_factor = _ATR_SIGMA_FACTORS.get(regime_id, 1.25)
+
     if st in ("iron_condor", "iron_butterfly", "credit_spread", "strangle", "straddle"):
         # Credit trade: profit if price stays between breakevens
-        # ATR% is daily. Convert to 1-sigma via ATR/1.25 (ATR ≈ 1.25σ for normal dist)
-        daily_sigma = (atr_pct / 100.0) / 1.25
+        # ATR% is daily. Convert to 1-sigma via regime-adjusted factor.
+        daily_sigma = (atr_pct / 100.0) / _atr_sigma_factor
         # IV rank adjustment: elevated IV (rank > 50) widens expected moves,
         # compressed IV (rank < 50) narrows them
         if iv_rank is not None:
@@ -778,7 +790,7 @@ def estimate_pop(
         if not long_legs:
             return None
 
-        daily_sigma = (atr_pct / 100.0) / 1.25
+        daily_sigma = (atr_pct / 100.0) / _atr_sigma_factor  # regime-adjusted (same as credit branch)
         # IV rank adjustment (same as credit branch)
         if iv_rank is not None:
             iv_factor = 0.7 + (iv_rank / 100) * 0.6  # Range: 0.7 to 1.3
@@ -803,9 +815,7 @@ def estimate_pop(
         pop = max(0.0, min(1.0, pop))
 
         lot_size = trade_spec.lot_size
-        max_profit = ((trade_spec.wing_width_points or entry_price) - entry_price) * lot_size * contracts
         max_loss = entry_price * lot_size * contracts
-        ev = pop * max_profit - (1 - pop) * max_loss
 
         gaps: list[DataGap] = []
         if iv_rank is None:
@@ -815,6 +825,31 @@ def estimate_pop(
                 impact="medium",
                 affects="POP estimate may be 10-15% off without IV calibration",
             ))
+
+        if not trade_spec.wing_width_points:
+            # Cannot compute max_profit without wing width — return degraded result
+            gaps.append(DataGap(
+                field="max_profit",
+                reason="wing_width_points not set on TradeSpec",
+                impact="high",
+                affects="EV, R:R, and trade quality score are unavailable",
+            ))
+            return POPEstimate(
+                pop_pct=round(pop, 4),
+                expected_value=0.0,
+                max_profit=0.0,
+                max_loss=round(max_loss, 2),
+                risk_reward_ratio=99.0,
+                trade_quality="poor",
+                trade_quality_score=0.0,
+                method="regime_historical",
+                regime_id=regime_id,
+                notes=f"Directional: needs ${adjusted_move:.1f} move to profit — EV unavailable (no wing width)",
+                data_gaps=gaps,
+            )
+
+        max_profit = (trade_spec.wing_width_points - entry_price) * lot_size * contracts
+        ev = pop * max_profit - (1 - pop) * max_loss
 
         rr = round(max_loss / max_profit, 2) if max_profit > 0 else 99.0
         quality, qscore = _trade_quality(pop, ev, rr, max_profit)
@@ -968,7 +1003,7 @@ def check_income_entry(
     total_weight += w
 
     score = total_score / total_weight if total_weight > 0 else 0.0
-    confirmed = score >= 0.60 and regime_id in (1, 2, 3)
+    confirmed = score >= 0.60 and regime_id in (1, 2)  # R3/R4 trending — not income-safe
 
     failed = [c["name"] for c in conditions if not c["passed"]]
     if confirmed:
@@ -1034,6 +1069,9 @@ def monitor_exit_conditions(
     exit_dte: int | None = None,
     time_of_day: dt_time | None = None,
     lot_size: int = 100,
+    regime_stop_multiplier: float | None = None,
+    days_held: int | None = None,
+    dte_at_entry: int | None = None,
 ) -> ExitMonitorResult:
     """Check all exit conditions for an open trade.
 
@@ -1065,38 +1103,57 @@ def monitor_exit_conditions(
         pnl_pct = profit_per / entry_price if entry_price > 0 else 0
         pnl_dollars = profit_per * lot_size * contracts
 
+        # Time-adjusted profit target if holding period data provided
+        effective_target = profit_target_pct
+        target_source = "fixed"
+        if (days_held is not None and dte_at_entry is not None
+                and effective_target is not None and dte_at_entry > 0):
+            from market_analyzer.features.exit_intelligence import compute_time_adjusted_target
+            time_adj = compute_time_adjusted_target(
+                days_held=days_held, dte_at_entry=dte_at_entry,
+                current_profit_pct=pnl_pct, original_target_pct=effective_target,
+            )
+            if time_adj.acceleration_reason is not None:
+                effective_target = time_adj.adjusted_target_pct
+                target_source = time_adj.acceleration_reason
+
         # Profit target
-        if profit_target_pct is not None:
-            triggered = pnl_pct >= profit_target_pct
-            approaching = pnl_pct >= profit_target_pct * 0.85
+        if effective_target is not None:
+            triggered = pnl_pct >= effective_target
+            approaching = pnl_pct >= effective_target * 0.85
             signals.append(ExitSignal(
                 rule="profit_target",
                 triggered=triggered,
                 current_value=f"{pnl_pct:.0%} ({pnl_dollars:+.0f}$)",
-                threshold=f"{profit_target_pct:.0%}",
+                threshold=f"{effective_target:.0%}" + (f" ({target_source})" if target_source != "fixed" else ""),
                 urgency="immediate" if triggered else "soon" if approaching else "monitor",
                 action=f"Close for ${pnl_dollars:.0f} profit" if triggered else "Approaching target",
-                detail=f"Credit decayed {pnl_pct:.0%} of max ({profit_target_pct:.0%} target). "
+                detail=f"Credit decayed {pnl_pct:.0%} of max ({effective_target:.0%} target). "
                        f"Lock in ${pnl_dollars:.0f} gain." if triggered
-                       else f"At {pnl_pct:.0%} of {profit_target_pct:.0%} target — approaching profit zone.",
+                       else f"At {pnl_pct:.0%} of {effective_target:.0%} target — approaching profit zone.",
             ))
 
-        # Stop loss (credit: loss = current_mid - entry > X× entry)
-        if stop_loss_pct is not None:
+        # Stop loss — regime-stop override if provided
+        effective_stop = stop_loss_pct
+        stop_source = "fixed"
+        if regime_stop_multiplier is not None:
+            effective_stop = regime_stop_multiplier
+            stop_source = f"regime R{regime_id}"
+        if effective_stop is not None:
             loss_multiple = (current_mid_price - entry_price) / entry_price if entry_price > 0 else 0
-            triggered = loss_multiple >= stop_loss_pct
-            approaching = loss_multiple >= stop_loss_pct * 0.75
+            triggered = loss_multiple >= effective_stop
+            approaching = loss_multiple >= effective_stop * 0.75
             loss_dollars = (current_mid_price - entry_price) * lot_size * contracts
             signals.append(ExitSignal(
                 rule="stop_loss",
                 triggered=triggered,
-                current_value=f"{loss_multiple:.1f}× credit ({loss_dollars:+.0f}$)",
-                threshold=f"{stop_loss_pct:.0f}× credit",
+                current_value=f"{loss_multiple:.1f}x credit ({loss_dollars:+.0f}$)",
+                threshold=f"{effective_stop:.1f}x credit ({stop_source})",
                 urgency="immediate" if triggered else "soon" if approaching else "monitor",
                 action=f"Close to limit loss at ${loss_dollars:.0f}" if triggered else "Monitoring loss",
-                detail=f"Loss at {loss_multiple:.1f}× initial credit (${loss_dollars:+.0f}). "
-                       f"Stop at {stop_loss_pct:.0f}×. Close to prevent further damage." if triggered
-                       else f"Loss at {loss_multiple:.1f}× credit — within tolerance but elevated.",
+                detail=f"Loss at {loss_multiple:.1f}x initial credit (${loss_dollars:+.0f}). "
+                       f"Stop at {effective_stop:.1f}x ({stop_source}). Close to prevent further damage." if triggered
+                       else f"Loss at {loss_multiple:.1f}x credit — within tolerance but elevated.",
             ))
     else:
         # Debit trade
@@ -1165,32 +1222,34 @@ def monitor_exit_conditions(
         ))
 
     # End-of-day urgency escalation
-    if time_of_day is not None:
+    # Auto-fetch current time if not provided — 0DTE positions MUST be force-closed
+    _eod_time = time_of_day if time_of_day is not None else datetime.now().time()
+    if True:
         # 0DTE: force close after 15:00
         if structure_type in ("iron_condor", "iron_man", "credit_spread", "straddle", "strangle") and dte_remaining == 0:
-            if time_of_day >= dt_time(15, 0):
+            if _eod_time >= dt_time(15, 0):
                 signals.append(ExitSignal(
                     rule="eod_0dte",
                     triggered=True,
-                    current_value=f"{time_of_day.strftime('%H:%M')}",
+                    current_value=f"{_eod_time.strftime('%H:%M')}",
                     threshold="15:00",
                     urgency="immediate",
                     action="Close 0DTE position — market closing",
-                    detail=f"0DTE position at {time_of_day.strftime('%H:%M')} — must close before 16:00. Gamma risk is extreme.",
+                    detail=f"0DTE position at {_eod_time.strftime('%H:%M')} — must close before 16:00. Gamma risk is extreme.",
                 ))
         # Non-0DTE: escalate TESTED positions after 15:30
-        elif dte_remaining > 0 and time_of_day >= dt_time(15, 30):
+        elif dte_remaining > 0 and _eod_time >= dt_time(15, 30):
             # Check if any existing signal has "tested" status
             any_tested = any(s.rule == "stop_loss" and s.urgency == "soon" for s in signals)
             if any_tested:
                 signals.append(ExitSignal(
                     rule="eod_tested",
                     triggered=True,
-                    current_value=f"{time_of_day.strftime('%H:%M')}",
+                    current_value=f"{_eod_time.strftime('%H:%M')}",
                     threshold="15:30",
                     urgency="immediate",
                     action="Close tested position before overnight gap",
-                    detail=f"Position tested at {time_of_day.strftime('%H:%M')} — close before overnight gap risk.",
+                    detail=f"Position tested at {_eod_time.strftime('%H:%M')} — close before overnight gap risk.",
                 ))
 
     triggered_signals = [s for s in signals if s.triggered]

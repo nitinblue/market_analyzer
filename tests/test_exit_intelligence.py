@@ -302,3 +302,97 @@ class TestComputeRemainingThetaValue:
         )
         assert result.remaining_theta_pct == pytest.approx(1.0, abs=0.01)
         assert result.recommendation == "hold"
+
+
+from market_analyzer.trade_lifecycle import monitor_exit_conditions
+
+
+class TestMonitorExitWithRegimeStop:
+    def test_regime_stop_overrides_fixed_stop(self) -> None:
+        """R2 regime stop (3.0x) should allow wider loss before triggering."""
+        result = monitor_exit_conditions(
+            trade_id="test-1", ticker="SPY", structure_type="iron_condor",
+            order_side="credit", entry_price=2.00, current_mid_price=5.50,
+            contracts=1, dte_remaining=20, regime_id=2,
+            stop_loss_pct=2.0,  # Would trigger at 2x (loss_multiple = 1.75)
+            regime_stop_multiplier=3.0,  # Override: won't trigger until 3x
+        )
+        stop_signals = [s for s in result.signals if s.rule == "stop_loss"]
+        assert len(stop_signals) == 1
+        # loss_multiple = (5.50 - 2.00) / 2.00 = 1.75
+        # 1.75 < 3.0 -> NOT triggered
+        assert not stop_signals[0].triggered
+        assert "regime" in stop_signals[0].threshold.lower() or "R2" in stop_signals[0].threshold
+
+    def test_regime_stop_triggers_when_exceeded(self) -> None:
+        """R4 regime stop (1.5x) triggers earlier than fixed 2x would."""
+        result = monitor_exit_conditions(
+            trade_id="test-2", ticker="SPY", structure_type="iron_condor",
+            order_side="credit", entry_price=2.00, current_mid_price=5.50,
+            contracts=1, dte_remaining=20, regime_id=4,
+            stop_loss_pct=2.0,
+            regime_stop_multiplier=1.5,  # Override: triggers at 1.5x
+        )
+        stop_signals = [s for s in result.signals if s.rule == "stop_loss"]
+        assert len(stop_signals) == 1
+        # loss_multiple = 1.75, effective_stop = 1.5 -> TRIGGERED
+        assert stop_signals[0].triggered
+
+    def test_no_regime_stop_uses_fixed(self) -> None:
+        """Without regime_stop_multiplier, uses stop_loss_pct as before."""
+        result = monitor_exit_conditions(
+            trade_id="test-3", ticker="SPY", structure_type="iron_condor",
+            order_side="credit", entry_price=2.00, current_mid_price=6.50,
+            contracts=1, dte_remaining=20, regime_id=1,
+            stop_loss_pct=2.0,
+        )
+        stop_signals = [s for s in result.signals if s.rule == "stop_loss"]
+        assert len(stop_signals) == 1
+        # loss_multiple = (6.50-2.00)/2.00 = 2.25, stop=2.0 -> triggered
+        assert stop_signals[0].triggered
+
+
+class TestMonitorExitWithTimeAdjustedTarget:
+    def test_fast_profit_lowers_target(self) -> None:
+        """40% profit in 5 days on 30 DTE -> lower target, trigger exit."""
+        result = monitor_exit_conditions(
+            trade_id="test-4", ticker="SPY", structure_type="iron_condor",
+            order_side="credit", entry_price=2.00, current_mid_price=1.10,
+            contracts=1, dte_remaining=25, regime_id=1,
+            profit_target_pct=0.50,
+            days_held=5, dte_at_entry=30,
+        )
+        # pnl_pct = (2.00 - 1.10) / 2.00 = 0.45
+        # velocity = 0.45 / (5/30) = 0.45/0.167 = 2.7 > 2.0, profit >= 0.25
+        # adjusted_target = max(0.25, 0.50 - 0.15) = 0.35
+        # 0.45 >= 0.35 -> triggered
+        target_signals = [s for s in result.signals if s.rule == "profit_target"]
+        assert len(target_signals) == 1
+        assert target_signals[0].triggered
+
+    def test_normal_pace_no_adjustment(self) -> None:
+        """20% profit in 15 days on 30 DTE -> no adjustment."""
+        result = monitor_exit_conditions(
+            trade_id="test-5", ticker="SPY", structure_type="iron_condor",
+            order_side="credit", entry_price=2.00, current_mid_price=1.60,
+            contracts=1, dte_remaining=15, regime_id=1,
+            profit_target_pct=0.50,
+            days_held=15, dte_at_entry=30,
+        )
+        # pnl_pct = 0.20, velocity = 0.20/0.50 = 0.40, not > 2.0
+        target_signals = [s for s in result.signals if s.rule == "profit_target"]
+        assert len(target_signals) == 1
+        assert not target_signals[0].triggered  # 20% < 50%
+
+    def test_backward_compatible_without_days_held(self) -> None:
+        """Without days_held/dte_at_entry, behaves exactly as before."""
+        result = monitor_exit_conditions(
+            trade_id="test-6", ticker="SPY", structure_type="iron_condor",
+            order_side="credit", entry_price=2.00, current_mid_price=0.80,
+            contracts=1, dte_remaining=10, regime_id=1,
+            profit_target_pct=0.50,
+        )
+        # pnl_pct = (2.00-0.80)/2.00 = 0.60 >= 0.50 -> triggered
+        target_signals = [s for s in result.signals if s.rule == "profit_target"]
+        assert len(target_signals) == 1
+        assert target_signals[0].triggered
