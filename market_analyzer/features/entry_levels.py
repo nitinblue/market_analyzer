@@ -8,6 +8,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from market_analyzer.models.entry import (
+    ConditionalEntry,
+    EntryLevelScore,
+    PullbackAlert,
     SkewOptimalStrike,
     StrikeProximityLeg,
     StrikeProximityResult,
@@ -17,6 +20,7 @@ from market_analyzer.models.vol_surface import SkewSlice
 if TYPE_CHECKING:
     from market_analyzer.models.levels import LevelsAnalysis
     from market_analyzer.models.opportunity import TradeSpec
+    from market_analyzer.models.technicals import TechnicalSnapshot
 
 
 def compute_strike_support_proximity(
@@ -144,3 +148,210 @@ def select_skew_optimal_strike(
             f"{iv_advantage:.1f}% richer at {target_mult:.1f} ATR OTM"
         ),
     )
+
+
+def score_entry_level(
+    technicals: TechnicalSnapshot,
+    levels: LevelsAnalysis,
+    direction: str = "neutral",
+) -> EntryLevelScore:
+    """Multi-factor entry score combining RSI, Bollinger, VWAP, ATR extension, and level proximity.
+
+    Weights: RSI=35%, Bollinger=30%, VWAP=10%, ATR_extension=15%, level_proximity=10%.
+    RSI extremity uses a /20 divisor (sensitive to moderate overbought/oversold).
+    Bollinger extremity uses a /0.30 divisor (sensitive to moderate %B deviation).
+    Actions: >=0.70 = enter_now, >=0.40 = wait, <0.40 = not_yet.
+    """
+    price = technicals.current_price
+    atr = technicals.atr
+    rsi = technicals.rsi.value if technicals.rsi else 50.0
+    percent_b = technicals.bollinger.percent_b if technicals.bollinger else 0.5
+    vwap = technicals.vwma_20 if technicals.vwma_20 is not None else price
+    sma_20 = (
+        technicals.moving_averages.sma_20
+        if technicals.moving_averages and technicals.moving_averages.sma_20 is not None
+        else price
+    )
+
+    # RSI extremity — /20 divisor for sensitivity at moderate overbought/oversold
+    if direction == "bullish":
+        rsi_score = max(0.0, (50.0 - rsi) / 20.0)
+    elif direction == "bearish":
+        rsi_score = max(0.0, (rsi - 50.0) / 20.0)
+    else:
+        rsi_score = abs(rsi - 50.0) / 20.0
+    rsi_score = min(1.0, rsi_score)
+
+    # Bollinger %B extremity — /0.30 divisor for sensitivity
+    if direction == "bullish":
+        bb_score = max(0.0, (0.5 - percent_b) / 0.30)
+    elif direction == "bearish":
+        bb_score = max(0.0, (percent_b - 0.5) / 0.30)
+    else:
+        bb_score = abs(percent_b - 0.5) / 0.30
+    bb_score = min(1.0, bb_score)
+
+    # VWAP deviation
+    vwap_score = min(1.0, abs(price - vwap) / atr / 2.0) if atr > 0 else 0.0
+
+    # ATR extension from SMA-20
+    atr_score = min(1.0, abs(price - sma_20) / atr / 1.5) if atr > 0 else 0.0
+
+    # Level proximity
+    if direction == "bullish":
+        candidate_levels = list(levels.support_levels)
+    elif direction == "bearish":
+        candidate_levels = list(levels.resistance_levels)
+    else:
+        candidate_levels = list(levels.support_levels) + list(levels.resistance_levels)
+
+    level_score = 0.0
+    for lvl in candidate_levels:
+        dist = abs(price - lvl.price)
+        dist_atr = dist / atr if atr > 0 else float("inf")
+        if dist_atr <= 1.0 and lvl.strength >= 0.5:
+            prox = (1.0 - dist_atr) * lvl.strength
+            if prox > level_score:
+                level_score = prox
+
+    # Weighted sum — RSI and Bollinger carry most weight as primary momentum signals
+    overall = (
+        rsi_score * 0.35
+        + bb_score * 0.30
+        + vwap_score * 0.10
+        + atr_score * 0.15
+        + level_score * 0.10
+    )
+
+    if overall >= 0.70:
+        action = "enter_now"
+    elif overall >= 0.40:
+        action = "wait"
+    else:
+        action = "not_yet"
+
+    rationale_parts = []
+    if rsi_score > 0.5:
+        rationale_parts.append(f"RSI {rsi:.0f} extremity ({rsi_score:.2f})")
+    if bb_score > 0.5:
+        rationale_parts.append(f"%B {percent_b:.2f} extremity ({bb_score:.2f})")
+    if atr_score > 0.5:
+        rationale_parts.append(f"Price extended from SMA-20 ({atr_score:.2f})")
+    if level_score > 0.3:
+        rationale_parts.append(f"Near key level ({level_score:.2f})")
+    if not rationale_parts:
+        rationale_parts.append("No strong entry signal")
+
+    return EntryLevelScore(
+        overall_score=round(overall, 4),
+        action=action,
+        components={
+            "rsi_extremity": round(rsi_score, 4),
+            "bollinger_extremity": round(bb_score, 4),
+            "vwap_deviation": round(vwap_score, 4),
+            "atr_extension": round(atr_score, 4),
+            "level_proximity": round(level_score, 4),
+        },
+        rationale=" | ".join(rationale_parts),
+    )
+
+
+def compute_limit_entry_price(
+    current_mid: float,
+    bid_ask_spread: float,
+    urgency: str = "normal",
+    is_credit: bool = False,
+) -> ConditionalEntry:
+    """Compute limit order entry price based on urgency and order direction.
+
+    Credits and debits have inverted urgency logic:
+    - Debits:  patient=0.30 (save most), normal=0.10, aggressive=0.00 (pay mid)
+    - Credits: patient=0.00 (hold at mid), normal=0.10, aggressive=0.30 (concede most)
+    """
+    if is_credit:
+        factors = {"patient": 0.0, "normal": 0.10, "aggressive": 0.30}
+    else:
+        factors = {"patient": 0.30, "normal": 0.10, "aggressive": 0.0}
+
+    factor = factors.get(urgency, 0.10)
+    limit_price = current_mid - factor * bid_ask_spread
+
+    # Determine entry mode
+    if not is_credit and factor == 0.0:
+        entry_mode = "market"
+    else:
+        entry_mode = "limit"
+
+    # Improvement pct
+    if current_mid > 0 and factor > 0:
+        improvement_pct = round((current_mid - limit_price) / current_mid * 100, 2)
+    else:
+        improvement_pct = 0.0
+
+    side = "credit" if is_credit else "debit"
+    rationale = (
+        f"{urgency.capitalize()} {side} entry: "
+        f"limit at ${limit_price:.2f} "
+        f"(mid ${current_mid:.2f} - {factor:.0%} of ${bid_ask_spread:.2f} spread)"
+    )
+
+    return ConditionalEntry(
+        entry_mode=entry_mode,
+        limit_price=round(limit_price, 4),
+        current_mid=current_mid,
+        improvement_pct=improvement_pct,
+        urgency=urgency,
+        rationale=rationale,
+    )
+
+
+def compute_pullback_levels(
+    current_price: float,
+    levels: LevelsAnalysis,
+    atr: float,
+    min_strength: float = 0.4,
+    max_distance_atr: float = 2.0,
+    min_roc_improvement_pct: float = 1.0,
+) -> list[PullbackAlert]:
+    """Compute pullback alert levels where patient entry would improve trade quality.
+
+    Returns alerts sorted nearest first (highest alert_price first).
+    Only considers support levels below current price within 2 ATR.
+    """
+    alerts: list[PullbackAlert] = []
+
+    for lvl in levels.support_levels:
+        # Only pullbacks below current price
+        if lvl.price >= current_price:
+            continue
+        # Minimum strength filter
+        if lvl.strength < min_strength:
+            continue
+        # Distance filter
+        distance = current_price - lvl.price
+        distance_atr = distance / atr if atr > 0 else float("inf")
+        if distance_atr > max_distance_atr:
+            continue
+        # ROC improvement estimate
+        roc_improvement = (distance / (atr * 0.5)) * 2.0
+        if roc_improvement < min_roc_improvement_pct:
+            continue
+
+        source = lvl.sources[0].value if lvl.sources else "support"
+        improvement_desc = (
+            f"Pullback to {lvl.price:.1f} ({source}) improves short put placement "
+            f"by ~{distance:.1f}pt ({distance_atr:.1f} ATR)"
+        )
+
+        alerts.append(PullbackAlert(
+            alert_price=round(lvl.price, 2),
+            current_price=current_price,
+            level_source=source,
+            level_strength=lvl.strength,
+            improvement_description=improvement_desc,
+            roc_improvement_pct=round(roc_improvement, 2),
+        ))
+
+    # Sort nearest first (highest alert_price first)
+    alerts.sort(key=lambda a: a.alert_price, reverse=True)
+    return alerts

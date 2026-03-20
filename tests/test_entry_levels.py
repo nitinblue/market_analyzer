@@ -301,3 +301,192 @@ class TestSkewOptimalStrike:
         distance = abs(580.0 - result.optimal_strike)
         assert distance >= 0.8 * 5.0 - 0.01
         assert distance <= 2.0 * 5.0 + 0.01
+
+
+# ---------------------------------------------------------------------------
+# Task 4: score_entry_level
+# ---------------------------------------------------------------------------
+
+from market_analyzer.models.technicals import (
+    BollingerBands, MACDData, MovingAverages, RSIData,
+    StochasticData, SupportResistance, TechnicalSnapshot,
+    MarketPhase, PhaseIndicator,
+)
+from market_analyzer.features.entry_levels import score_entry_level
+
+
+def _make_technicals(
+    price: float = 580.0, rsi: float = 50.0, percent_b: float = 0.5,
+    atr_pct: float = 0.86, sma_20: float | None = None, vwap: float | None = None,
+) -> TechnicalSnapshot:
+    atr = price * atr_pct / 100
+    _sma_20 = sma_20 if sma_20 is not None else price
+    _vwap = vwap if vwap is not None else price
+    pct_sma_20 = (price - _sma_20) / _sma_20 * 100 if _sma_20 else 0.0
+    return TechnicalSnapshot(
+        ticker="SPY", as_of_date=date(2026, 3, 19), current_price=price,
+        atr=atr, atr_pct=atr_pct, vwma_20=_vwap,
+        moving_averages=MovingAverages(
+            sma_20=_sma_20, sma_50=price * 0.98, sma_200=price * 0.95,
+            ema_9=price, ema_21=price,
+            price_vs_sma_20_pct=pct_sma_20, price_vs_sma_50_pct=2.0, price_vs_sma_200_pct=5.0,
+        ),
+        rsi=RSIData(value=rsi, is_overbought=rsi > 70, is_oversold=rsi < 30),
+        bollinger=BollingerBands(upper=price + 10, middle=price, lower=price - 10,
+                                 bandwidth=0.04, percent_b=percent_b),
+        macd=MACDData(macd_line=0.5, signal_line=0.3, histogram=0.2,
+                      is_bullish_crossover=False, is_bearish_crossover=False),
+        stochastic=StochasticData(k=50.0, d=50.0, is_overbought=False, is_oversold=False),
+        support_resistance=SupportResistance(support=570.0, resistance=590.0,
+                                              price_vs_support_pct=1.7, price_vs_resistance_pct=-1.7),
+        phase=PhaseIndicator(phase=MarketPhase.ACCUMULATION, confidence=0.5, description="Test",
+                             higher_highs=False, higher_lows=True, lower_highs=False, lower_lows=False,
+                             range_compression=0.3, volume_trend="declining", price_vs_sma_50_pct=2.0),
+        signals=[],
+    )
+
+
+class TestEntryLevelScore:
+    def test_extreme_oversold_at_support_enter_now(self) -> None:
+        """RSI 25 + %B 0.05 + extended from mean + near support → enter_now."""
+        tech = _make_technicals(price=572.0, rsi=25.0, percent_b=0.05,
+                                sma_20=580.0, vwap=580.0)
+        levels = _make_levels(
+            supports=[(570.0, 0.90, ["sma_200", "swing_support"])],
+            resistances=[],
+        )
+        result = score_entry_level(tech, levels, direction="bullish")
+        assert result.action == "enter_now"
+        assert result.overall_score >= 0.70
+        assert result.components["rsi_extremity"] > 0.7
+
+    def test_neutral_rsi_mid_bollinger_wait(self) -> None:
+        tech = _make_technicals(price=580.0, rsi=50.0, percent_b=0.5)
+        levels = _make_levels(supports=[], resistances=[])
+        result = score_entry_level(tech, levels, direction="bullish")
+        assert result.action in ("wait", "not_yet")
+        assert result.overall_score < 0.70
+
+    def test_overbought_at_resistance_bearish_enter(self) -> None:
+        tech = _make_technicals(price=589.0, rsi=78.0, percent_b=0.95,
+                                sma_20=580.0, vwap=580.0)
+        levels = _make_levels(supports=[], resistances=[(590.0, 0.85, ["swing_resistance", "pivot_r1"])])
+        result = score_entry_level(tech, levels, direction="bearish")
+        assert result.action == "enter_now"
+        assert result.overall_score >= 0.70
+
+    def test_moderate_signal_caution(self) -> None:
+        tech = _make_technicals(price=582.0, rsi=62.0, percent_b=0.70)
+        levels = _make_levels(supports=[(578.0, 0.60, ["sma_20"])], resistances=[])
+        result = score_entry_level(tech, levels, direction="bearish")
+        assert result.action == "wait"
+        assert 0.40 <= result.overall_score <= 0.75
+
+    def test_components_all_present(self) -> None:
+        tech = _make_technicals()
+        levels = _make_levels(supports=[], resistances=[])
+        result = score_entry_level(tech, levels, direction="neutral")
+        expected_keys = {"rsi_extremity", "bollinger_extremity", "vwap_deviation",
+                         "atr_extension", "level_proximity"}
+        assert expected_keys == set(result.components.keys())
+
+    def test_neutral_direction_uses_absolute_extremity(self) -> None:
+        tech = _make_technicals(rsi=28.0, percent_b=0.10)
+        levels = _make_levels(supports=[(575.0, 0.70, ["sma_50"])], resistances=[])
+        result = score_entry_level(tech, levels, direction="neutral")
+        assert result.components["rsi_extremity"] > 0.6
+
+
+# ---------------------------------------------------------------------------
+# Task 5: compute_limit_entry_price
+# ---------------------------------------------------------------------------
+
+from market_analyzer.features.entry_levels import compute_limit_entry_price
+
+
+class TestLimitEntryPrice:
+    def test_patient_debit_entry_below_mid(self) -> None:
+        result = compute_limit_entry_price(current_mid=3.50, bid_ask_spread=0.40, urgency="patient", is_credit=False)
+        assert result.entry_mode == "limit"
+        assert result.limit_price < result.current_mid
+        assert result.limit_price == pytest.approx(3.50 - 0.40 * 0.30, abs=0.01)
+        assert result.improvement_pct > 0
+
+    def test_normal_debit_entry_slight_improvement(self) -> None:
+        result = compute_limit_entry_price(current_mid=3.50, bid_ask_spread=0.40, urgency="normal", is_credit=False)
+        assert result.limit_price == pytest.approx(3.50 - 0.40 * 0.10, abs=0.01)
+        assert result.limit_price < result.current_mid
+
+    def test_aggressive_entry_at_mid(self) -> None:
+        result = compute_limit_entry_price(current_mid=1.85, bid_ask_spread=0.30, urgency="aggressive")
+        assert result.limit_price == result.current_mid
+        assert result.improvement_pct == 0.0
+
+    def test_narrow_spread_minimal_improvement(self) -> None:
+        result = compute_limit_entry_price(current_mid=1.85, bid_ask_spread=0.05, urgency="patient")
+        improvement = abs(result.current_mid - result.limit_price)
+        assert improvement < 0.02
+
+    def test_patient_credit_holds_at_mid(self) -> None:
+        result = compute_limit_entry_price(current_mid=1.85, bid_ask_spread=0.30, urgency="patient", is_credit=True)
+        assert result.limit_price == result.current_mid
+        assert result.entry_mode == "limit"
+
+    def test_normal_credit_small_concession(self) -> None:
+        result = compute_limit_entry_price(current_mid=1.85, bid_ask_spread=0.30, urgency="normal", is_credit=True)
+        assert result.limit_price == pytest.approx(1.85 - 0.30 * 0.10, abs=0.01)
+        assert result.limit_price < result.current_mid
+
+    def test_aggressive_credit_big_concession(self) -> None:
+        result = compute_limit_entry_price(current_mid=1.85, bid_ask_spread=0.30, urgency="aggressive", is_credit=True)
+        assert result.limit_price == pytest.approx(1.85 - 0.30 * 0.30, abs=0.01)
+
+    def test_rationale_includes_urgency(self) -> None:
+        result = compute_limit_entry_price(1.85, 0.30, "patient")
+        assert "patient" in result.rationale.lower() or "R1" in result.rationale
+
+
+# ---------------------------------------------------------------------------
+# Task 6: compute_pullback_levels
+# ---------------------------------------------------------------------------
+
+from market_analyzer.features.entry_levels import compute_pullback_levels
+
+
+class TestPullbackLevels:
+    def test_support_pullback_improves_put_side(self) -> None:
+        levels = _make_levels(
+            supports=[(576.0, 0.70, ["sma_20"]), (570.0, 0.85, ["sma_200"])],
+            resistances=[],
+        )
+        alerts = compute_pullback_levels(580.0, levels, atr=5.0)
+        assert len(alerts) >= 1
+        assert alerts[0].alert_price < 580.0
+        assert alerts[0].roc_improvement_pct > 0
+
+    def test_no_nearby_levels_no_alerts(self) -> None:
+        levels = _make_levels(supports=[], resistances=[])
+        alerts = compute_pullback_levels(580.0, levels, atr=5.0)
+        assert len(alerts) == 0
+
+    def test_only_levels_below_current_price(self) -> None:
+        levels = _make_levels(supports=[(576.0, 0.70, ["sma_20"])], resistances=[(585.0, 0.70, ["sma_50"])])
+        alerts = compute_pullback_levels(580.0, levels, atr=5.0)
+        for alert in alerts:
+            assert alert.alert_price < 580.0
+
+    def test_weak_levels_excluded(self) -> None:
+        levels = _make_levels(supports=[(577.0, 0.25, ["ema_9"])], resistances=[])
+        alerts = compute_pullback_levels(580.0, levels, atr=5.0)
+        assert len(alerts) == 0
+
+    def test_max_pullback_distance_2atr(self) -> None:
+        levels = _make_levels(supports=[(560.0, 0.90, ["sma_200"])], resistances=[])
+        alerts = compute_pullback_levels(580.0, levels, atr=5.0)
+        assert len(alerts) == 0
+
+    def test_alerts_sorted_nearest_first(self) -> None:
+        levels = _make_levels(supports=[(576.0, 0.70, ["sma_20"]), (573.0, 0.80, ["sma_50"])], resistances=[])
+        alerts = compute_pullback_levels(580.0, levels, atr=5.0)
+        assert len(alerts) == 2
+        assert alerts[0].alert_price > alerts[1].alert_price
