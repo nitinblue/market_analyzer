@@ -7,6 +7,9 @@ current portfolio exposure, and drawdown state.
 
 from __future__ import annotations
 
+import math as _math
+from typing import Callable
+
 from pydantic import BaseModel
 
 
@@ -31,6 +34,28 @@ class PortfolioExposure(BaseModel):
     max_risk_pct: float = 0.25  # Max portfolio risk (25%)
     drawdown_pct: float = 0.0  # Current drawdown from peak (0-1)
     drawdown_halt_pct: float = 0.10  # Circuit breaker threshold
+
+
+class CorrelationAdjustment(BaseModel):
+    """Result of adjusting Kelly fraction for portfolio correlation."""
+
+    original_kelly_fraction: float
+    correlation_penalty: float
+    adjusted_kelly_fraction: float
+    correlated_pairs: list[tuple[str, str, float]]  # (ticker_a, ticker_b, corr)
+    effective_position_count: float  # How many "unique" positions this represents
+    rationale: str
+
+
+class RegimeMarginEstimate(BaseModel):
+    """Regime-adjusted buying power estimate per contract."""
+
+    base_bp_per_contract: float
+    regime_id: int
+    regime_multiplier: float
+    adjusted_bp_per_contract: float
+    max_contracts_by_margin: int
+    rationale: str
 
 
 def compute_kelly_fraction(
@@ -164,6 +189,257 @@ def compute_kelly_position_size(
         full_kelly_fraction=round(full_kelly, 4),
         half_kelly_fraction=round(half_kelly, 4),
         portfolio_adjusted_fraction=round(adjusted, 4),
+        recommended_contracts=recommended,
+        max_contracts_by_risk=max_by_risk,
+        rationale=" | ".join(parts),
+        components=components,
+    )
+
+
+def compute_pairwise_correlation(
+    returns_a: list[float],
+    returns_b: list[float],
+    lookback: int = 60,
+) -> float:
+    """Compute Pearson correlation between two return series.
+
+    Pure Python — no pandas dependency. Uses last `lookback` values from
+    each series. Both series must have at least `lookback` elements.
+
+    Args:
+        returns_a: Daily log returns for ticker A.
+        returns_b: Daily log returns for ticker B.
+        lookback: Number of trailing observations to use.
+
+    Returns:
+        Pearson correlation coefficient (-1.0 to 1.0).
+        Returns 0.0 if insufficient data or zero variance.
+    """
+    n = min(len(returns_a), len(returns_b), lookback)
+    if n < 5:
+        return 0.0
+
+    a = returns_a[-n:]
+    b = returns_b[-n:]
+
+    mean_a = sum(a) / n
+    mean_b = sum(b) / n
+
+    cov = sum((a[i] - mean_a) * (b[i] - mean_b) for i in range(n)) / n
+    var_a = sum((x - mean_a) ** 2 for x in a) / n
+    var_b = sum((x - mean_b) ** 2 for x in b) / n
+
+    if var_a <= 0 or var_b <= 0:
+        return 0.0
+
+    return max(-1.0, min(1.0, cov / _math.sqrt(var_a * var_b)))
+
+
+def adjust_kelly_for_correlation(
+    kelly_result: KellyResult,
+    new_ticker: str,
+    open_tickers: list[str],
+    correlation_fn: Callable[[str, str], float],
+) -> CorrelationAdjustment:
+    """Reduce Kelly sizing when new trade is correlated with existing positions.
+
+    Penalty logic: if max correlation with any existing position > 0.70,
+    apply penalty = max_corr * 0.5 to reduce the kelly fraction.
+
+    Args:
+        kelly_result: Output from compute_kelly_position_size().
+        new_ticker: Ticker being sized.
+        open_tickers: List of tickers already in portfolio.
+        correlation_fn: Callable(ticker_a, ticker_b) -> correlation float.
+
+    Returns:
+        CorrelationAdjustment with adjusted fraction and penalty details.
+    """
+    original = kelly_result.portfolio_adjusted_fraction
+    pairs: list[tuple[str, str, float]] = []
+    max_corr = 0.0
+
+    for existing in open_tickers:
+        if existing == new_ticker:
+            continue
+        corr = correlation_fn(new_ticker, existing)
+        pairs.append((new_ticker, existing, round(corr, 4)))
+        max_corr = max(max_corr, corr)
+
+    penalty = max_corr * 0.5 if max_corr > 0.70 else 0.0
+    adjusted = original * (1 - penalty)
+
+    # Effective position count: 1 / (1 - penalty) when correlated
+    effective_count = 1.0 / (1.0 - penalty) if penalty < 1.0 else float("inf")
+
+    if penalty > 0:
+        rationale = (
+            f"Max correlation {max_corr:.2f} with existing positions — "
+            f"{penalty:.0%} penalty applied. Effective position count: {effective_count:.1f}"
+        )
+    else:
+        rationale = "No significant correlation with existing positions — no penalty"
+
+    return CorrelationAdjustment(
+        original_kelly_fraction=round(original, 4),
+        correlation_penalty=round(penalty, 4),
+        adjusted_kelly_fraction=round(adjusted, 4),
+        correlated_pairs=pairs,
+        effective_position_count=round(effective_count, 2),
+        rationale=rationale,
+    )
+
+
+_REGIME_MARGIN_MULTIPLIERS: dict[int, tuple[float, str]] = {
+    1: (1.0, "R1 standard margin"),
+    2: (1.3, "R2 high-vol: broker raises margin ~30%"),
+    3: (1.1, "R3 trending: slight margin increase"),
+    4: (1.5, "R4 explosive: maximum margin expansion"),
+}
+
+
+def compute_regime_adjusted_bp(
+    wing_width: float,
+    regime_id: int,
+    lot_size: int = 100,
+    available_bp: float | None = None,
+) -> RegimeMarginEstimate:
+    """Compute regime-aware buying power requirement per contract.
+
+    In high-vol regimes, brokers typically expand margin requirements.
+    This estimates the effective BP needed so position sizing doesn't
+    over-allocate.
+
+    Args:
+        wing_width: Spread width in points (e.g., 5.0 for 5-wide IC).
+        regime_id: Current regime (1-4).
+        lot_size: Options multiplier (default 100).
+        available_bp: Available buying power (optional, for max contracts).
+
+    Returns:
+        RegimeMarginEstimate with adjusted BP per contract.
+    """
+    base_bp = wing_width * lot_size
+    multiplier, rationale = _REGIME_MARGIN_MULTIPLIERS.get(
+        regime_id, (1.0, f"Unknown regime R{regime_id}: standard margin"),
+    )
+    adjusted_bp = base_bp * multiplier
+
+    max_contracts = 0
+    if available_bp is not None and adjusted_bp > 0:
+        max_contracts = int(available_bp / adjusted_bp)
+
+    return RegimeMarginEstimate(
+        base_bp_per_contract=base_bp,
+        regime_id=regime_id,
+        regime_multiplier=multiplier,
+        adjusted_bp_per_contract=adjusted_bp,
+        max_contracts_by_margin=max_contracts,
+        rationale=rationale,
+    )
+
+
+def compute_position_size(
+    pop_pct: float,
+    max_profit: float,
+    max_loss: float,
+    capital: float,
+    risk_per_contract: float,
+    regime_id: int = 1,
+    wing_width: float = 5.0,
+    exposure: PortfolioExposure | None = None,
+    open_tickers: list[str] | None = None,
+    new_ticker: str = "",
+    correlation_fn: Callable[[str, str], float] | None = None,
+    safety_factor: float = 0.5,
+    max_contracts: int = 50,
+) -> KellyResult:
+    """Unified position sizing: Kelly -> correlation -> regime margin -> final.
+
+    This is the master sizing function that chains all sizing intelligence:
+    1. compute_kelly_position_size() — raw Kelly from POP and R:R
+    2. adjust_kelly_for_correlation() — reduce for correlated positions
+    3. compute_regime_adjusted_bp() — cap by regime-aware margin
+    4. Return final KellyResult with all adjustments shown
+
+    Args:
+        pop_pct: Probability of profit (0-1 fraction).
+        max_profit: Max profit per contract in dollars.
+        max_loss: Max loss per contract in dollars (positive).
+        capital: Account NLV in dollars.
+        risk_per_contract: Capital at risk per contract.
+        regime_id: Current regime (1-4).
+        wing_width: Spread width in points for margin calculation.
+        exposure: Current portfolio state. None = no adjustment.
+        open_tickers: Tickers currently in portfolio (for correlation check).
+        new_ticker: Ticker being sized (for correlation check).
+        correlation_fn: Callable(ticker_a, ticker_b) -> correlation.
+        safety_factor: Fraction of Kelly to use (default 0.5 = half Kelly).
+        max_contracts: Hard cap on contracts.
+
+    Returns:
+        KellyResult with all adjustments reflected.
+    """
+    # Step 1: Base Kelly
+    kelly = compute_kelly_position_size(
+        capital=capital,
+        pop_pct=pop_pct,
+        max_profit=max_profit,
+        max_loss=max_loss,
+        risk_per_contract=risk_per_contract,
+        exposure=exposure,
+        safety_factor=safety_factor,
+        max_contracts=max_contracts,
+    )
+
+    # Step 2: Correlation adjustment
+    corr_adj: CorrelationAdjustment | None = None
+    if open_tickers and correlation_fn and new_ticker:
+        corr_adj = adjust_kelly_for_correlation(
+            kelly, new_ticker, open_tickers, correlation_fn,
+        )
+
+    # Step 3: Regime margin cap
+    margin = compute_regime_adjusted_bp(
+        wing_width, regime_id, available_bp=capital * 0.25,
+    )
+
+    # Compose final recommendation
+    effective_fraction = kelly.portfolio_adjusted_fraction
+    components = dict(kelly.components)
+
+    if corr_adj is not None and corr_adj.correlation_penalty > 0:
+        effective_fraction = corr_adj.adjusted_kelly_fraction
+        components["correlation_penalty"] = corr_adj.correlation_penalty
+        components["after_correlation"] = round(effective_fraction, 4)
+
+    # Convert fraction to contracts
+    if effective_fraction <= 0 or risk_per_contract <= 0 or capital <= 0:
+        recommended = 0
+    else:
+        kelly_dollars = capital * effective_fraction
+        recommended = max(1, min(int(kelly_dollars / risk_per_contract), max_contracts))
+
+    # Cap by regime-adjusted margin
+    if margin.max_contracts_by_margin > 0:
+        recommended = min(recommended, margin.max_contracts_by_margin)
+        components["regime_margin_cap"] = margin.max_contracts_by_margin
+
+    # Cap by base risk limit
+    max_by_risk = kelly.max_contracts_by_risk
+    recommended = min(recommended, max_by_risk)
+
+    # Build rationale
+    parts = [kelly.rationale.split(" -> ")[0]]  # Base Kelly part
+    if corr_adj and corr_adj.correlation_penalty > 0:
+        parts.append(f"corr penalty -{corr_adj.correlation_penalty:.0%}")
+    parts.append(f"R{regime_id} margin {margin.regime_multiplier:.1f}x")
+    parts.append(f"-> {recommended} contracts")
+
+    return KellyResult(
+        full_kelly_fraction=kelly.full_kelly_fraction,
+        half_kelly_fraction=kelly.half_kelly_fraction,
+        portfolio_adjusted_fraction=round(effective_fraction, 4),
         recommended_contracts=recommended,
         max_contracts_by_risk=max_by_risk,
         rationale=" | ".join(parts),

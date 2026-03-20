@@ -179,3 +179,256 @@ class TestExports:
         )
         assert callable(compute_kelly_fraction)
         assert callable(compute_kelly_position_size)
+
+
+# ---------------------------------------------------------------------------
+# Task 4: Correlation + Margin-Regime Sizing
+# ---------------------------------------------------------------------------
+
+from market_analyzer.features.position_sizing import (  # noqa: E402
+    CorrelationAdjustment,
+    RegimeMarginEstimate,
+    compute_pairwise_correlation,
+    adjust_kelly_for_correlation,
+    compute_regime_adjusted_bp,
+)
+
+
+class TestPairwiseCorrelation:
+    def test_perfect_positive_correlation(self) -> None:
+        a = [0.01 * i for i in range(60)]
+        b = [0.01 * i for i in range(60)]
+        corr = compute_pairwise_correlation(a, b)
+        assert corr == pytest.approx(1.0, abs=0.01)
+
+    def test_perfect_negative_correlation(self) -> None:
+        a = [0.01 * i for i in range(60)]
+        b = [-0.01 * i for i in range(60)]
+        corr = compute_pairwise_correlation(a, b)
+        assert corr == pytest.approx(-1.0, abs=0.01)
+
+    def test_uncorrelated_near_zero(self) -> None:
+        import math
+        a = [math.sin(i) for i in range(60)]
+        b = [math.cos(i * 7.3) for i in range(60)]
+        corr = compute_pairwise_correlation(a, b)
+        assert abs(corr) < 0.5  # Not exactly 0 but small
+
+    def test_insufficient_data_returns_zero(self) -> None:
+        corr = compute_pairwise_correlation([0.01, 0.02], [0.01, 0.02])
+        assert corr == 0.0
+
+    def test_lookback_limits_data(self) -> None:
+        # Build a=increasing, b=increasing for first 50, then b=decreasing for last 10
+        # Use lookback=10 vs lookback=50 to verify different windows give different results
+        a = [float(i) for i in range(60)]
+        # b: perfectly correlated for first 50, then reverses
+        b = [float(i) for i in range(50)] + [float(50 - i) for i in range(10)]
+        corr_50 = compute_pairwise_correlation(a, b, lookback=50)  # correlated window
+        corr_10 = compute_pairwise_correlation(a, b, lookback=10)  # anti-correlated window
+        # Over the correlated 50-point window, corr should be > 0
+        assert corr_50 > 0
+        # Over the recent 10-point window (a goes up, b goes down), corr < 0
+        assert corr_10 < 0
+
+    def test_zero_variance_returns_zero(self) -> None:
+        a = [0.01] * 60
+        b = [0.02 * i for i in range(60)]
+        corr = compute_pairwise_correlation(a, b)
+        assert corr == 0.0
+
+    def test_bounded_minus_one_to_one(self) -> None:
+        import random
+        random.seed(42)
+        a = [random.gauss(0, 0.02) for _ in range(60)]
+        b = [random.gauss(0, 0.02) for _ in range(60)]
+        corr = compute_pairwise_correlation(a, b)
+        assert -1.0 <= corr <= 1.0
+
+
+class TestCorrelationAdjustedKelly:
+    def _base_kelly(self) -> KellyResult:
+        return compute_kelly_position_size(
+            capital=50000, pop_pct=0.72, max_profit=180, max_loss=320,
+            risk_per_contract=500,
+        )
+
+    def test_no_existing_positions_no_penalty(self) -> None:
+        kelly = self._base_kelly()
+        result = adjust_kelly_for_correlation(
+            kelly, "AAPL", [], lambda a, b: 0.0,
+        )
+        assert result.correlation_penalty == 0.0
+        assert result.adjusted_kelly_fraction == result.original_kelly_fraction
+
+    def test_high_correlation_penalty(self) -> None:
+        kelly = self._base_kelly()
+        result = adjust_kelly_for_correlation(
+            kelly, "QQQ", ["SPY"],
+            lambda a, b: 0.90,  # SPY/QQQ highly correlated
+        )
+        assert result.correlation_penalty > 0
+        assert result.adjusted_kelly_fraction < result.original_kelly_fraction
+        # penalty = 0.90 * 0.5 = 0.45
+        assert result.correlation_penalty == pytest.approx(0.45, abs=0.01)
+
+    def test_low_correlation_no_penalty(self) -> None:
+        kelly = self._base_kelly()
+        result = adjust_kelly_for_correlation(
+            kelly, "GLD", ["SPY"],
+            lambda a, b: 0.30,  # Gold/SPY low correlation
+        )
+        assert result.correlation_penalty == 0.0
+        assert result.adjusted_kelly_fraction == result.original_kelly_fraction
+
+    def test_multiple_positions_uses_max_corr(self) -> None:
+        kelly = self._base_kelly()
+        corr_map = {("IWM", "SPY"): 0.85, ("IWM", "GLD"): 0.15}
+        result = adjust_kelly_for_correlation(
+            kelly, "IWM", ["SPY", "GLD"],
+            lambda a, b: corr_map.get((a, b), corr_map.get((b, a), 0.0)),
+        )
+        # max_corr = 0.85, penalty = 0.85 * 0.5 = 0.425
+        assert result.correlation_penalty == pytest.approx(0.425, abs=0.01)
+
+    def test_self_ticker_skipped(self) -> None:
+        kelly = self._base_kelly()
+        result = adjust_kelly_for_correlation(
+            kelly, "SPY", ["SPY"],
+            lambda a, b: 1.0,
+        )
+        assert result.correlation_penalty == 0.0  # Self is skipped
+
+    def test_effective_position_count(self) -> None:
+        kelly = self._base_kelly()
+        result = adjust_kelly_for_correlation(
+            kelly, "QQQ", ["SPY"],
+            lambda a, b: 0.80,  # penalty = 0.40
+        )
+        # effective = 1 / (1 - 0.40) = 1.667
+        assert result.effective_position_count == pytest.approx(1.67, abs=0.05)
+
+
+class TestRegimeAdjustedBP:
+    def test_r1_standard_margin(self) -> None:
+        result = compute_regime_adjusted_bp(5.0, regime_id=1)
+        assert result.base_bp_per_contract == 500.0
+        assert result.regime_multiplier == 1.0
+        assert result.adjusted_bp_per_contract == 500.0
+
+    def test_r2_expanded_margin(self) -> None:
+        result = compute_regime_adjusted_bp(5.0, regime_id=2)
+        assert result.regime_multiplier == 1.3
+        assert result.adjusted_bp_per_contract == 650.0
+
+    def test_r3_slight_expansion(self) -> None:
+        result = compute_regime_adjusted_bp(5.0, regime_id=3)
+        assert result.regime_multiplier == 1.1
+        assert result.adjusted_bp_per_contract == 550.0
+
+    def test_r4_maximum_expansion(self) -> None:
+        result = compute_regime_adjusted_bp(5.0, regime_id=4)
+        assert result.regime_multiplier == 1.5
+        assert result.adjusted_bp_per_contract == 750.0
+
+    def test_max_contracts_with_bp(self) -> None:
+        result = compute_regime_adjusted_bp(5.0, regime_id=1, available_bp=5000.0)
+        assert result.max_contracts_by_margin == 10  # 5000 / 500
+
+    def test_max_contracts_r2_fewer(self) -> None:
+        r1 = compute_regime_adjusted_bp(5.0, regime_id=1, available_bp=5000.0)
+        r2 = compute_regime_adjusted_bp(5.0, regime_id=2, available_bp=5000.0)
+        assert r2.max_contracts_by_margin < r1.max_contracts_by_margin
+
+    def test_10_wide_wings(self) -> None:
+        result = compute_regime_adjusted_bp(10.0, regime_id=1)
+        assert result.base_bp_per_contract == 1000.0
+
+    def test_no_available_bp(self) -> None:
+        result = compute_regime_adjusted_bp(5.0, regime_id=1)
+        assert result.max_contracts_by_margin == 0  # No BP provided
+
+    def test_unknown_regime_standard(self) -> None:
+        result = compute_regime_adjusted_bp(5.0, regime_id=99)
+        assert result.regime_multiplier == 1.0
+
+
+# ---------------------------------------------------------------------------
+# Task 5: Unified Position Sizing
+# ---------------------------------------------------------------------------
+
+from market_analyzer.features.position_sizing import compute_position_size  # noqa: E402
+
+
+class TestUnifiedPositionSize:
+    def test_basic_sizing_without_correlation(self) -> None:
+        result = compute_position_size(
+            pop_pct=0.72, max_profit=180, max_loss=320,
+            capital=50000, risk_per_contract=500, regime_id=1,
+        )
+        assert result.recommended_contracts >= 1
+        assert result.recommended_contracts <= 10
+
+    def test_r2_reduces_via_margin(self) -> None:
+        r1 = compute_position_size(
+            pop_pct=0.72, max_profit=180, max_loss=320,
+            capital=50000, risk_per_contract=500, regime_id=1,
+        )
+        r2 = compute_position_size(
+            pop_pct=0.72, max_profit=180, max_loss=320,
+            capital=50000, risk_per_contract=500, regime_id=2,
+        )
+        assert r2.recommended_contracts <= r1.recommended_contracts
+
+    def test_correlation_reduces_size(self) -> None:
+        no_corr = compute_position_size(
+            pop_pct=0.72, max_profit=180, max_loss=320,
+            capital=50000, risk_per_contract=500, regime_id=1,
+        )
+        with_corr = compute_position_size(
+            pop_pct=0.72, max_profit=180, max_loss=320,
+            capital=50000, risk_per_contract=500, regime_id=1,
+            new_ticker="QQQ", open_tickers=["SPY"],
+            correlation_fn=lambda a, b: 0.90,
+        )
+        assert with_corr.recommended_contracts <= no_corr.recommended_contracts
+
+    def test_negative_ev_zero_contracts(self) -> None:
+        result = compute_position_size(
+            pop_pct=0.30, max_profit=100, max_loss=400,
+            capital=50000, risk_per_contract=500, regime_id=1,
+        )
+        assert result.recommended_contracts == 0
+
+    def test_r4_most_restrictive(self) -> None:
+        r1 = compute_position_size(
+            pop_pct=0.72, max_profit=180, max_loss=320,
+            capital=50000, risk_per_contract=500, regime_id=1,
+        )
+        r4 = compute_position_size(
+            pop_pct=0.72, max_profit=180, max_loss=320,
+            capital=50000, risk_per_contract=500, regime_id=4,
+        )
+        assert r4.recommended_contracts <= r1.recommended_contracts
+
+    def test_components_include_regime_margin(self) -> None:
+        result = compute_position_size(
+            pop_pct=0.72, max_profit=180, max_loss=320,
+            capital=50000, risk_per_contract=500, regime_id=2,
+        )
+        assert "regime_margin_cap" in result.components
+
+    def test_with_exposure_and_correlation(self) -> None:
+        exposure = PortfolioExposure(
+            open_position_count=2, max_positions=5,
+            current_risk_pct=0.10, max_risk_pct=0.25,
+        )
+        result = compute_position_size(
+            pop_pct=0.72, max_profit=180, max_loss=320,
+            capital=50000, risk_per_contract=500, regime_id=1,
+            exposure=exposure,
+            new_ticker="IWM", open_tickers=["SPY", "QQQ"],
+            correlation_fn=lambda a, b: 0.80,
+        )
+        assert result.recommended_contracts >= 0
+        assert "correlation_penalty" in result.components
