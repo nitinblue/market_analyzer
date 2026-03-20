@@ -402,6 +402,14 @@ from market_analyzer.currency import (
     assess_currency_exposure,
 )
 
+# Kelly criterion position sizing
+from market_analyzer.features.position_sizing import (
+    KellyResult,
+    PortfolioExposure as KellyPortfolioExposure,
+    compute_kelly_fraction,
+    compute_kelly_position_size,
+)
+
 # Capital deployment engine (long-term systematic investing)
 from market_analyzer.capital_deployment import (
     AssetAllocation,
@@ -964,6 +972,11 @@ __all__ = [
     # Threshold optimization
     "ThresholdConfig",
     "optimize_thresholds",
+    # Kelly criterion position sizing
+    "KellyResult",
+    "KellyPortfolioExposure",
+    "compute_kelly_fraction",
+    "compute_kelly_position_size",
     # Capital deployment engine
     "ValuationZone",
     "RiskTolerance",

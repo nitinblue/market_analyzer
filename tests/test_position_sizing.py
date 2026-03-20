@@ -167,3 +167,15 @@ class TestKellyPositionSize:
         d = result.model_dump()
         assert "recommended_contracts" in d
         assert "full_kelly_fraction" in d
+
+
+class TestExports:
+    def test_kelly_importable_from_top_level(self) -> None:
+        from market_analyzer import (
+            KellyResult,
+            KellyPortfolioExposure,
+            compute_kelly_fraction,
+            compute_kelly_position_size,
+        )
+        assert callable(compute_kelly_fraction)
+        assert callable(compute_kelly_position_size)

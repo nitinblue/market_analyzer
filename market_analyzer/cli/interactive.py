@@ -2323,6 +2323,91 @@ Requires --broker connection."""
         except Exception as exc:
             print(f"{_styled('ERROR:', 'red')} {exc}")
 
+    def do_kelly(self, arg: str) -> None:
+        """Kelly-optimal position sizing: kelly TICKER [ACCOUNT_SIZE]
+
+        Computes Kelly criterion sizing for a representative iron condor on the ticker.
+        Shows: full Kelly, half Kelly (conservative), portfolio-adjusted, recommended contracts.
+
+        Examples:
+            kelly SPY
+            kelly SPY 50000
+            kelly AAPL 200000
+        """
+        parts = arg.strip().split()
+        ticker = parts[0].upper() if parts else "SPY"
+        capital = float(parts[1]) if len(parts) > 1 else 50000.0
+
+        try:
+            ma = self._get_ma()
+            regime = ma.regime.detect(ticker)
+            tech = ma.technicals.snapshot(ticker)
+            vol = ma.vol_surface.compute(ticker)
+
+            from market_analyzer.opportunity.option_plays.iron_condor import assess_iron_condor
+            ic = assess_iron_condor(ticker, regime, tech, vol)
+
+            if ic.trade_spec is None:
+                print(f"No trade spec for {ticker} (verdict: {ic.verdict})")
+                return
+
+            # Get POP estimate
+            from market_analyzer.trade_lifecycle import estimate_pop
+            pop_est = estimate_pop(
+                trade_spec=ic.trade_spec,
+                entry_price=ic.trade_spec.max_entry_price or 1.50,
+                regime_id=regime.regime.value,
+                atr_pct=tech.atr_pct,
+            )
+
+            # Compute risk per contract
+            wing_width = ic.trade_spec.wing_width_points or 5.0
+            lot_size = ic.trade_spec.lot_size
+            risk_per_contract = wing_width * lot_size
+
+            from market_analyzer.features.position_sizing import (
+                compute_kelly_position_size,
+                compute_kelly_fraction,
+            )
+
+            # Without portfolio context (standalone)
+            result = compute_kelly_position_size(
+                capital=capital,
+                pop_pct=pop_est.pop_pct,
+                max_profit=pop_est.max_profit,
+                max_loss=pop_est.max_loss,
+                risk_per_contract=risk_per_contract,
+            )
+
+            print(f"\nKELLY SIZING — {ticker} — ${capital:,.0f} account")
+            print("-" * 50)
+            print(f"Trade: {ic.trade_spec.structure_type or 'iron_condor'}")
+            print(f"POP:   {pop_est.pop_pct:.0%}  |  Max Profit: ${pop_est.max_profit:.0f}  |  Max Loss: ${pop_est.max_loss:.0f}")
+            print(f"Risk/contract: ${risk_per_contract:.0f}")
+            print()
+            print(f"Full Kelly:     {result.full_kelly_fraction:.1%} of capital (${capital * result.full_kelly_fraction:,.0f})")
+            print(f"Half Kelly:     {result.half_kelly_fraction:.1%} of capital (${capital * result.half_kelly_fraction:,.0f})")
+            print(f"Fixed 2%:       ${capital * 0.02:,.0f}")
+            print()
+            print(f"Recommended:    {result.recommended_contracts} contracts")
+            print(f"Max by risk:    {result.max_contracts_by_risk} contracts (2% cap)")
+            print()
+
+            # Compare sizing methods
+            fixed_contracts = max(1, int(capital * 0.02 / risk_per_contract))
+            kelly_contracts = result.recommended_contracts
+            if kelly_contracts > fixed_contracts:
+                print(f"Kelly suggests MORE than fixed 2%: {kelly_contracts} vs {fixed_contracts} (high-quality trade)")
+            elif kelly_contracts < fixed_contracts:
+                print(f"Kelly suggests LESS than fixed 2%: {kelly_contracts} vs {fixed_contracts} (lower-quality trade)")
+            else:
+                print(f"Kelly agrees with fixed 2%: {kelly_contracts} contracts")
+
+            print("-" * 50)
+
+        except Exception as e:
+            print(f"Error: {e}")
+
     def do_adjust(self, arg: str) -> None:
         """Analyze trade adjustments for a ticker.\nUsage: adjust TICKER"""
         tickers = self._parse_tickers(arg)
