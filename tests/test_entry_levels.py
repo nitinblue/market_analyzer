@@ -251,3 +251,53 @@ class TestStrikeProximity:
         result = compute_strike_support_proximity(ts, levels, atr=5.0)
         assert result.all_backed is False
         assert result.overall_score == 0.0
+
+
+from market_analyzer.models.vol_surface import SkewSlice
+from market_analyzer.features.entry_levels import select_skew_optimal_strike
+
+
+def _make_skew(
+    atm_iv: float = 0.22, put_skew: float = 0.05,
+    call_skew: float = 0.02, skew_ratio: float = 2.5,
+) -> SkewSlice:
+    return SkewSlice(
+        expiration=date(2026, 4, 17), days_to_expiry=30,
+        atm_iv=atm_iv, otm_put_iv=atm_iv + put_skew,
+        otm_call_iv=atm_iv + call_skew,
+        put_skew=put_skew, call_skew=call_skew, skew_ratio=skew_ratio,
+    )
+
+
+class TestSkewOptimalStrike:
+    def test_put_side_shifts_toward_skew(self) -> None:
+        skew = _make_skew(atm_iv=0.22, put_skew=0.08)
+        result = select_skew_optimal_strike(580.0, 5.0, 1, skew, "put")
+        assert result.optimal_strike <= result.baseline_strike
+        assert result.iv_advantage_pct > 0
+        assert result.optimal_iv > result.baseline_iv
+
+    def test_flat_skew_no_shift(self) -> None:
+        skew = _make_skew(atm_iv=0.22, put_skew=0.005, call_skew=0.003)
+        result = select_skew_optimal_strike(580.0, 5.0, 1, skew, "put")
+        assert result.optimal_strike == result.baseline_strike
+        assert result.iv_advantage_pct < 5.0
+
+    def test_call_side_shifts_toward_call_skew(self) -> None:
+        skew = _make_skew(atm_iv=0.22, call_skew=0.06)
+        result = select_skew_optimal_strike(580.0, 5.0, 1, skew, "call")
+        assert result.optimal_strike >= result.baseline_strike
+        assert result.iv_advantage_pct > 0
+
+    def test_r2_wider_baseline(self) -> None:
+        skew = _make_skew(atm_iv=0.30, put_skew=0.06)
+        r1 = select_skew_optimal_strike(580.0, 5.0, 1, skew, "put")
+        r2 = select_skew_optimal_strike(580.0, 5.0, 2, skew, "put")
+        assert r2.baseline_strike < r1.baseline_strike
+
+    def test_stays_within_atr_bounds(self) -> None:
+        skew = _make_skew(atm_iv=0.22, put_skew=0.15)
+        result = select_skew_optimal_strike(580.0, 5.0, 1, skew, "put")
+        distance = abs(580.0 - result.optimal_strike)
+        assert distance >= 0.8 * 5.0 - 0.01
+        assert distance <= 2.0 * 5.0 + 0.01
