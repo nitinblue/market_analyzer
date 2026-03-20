@@ -609,12 +609,12 @@ class TestStrikeProximityInDailyChecks:
         assert len(prox) == 1
         assert prox[0].severity == Severity.WARN
 
-    def test_total_checks_now_8(self) -> None:
+    def test_total_checks_now_9_with_levels(self) -> None:
         report = self._run_daily_with_levels(
             supports=[(571.0, 0.85, ["sma_200"])],
             resistances=[(592.0, 0.80, ["swing_resistance"])],
         )
-        assert len(report.checks) == 8
+        assert len(report.checks) == 9
 
 
 class TestCLIEntryAnalysis:
@@ -636,3 +636,63 @@ class TestCLIEntryAnalysis:
         assert callable(score_entry_level)
         assert callable(compute_limit_entry_price)
         assert callable(compute_pullback_levels)
+
+
+# ---------------------------------------------------------------------------
+# Check #9: Earnings blackout gate in daily validation
+# ---------------------------------------------------------------------------
+
+
+class TestEarningsBlackoutInDailyChecks:
+    def _run_daily_with_earnings(self, days_to_earnings: int | None, dte: int = 30):
+        legs = [
+            _make_leg("short_put", LegAction.SELL_TO_OPEN, "put", 570.0),
+            _make_leg("long_put", LegAction.BUY_TO_OPEN, "put", 565.0),
+        ]
+        ts = _make_trade_spec(legs)
+        return run_daily_checks(
+            ticker="SPY", trade_spec=ts, entry_credit=3.00,
+            regime_id=1, atr_pct=0.86, current_price=580.0,
+            avg_bid_ask_spread_pct=1.0, dte=dte, rsi=50.0,
+            days_to_earnings=days_to_earnings,
+        )
+
+    def test_earnings_within_dte_fails(self) -> None:
+        """Earnings in 15 days with 30 DTE trade -> FAIL."""
+        report = self._run_daily_with_earnings(days_to_earnings=15, dte=30)
+        eb = [c for c in report.checks if c.name == "earnings_blackout"]
+        assert len(eb) == 1
+        assert eb[0].severity == Severity.FAIL
+        assert not report.is_ready  # FAIL blocks the trade
+
+    def test_earnings_just_outside_dte_warns(self) -> None:
+        """Earnings in 33 days with 30 DTE trade -> WARN (close but OK)."""
+        report = self._run_daily_with_earnings(days_to_earnings=33, dte=30)
+        eb = [c for c in report.checks if c.name == "earnings_blackout"]
+        assert len(eb) == 1
+        assert eb[0].severity == Severity.WARN
+
+    def test_earnings_far_away_passes(self) -> None:
+        """Earnings in 60 days with 30 DTE trade -> PASS."""
+        report = self._run_daily_with_earnings(days_to_earnings=60, dte=30)
+        eb = [c for c in report.checks if c.name == "earnings_blackout"]
+        assert len(eb) == 1
+        assert eb[0].severity == Severity.PASS
+
+    def test_no_earnings_data_passes(self) -> None:
+        """No earnings data (ETF) -> PASS."""
+        report = self._run_daily_with_earnings(days_to_earnings=None)
+        eb = [c for c in report.checks if c.name == "earnings_blackout"]
+        assert len(eb) == 1
+        assert eb[0].severity == Severity.PASS
+
+    def test_earnings_on_expiry_day_fails(self) -> None:
+        """Earnings exactly on DTE -> FAIL."""
+        report = self._run_daily_with_earnings(days_to_earnings=30, dte=30)
+        eb = [c for c in report.checks if c.name == "earnings_blackout"]
+        assert eb[0].severity == Severity.FAIL
+
+    def test_total_checks_now_9(self) -> None:
+        """Daily suite now has 9 checks."""
+        report = self._run_daily_with_earnings(days_to_earnings=60)
+        assert len(report.checks) == 9

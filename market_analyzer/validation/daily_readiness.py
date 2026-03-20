@@ -46,8 +46,9 @@ def run_daily_checks(
     iv_percentile: float | None = None,
     contracts: int = 1,
     levels: LevelsAnalysis | None = None,
+    days_to_earnings: int | None = None,
 ) -> ValidationReport:
-    """Run the 8-check daily pre-trade validation suite.
+    """Run the 9-check daily pre-trade validation suite.
 
     Checks (in order):
       1. commission_drag    — fees vs credit
@@ -58,6 +59,7 @@ def run_daily_checks(
       6. entry_quality      — IV rank, DTE, RSI, regime confirmation
       7. exit_discipline    — trade spec has profit target, stop loss, exit DTE
       8. strike_proximity   — short strikes backed by S/R levels
+      9. earnings_blackout  — no earnings event within trade DTE (HARD FAIL)
 
     Args:
         ticker: Underlying symbol.
@@ -73,6 +75,7 @@ def run_daily_checks(
         iv_percentile: IV percentile 0–100 (optional).
         contracts: Number of contracts for yield computation.
         levels: LevelsAnalysis from ma.levels.analyze() (optional, enables strike proximity check).
+        days_to_earnings: Days until next earnings event (from FundamentalsSnapshot). None for ETFs/no data.
     """
     checks: list[CheckResult] = []
 
@@ -141,6 +144,10 @@ def run_daily_checks(
         ))
 
     # 6. Entry quality (IV rank, RSI, regime, DTE)
+    has_earnings_within_dte = (
+        days_to_earnings is not None
+        and days_to_earnings <= dte
+    )
     entry_check = check_income_entry(
         iv_rank=iv_rank,
         iv_percentile=iv_percentile,
@@ -148,6 +155,7 @@ def run_daily_checks(
         rsi=rsi,
         atr_pct=atr_pct,
         regime_id=regime_id,
+        has_earnings_within_dte=has_earnings_within_dte,
     )
     entry_sev = Severity.PASS if entry_check.confirmed else (
         Severity.WARN if entry_check.score >= 0.45 else Severity.FAIL
@@ -208,6 +216,33 @@ def run_daily_checks(
             severity=Severity.WARN,
             message="No levels data — cannot assess strike proximity to S/R",
             detail="Pass levels from ma.levels.analyze() for strike proximity check",
+        ))
+
+    # ── Check 9: Earnings blackout ──
+    if days_to_earnings is not None and days_to_earnings <= dte:
+        checks.append(CheckResult(
+            name="earnings_blackout",
+            severity=Severity.FAIL,
+            message=f"Earnings in {days_to_earnings}d — trade expires in {dte}d (earnings within DTE)",
+            detail="Do not enter income trades that straddle earnings. Gap risk destroys the structure's assumptions.",
+            value=float(days_to_earnings),
+            threshold=float(dte),
+        ))
+    elif days_to_earnings is not None and days_to_earnings <= dte + 5:
+        # Earnings just outside DTE but close — warn
+        checks.append(CheckResult(
+            name="earnings_blackout",
+            severity=Severity.WARN,
+            message=f"Earnings in {days_to_earnings}d — close to {dte}d DTE (monitor)",
+            detail="Earnings is close to expiration. Consider shorter DTE or different ticker.",
+            value=float(days_to_earnings),
+            threshold=float(dte),
+        ))
+    else:
+        checks.append(CheckResult(
+            name="earnings_blackout",
+            severity=Severity.PASS,
+            message=f"No earnings conflict" + (f" (next earnings in {days_to_earnings}d)" if days_to_earnings else " (no earnings data)"),
         ))
 
     return ValidationReport(
