@@ -615,3 +615,24 @@ class TestStrikeProximityInDailyChecks:
             resistances=[(592.0, 0.80, ["swing_resistance"])],
         )
         assert len(report.checks) == 8
+
+
+class TestCLIEntryAnalysis:
+    def test_do_entry_analysis_import(self) -> None:
+        from market_analyzer import (
+            compute_strike_support_proximity,
+            select_skew_optimal_strike,
+            score_entry_level,
+            compute_limit_entry_price,
+            compute_pullback_levels,
+            StrikeProximityResult,
+            SkewOptimalStrike,
+            EntryLevelScore,
+            ConditionalEntry,
+            PullbackAlert,
+        )
+        assert callable(compute_strike_support_proximity)
+        assert callable(select_skew_optimal_strike)
+        assert callable(score_entry_level)
+        assert callable(compute_limit_entry_price)
+        assert callable(compute_pullback_levels)

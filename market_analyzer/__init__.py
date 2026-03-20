@@ -44,7 +44,24 @@ from market_analyzer.models.technicals import TechnicalSnapshot, TechnicalSignal
 # New workflow models
 from market_analyzer.models.context import InstrumentAvailability, IntermarketDashboard, IntermarketEntry, MarketContext
 from market_analyzer.models.instrument import InstrumentAnalysis
-from market_analyzer.models.entry import EntryConfirmation, EntryCondition, EntryTriggerType
+from market_analyzer.models.entry import (
+    ConditionalEntry,
+    EntryConfirmation,
+    EntryCondition,
+    EntryLevelScore,
+    EntryTriggerType,
+    PullbackAlert,
+    SkewOptimalStrike,
+    StrikeProximityLeg,
+    StrikeProximityResult,
+)
+from market_analyzer.features.entry_levels import (
+    compute_limit_entry_price,
+    compute_pullback_levels,
+    compute_strike_support_proximity,
+    score_entry_level,
+    select_skew_optimal_strike,
+)
 from market_analyzer.models.strategy import (
     OptionStructure,
     OptionStructureType,
@@ -455,13 +472,12 @@ from market_analyzer.risk import (
     PortfolioPosition,
     RiskDashboard,
     StrategyConcentration,
-    VaRResult,  # backward compat alias for ExpectedLossResult
+    ExpectedLossResult,
     check_correlation_risk,
     check_directional_concentration,
     check_drawdown_circuit_breaker,
     check_portfolio_greeks,
     check_strategy_concentration,
-    compute_portfolio_var,  # backward compat alias for estimate_portfolio_loss
     estimate_portfolio_loss,
     compute_risk_dashboard,
 )
@@ -608,6 +624,18 @@ __all__ = [
     "EntryTriggerType",
     "EntryCondition",
     "EntryConfirmation",
+    "ConditionalEntry",
+    "EntryLevelScore",
+    "PullbackAlert",
+    "SkewOptimalStrike",
+    "StrikeProximityLeg",
+    "StrikeProximityResult",
+    # Entry level functions
+    "compute_limit_entry_price",
+    "compute_pullback_levels",
+    "compute_strike_support_proximity",
+    "score_entry_level",
+    "select_skew_optimal_strike",
     # Strategy models (new)
     "OptionStructureType",
     "OptionStructure",
@@ -862,13 +890,13 @@ __all__ = [
     "PortfolioGreeks",
     "GreeksLimits",
     "GreeksCheckResult",
-    "VaRResult",
+    "ExpectedLossResult",
     "StrategyConcentration",
     "DirectionalExposure",
     "CorrelationRisk",
     "DrawdownStatus",
     "RiskDashboard",
-    "compute_portfolio_var",
+    "estimate_portfolio_loss",
     "check_portfolio_greeks",
     "check_strategy_concentration",
     "check_directional_concentration",

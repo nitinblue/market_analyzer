@@ -1802,6 +1802,98 @@ Requires --broker connection."""
         except Exception as exc:
             print(f"{_styled('ERROR:', 'red')} {exc}")
 
+    def do_entry_analysis(self, arg: str) -> None:
+        """Analyze entry levels for a ticker: entry_analysis TICKER
+
+        Runs full entry-level intelligence:
+        1. Strike-to-S/R proximity check (are your short strikes backed?)
+        2. Skew-optimal strike suggestion (where is IV richest?)
+        3. Multi-factor entry score (enter now vs wait?)
+        4. Limit order price (patient/normal/aggressive fill target)
+        5. Pullback alert levels (where does the trade get better?)
+        """
+        ticker = arg.strip().upper() or "SPY"
+
+        try:
+            ma = self._get_ma()
+            regime = ma.regime.detect(ticker)
+            tech = ma.technicals.snapshot(ticker)
+            levels = ma.levels.analyze(ticker)
+            vol = ma.vol_surface.compute(ticker)
+
+            from market_analyzer.opportunity.option_plays.iron_condor import assess_iron_condor
+            ic = assess_iron_condor(ticker, regime, tech, vol)
+
+            if ic.trade_spec is None:
+                print(f"No trade spec for {ticker} (verdict: {ic.verdict})")
+                return
+
+            from market_analyzer.features.entry_levels import (
+                compute_strike_support_proximity,
+                select_skew_optimal_strike,
+                score_entry_level,
+                compute_limit_entry_price,
+                compute_pullback_levels,
+            )
+
+            atr = tech.atr
+            price = tech.current_price
+
+            # 1. Strike proximity
+            proximity = compute_strike_support_proximity(ic.trade_spec, levels, atr=atr)
+            print(f"\nENTRY ANALYSIS — {ticker} — {tech.as_of_date}")
+            print("-" * 50)
+            status = "PASS" if proximity.all_backed else "WARN"
+            print(f"{status}  Strike Proximity   {proximity.summary}")
+
+            # 2. Skew optimal
+            if vol and vol.skew_by_expiry:
+                skew = vol.skew_by_expiry[0]
+                put_opt = select_skew_optimal_strike(price, atr, regime.regime.value, skew, "put")
+                call_opt = select_skew_optimal_strike(price, atr, regime.regime.value, skew, "call")
+                if put_opt.iv_advantage_pct >= 5:
+                    print(f"UP    Skew Put          {put_opt.rationale}")
+                else:
+                    print(f"--    Skew Put          No meaningful skew advantage ({put_opt.iv_advantage_pct:.1f}%)")
+                if call_opt.iv_advantage_pct >= 5:
+                    print(f"UP    Skew Call         {call_opt.rationale}")
+                else:
+                    print(f"--    Skew Call         No meaningful skew advantage ({call_opt.iv_advantage_pct:.1f}%)")
+            else:
+                print(f"--    Skew              No vol surface data")
+
+            # 3. Entry level score
+            entry_score = score_entry_level(tech, levels, direction="neutral")
+            action_label = entry_score.action.upper()
+            print(f"{action_label:6s}Entry Score        {entry_score.overall_score:.0%} -> {entry_score.action} ({entry_score.rationale})")
+
+            # 4. Limit price
+            entry_credit = ic.trade_spec.max_entry_price
+            if entry_credit is not None:
+                spread = vol.avg_bid_ask_spread_pct / 100 * price / 100 if vol else 0.10
+                urgency_map = {1: "patient", 2: "normal", 3: "aggressive", 4: "aggressive"}
+                urgency = urgency_map.get(regime.regime.value, "normal")
+                limit = compute_limit_entry_price(
+                    current_mid=entry_credit, bid_ask_spread=spread, urgency=urgency,
+                )
+                print(f"$     Limit Price       {limit.rationale}")
+            else:
+                print(f"--    Limit Price       No entry price available (connect broker for real quotes)")
+
+            # 5. Pullback levels
+            pullbacks = compute_pullback_levels(price, levels, atr=atr)
+            if pullbacks:
+                print(f"\nPullback Alerts ({len(pullbacks)}):")
+                for pb in pullbacks[:3]:
+                    print(f"   -> Wait for {pb.alert_price:.0f} ({pb.level_source}) — +{pb.roc_improvement_pct:.1f}% ROC improvement")
+            else:
+                print(f"\n   No pullback levels within 2 ATR")
+
+            print("-" * 50)
+
+        except Exception as e:
+            print(f"Error: {e}")
+
     def do_parse(self, arg: str) -> None:
         """Parse DXLink symbols into a TradeSpec.\nUsage: parse .GLD260417P455 .GLD260417P450 STO BTO [PRICE]\n  Symbols first, then actions (STO/BTO) in same order, optional price last."""
         parts = arg.strip().split()
