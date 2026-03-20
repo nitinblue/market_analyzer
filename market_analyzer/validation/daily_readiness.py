@@ -47,8 +47,9 @@ def run_daily_checks(
     contracts: int = 1,
     levels: LevelsAnalysis | None = None,
     days_to_earnings: int | None = None,
+    ticker_type: str = "etf",
 ) -> ValidationReport:
-    """Run the 9-check daily pre-trade validation suite.
+    """Run the 10-check daily pre-trade validation suite.
 
     Checks (in order):
       1. commission_drag    — fees vs credit
@@ -60,6 +61,7 @@ def run_daily_checks(
       7. exit_discipline    — trade spec has profit target, stop loss, exit DTE
       8. strike_proximity   — short strikes backed by S/R levels
       9. earnings_blackout  — no earnings event within trade DTE (HARD FAIL)
+     10. iv_rank_quality    — IV rank meets ticker-type threshold
 
     Args:
         ticker: Underlying symbol.
@@ -76,6 +78,7 @@ def run_daily_checks(
         contracts: Number of contracts for yield computation.
         levels: LevelsAnalysis from ma.levels.analyze() (optional, enables strike proximity check).
         days_to_earnings: Days until next earnings event (from FundamentalsSnapshot). None for ETFs/no data.
+        ticker_type: "etf", "equity", or "index" — used for IV rank quality thresholds.
     """
     checks: list[CheckResult] = []
 
@@ -243,6 +246,30 @@ def run_daily_checks(
             name="earnings_blackout",
             severity=Severity.PASS,
             message=f"No earnings conflict" + (f" (next earnings in {days_to_earnings}d)" if days_to_earnings else " (no earnings data)"),
+        ))
+
+    # ── Check 10: IV rank quality by ticker type ──
+    if iv_rank is not None:
+        from market_analyzer.features.entry_levels import compute_iv_rank_quality
+        iv_quality = compute_iv_rank_quality(iv_rank, ticker_type)
+        if iv_quality.quality == "good":
+            iv_sev = Severity.PASS
+        elif iv_quality.quality == "wait":
+            iv_sev = Severity.WARN
+        else:
+            iv_sev = Severity.FAIL
+        checks.append(CheckResult(
+            name="iv_rank_quality",
+            severity=iv_sev,
+            message=iv_quality.rationale,
+            value=iv_rank,
+            threshold=iv_quality.threshold_good,
+        ))
+    else:
+        checks.append(CheckResult(
+            name="iv_rank_quality",
+            severity=Severity.WARN,
+            message="IV rank unavailable — cannot assess premium quality",
         ))
 
     return ValidationReport(

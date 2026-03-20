@@ -609,12 +609,12 @@ class TestStrikeProximityInDailyChecks:
         assert len(prox) == 1
         assert prox[0].severity == Severity.WARN
 
-    def test_total_checks_now_9_with_levels(self) -> None:
+    def test_total_checks_now_10_with_levels(self) -> None:
         report = self._run_daily_with_levels(
             supports=[(571.0, 0.85, ["sma_200"])],
             resistances=[(592.0, 0.80, ["swing_resistance"])],
         )
-        assert len(report.checks) == 9
+        assert len(report.checks) == 10
 
 
 class TestCLIEntryAnalysis:
@@ -692,7 +692,84 @@ class TestEarningsBlackoutInDailyChecks:
         eb = [c for c in report.checks if c.name == "earnings_blackout"]
         assert eb[0].severity == Severity.FAIL
 
-    def test_total_checks_now_9(self) -> None:
-        """Daily suite now has 9 checks."""
+    def test_total_checks_now_10(self) -> None:
+        """Daily suite now has 10 checks."""
         report = self._run_daily_with_earnings(days_to_earnings=60)
-        assert len(report.checks) == 9
+        assert len(report.checks) == 10
+
+
+# ---------------------------------------------------------------------------
+# Task 8: IVRankQuality model + compute_iv_rank_quality()
+# ---------------------------------------------------------------------------
+
+
+from market_analyzer.models.entry import IVRankQuality  # noqa: E402
+from market_analyzer.features.entry_levels import compute_iv_rank_quality  # noqa: E402
+
+
+class TestIVRankQuality:
+    def test_etf_good(self) -> None:
+        result = compute_iv_rank_quality(35.0, "etf")
+        assert result.quality == "good"
+        assert result.threshold_good == 30.0
+
+    def test_etf_wait(self) -> None:
+        result = compute_iv_rank_quality(25.0, "etf")
+        assert result.quality == "wait"
+
+    def test_etf_avoid(self) -> None:
+        result = compute_iv_rank_quality(15.0, "etf")
+        assert result.quality == "avoid"
+
+    def test_equity_good(self) -> None:
+        result = compute_iv_rank_quality(50.0, "equity")
+        assert result.quality == "good"
+        assert result.threshold_good == 45.0
+
+    def test_equity_wait(self) -> None:
+        result = compute_iv_rank_quality(35.0, "equity")
+        assert result.quality == "wait"
+
+    def test_equity_avoid(self) -> None:
+        result = compute_iv_rank_quality(25.0, "equity")
+        assert result.quality == "avoid"
+
+    def test_index_good(self) -> None:
+        result = compute_iv_rank_quality(30.0, "index")
+        assert result.quality == "good"
+        assert result.threshold_good == 25.0
+
+    def test_index_wait(self) -> None:
+        result = compute_iv_rank_quality(20.0, "index")
+        assert result.quality == "wait"
+
+    def test_index_avoid(self) -> None:
+        result = compute_iv_rank_quality(10.0, "index")
+        assert result.quality == "avoid"
+
+    def test_boundary_exactly_at_good(self) -> None:
+        result = compute_iv_rank_quality(30.0, "etf")
+        assert result.quality == "good"
+
+    def test_boundary_exactly_at_wait(self) -> None:
+        result = compute_iv_rank_quality(20.0, "etf")
+        assert result.quality == "wait"
+
+    def test_unknown_type_uses_etf_defaults(self) -> None:
+        result = compute_iv_rank_quality(35.0, "unknown")
+        assert result.quality == "good"  # Uses default (30, 20)
+
+    def test_case_insensitive(self) -> None:
+        result = compute_iv_rank_quality(35.0, "ETF")
+        assert result.quality == "good"
+
+    def test_serialization(self) -> None:
+        result = compute_iv_rank_quality(40.0, "etf")
+        d = result.model_dump()
+        assert "quality" in d
+        assert "ticker_type" in d
+        assert "threshold_good" in d
+
+    def test_rationale_contains_rank(self) -> None:
+        result = compute_iv_rank_quality(42.0, "etf")
+        assert "42" in result.rationale

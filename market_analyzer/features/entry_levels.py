@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from market_analyzer.models.entry import (
     ConditionalEntry,
     EntryLevelScore,
+    IVRankQuality,
     PullbackAlert,
     SkewOptimalStrike,
     StrikeProximityLeg,
@@ -355,3 +356,62 @@ def compute_pullback_levels(
     # Sort nearest first (highest alert_price first)
     alerts.sort(key=lambda a: a.alert_price, reverse=True)
     return alerts
+
+
+# Ticker type -> (good_threshold, wait_threshold)
+_IV_RANK_THRESHOLDS: dict[str, tuple[float, float]] = {
+    "etf": (30.0, 20.0),
+    "equity": (45.0, 30.0),
+    "index": (25.0, 15.0),
+}
+
+
+def compute_iv_rank_quality(
+    current_iv_rank: float,
+    ticker_type: str = "etf",
+) -> IVRankQuality:
+    """Assess IV rank quality relative to ticker-type-specific thresholds.
+
+    ETF IV is structurally lower — IV rank 30+ is already elevated.
+    Individual equities need 45+ for equivalent signal quality.
+    Indexes (SPX, NDX) run even lower — 25+ is meaningful.
+
+    Args:
+        current_iv_rank: Current IV rank (0-100 scale).
+        ticker_type: "etf", "equity", or "index".
+
+    Returns:
+        IVRankQuality with quality assessment and thresholds.
+    """
+    ticker_type = ticker_type.lower()
+    good_thresh, wait_thresh = _IV_RANK_THRESHOLDS.get(
+        ticker_type, (30.0, 20.0),
+    )
+
+    if current_iv_rank >= good_thresh:
+        quality = "good"
+        rationale = (
+            f"IV rank {current_iv_rank:.0f} >= {good_thresh:.0f} ({ticker_type}) — "
+            f"elevated IV, good premium for income trades"
+        )
+    elif current_iv_rank >= wait_thresh:
+        quality = "wait"
+        rationale = (
+            f"IV rank {current_iv_rank:.0f} in {wait_thresh:.0f}-{good_thresh:.0f} range ({ticker_type}) — "
+            f"marginal premium, consider waiting for IV expansion"
+        )
+    else:
+        quality = "avoid"
+        rationale = (
+            f"IV rank {current_iv_rank:.0f} < {wait_thresh:.0f} ({ticker_type}) — "
+            f"low IV, poor premium for income trades"
+        )
+
+    return IVRankQuality(
+        current_iv_rank=current_iv_rank,
+        ticker_type=ticker_type,
+        threshold_good=good_thresh,
+        threshold_wait=wait_thresh,
+        quality=quality,
+        rationale=rationale,
+    )

@@ -111,3 +111,14 @@ class PullbackAlert(BaseModel):
     level_strength: float  # 0-1
     improvement_description: str  # What changes at that price
     roc_improvement_pct: float  # Estimated ROC improvement
+
+
+class IVRankQuality(BaseModel):
+    """IV rank quality assessment by ticker type."""
+
+    current_iv_rank: float
+    ticker_type: str  # "etf", "equity", "index"
+    threshold_good: float
+    threshold_wait: float
+    quality: str  # "good", "wait", "avoid"
+    rationale: str
