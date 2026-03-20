@@ -14,6 +14,8 @@
 7. [Adjustment Integration Guide](#7-adjustment-integration-guide)
 8. [SaaS Broker Authentication Guide](#8-saas-broker-authentication-guide)
 9. [New Trading Intelligence APIs (March 2026)](#9-new-trading-intelligence-apis-march-2026)
+10. [Decision Audit Framework (March 20)](#10-decision-audit-framework-march-20)
+11. [March 20 Addenda — Behavior Changes](#11-march-20-addenda--behavior-changes)
 
 ---
 
@@ -1752,3 +1754,229 @@ place_limit_order(
     limit_price=limit.limit_price,
 )
 ```
+
+---
+
+## 10. Decision Audit Framework (March 20)
+
+**File:** `market_analyzer/features/decision_audit.py`
+**Models:** `market_analyzer/models/decision_audit.py`
+
+A 4-level scoring framework that audits a proposed trade before execution. Returns a single `DecisionReport` with a grade and `approved: bool`. This supplements (not replaces) `run_daily_checks()` — validation gates block bad trades, the audit grades good trades so you can prioritize.
+
+**Overall score weights:** Trade 35% | Risk 30% | Portfolio 20% | Legs 15% (when leg data present).
+**Approved:** `overall_score >= 70`.
+
+### 10.1 `audit_decision()` — Top-Level Entry Point
+
+```python
+from market_analyzer.features.decision_audit import audit_decision
+from market_analyzer.models.decision_audit import DecisionReport
+
+report: DecisionReport = audit_decision(
+    ticker="SPY",
+    trade_spec=trade_spec,          # TradeSpec from any assessor
+    # --- Leg level (optional but improves score accuracy) ---
+    levels=levels_analysis,         # From ma.levels.analyze(ticker). None = no S/R credit
+    skew=vol_surface.skew_slice,    # SkewSlice from vol surface. None = no skew credit
+    atr=5.20,                       # ATR in dollar terms (technicals.atr)
+    # --- Trade level ---
+    pop_pct=0.72,                   # From estimate_pop().pop_pct (0-1 fraction)
+    expected_value=48.0,            # From estimate_pop().expected_value (dollars)
+    entry_credit=1.80,              # Net credit received
+    entry_score=0.75,               # From score_entry_level().overall_score
+    regime_id=1,                    # From ma.regime.detect().regime.value
+    atr_pct=0.85,                   # ATR as % of price
+    # --- Portfolio level ---
+    open_position_count=3,          # Current open trades (eTrading position DB)
+    max_positions=5,                # Account max concurrent trades
+    portfolio_risk_pct=0.15,        # Sum(max_loss / NLV) across open positions
+    correlation_with_existing=0.25, # Max pairwise correlation (from compute_pairwise_correlation)
+    strategy_concentration_pct=0.40, # Fraction of open trades with same structure_type
+    directional_score=0.05,         # Net delta direction (-1 to +1). 0 = balanced
+    # --- Risk level ---
+    capital=50000.0,                # Account NLV
+    contracts=1,                    # Proposed contract count (from compute_position_size)
+    drawdown_pct=0.03,              # Current drawdown fraction (eTrading account DB)
+    stress_passed=True,             # From run_adversarial_checks().is_ready
+    kelly_fraction=0.12,            # From compute_position_size().full_kelly_fraction
+)
+
+if report.approved:
+    # overall_score >= 70 — trade clears the quality bar
+    place_order(...)
+else:
+    log(f"AUDIT REJECTED ({report.overall_score}/100 {report.overall_grade}): {report.summary}")
+```
+
+### 10.2 Individual Audit Functions
+
+These are called internally by `audit_decision()`. eTrading can call them directly if partial audits are needed (e.g., only leg quality or only risk audit).
+
+```python
+from market_analyzer.features.decision_audit import (
+    audit_legs,        # Level 1: strike placement, S/R backing, skew edge, wing width
+    audit_trade,       # Level 2: regime fit, POP, EV, commission drag, exit plan, entry timing
+    audit_portfolio,   # Level 3: slot availability, correlation, risk budget, concentration
+    audit_risk,        # Level 4: position size, drawdown headroom, stress survival, Kelly
+)
+```
+
+### 10.3 Score Breakdown per Level
+
+**Level 1 — Legs (`LegAudit`):** Scored per short leg. Four sub-checks, each 0–100:
+
+| Sub-check | Weight | Best Score Conditions |
+|---|---|---|
+| `sr_proximity` | equal | Short strike backed within 1 ATR of an S/R level |
+| `skew_advantage` | equal | Short leg IV ≥5% above ATM IV (sell rich premium) |
+| `atr_distance` | equal | Short strike 1.0–1.5 ATR from underlying |
+| `wing_width` | equal | Wing ≥5 points wide |
+
+Without `levels` data: `sr_proximity` scores 0 (no S/R credit awarded). Without `skew` data: 5/100 (minimal credit, not penalized).
+
+**Level 2 — Trade (`TradeAudit`):** Six sub-checks:
+
+| Sub-check | What It Measures |
+|---|---|
+| `regime_alignment` | Structure-regime fit (e.g., IC in R1 = 100, IC in R4 = 0) |
+| `pop_quality` | POP scaled: 75%+ = A, 40% = F |
+| `expected_value` | EV relative to credit collected |
+| `commission_drag` | Round-trip commissions as % of credit |
+| `exit_plan` | Has profit_target_pct + stop_loss_pct + exit_dte (35+35+30 pts) |
+| `entry_timing` | `entry_score` from `score_entry_level()` |
+
+**Level 3 — Portfolio (`PortfolioAudit`):** Five sub-checks — slot availability, correlation with existing positions, risk budget remaining, strategy concentration, directional balance.
+
+**Level 4 — Risk (`RiskAudit`):** Four sub-checks — position size as % of NLV (≤2% = A), drawdown headroom to circuit breaker, stress survival, Kelly alignment.
+
+### 10.4 DecisionReport Model
+
+| Field | Type | Meaning |
+|---|---|---|
+| `ticker` | `str` | Underlying symbol |
+| `structure_type` | `str` | e.g. "iron_condor" |
+| `leg_audit` | `LegAudit \| None` | None if trade has no legs |
+| `trade_audit` | `TradeAudit` | Level 2 result |
+| `portfolio_audit` | `PortfolioAudit` | Level 3 result |
+| `risk_audit` | `RiskAudit` | Level 4 result |
+| `overall_score` | `float` | Weighted average 0–100 |
+| `overall_grade` | `str` | A/B+/B/C/D/F |
+| `approved` | `bool` | True if overall_score >= 70 |
+| `summary` | `str` | e.g. "82/100 B+ — APPROVED \| Legs: B | Trade: A | Portfolio: B+ | Risk: B" |
+
+### 10.5 Grade Scale
+
+| Score | Grade |
+|---|---|
+| ≥ 93 | A |
+| ≥ 85 | B+ |
+| ≥ 77 | B |
+| ≥ 70 | C |
+| ≥ 60 | D |
+| < 60 | F |
+
+### 10.6 Integration Checklist — Decision Audit
+
+- [ ] Call `audit_decision()` after `run_daily_checks()` passes and before placing any order
+- [ ] Pass `stress_passed` from `run_adversarial_checks().is_ready` — avoids duplicate stress computation
+- [ ] Pass `entry_score` from `score_entry_level().overall_score` — same call, no extra cost
+- [ ] Pass `kelly_fraction` from `compute_position_size().full_kelly_fraction` — negative Kelly = severe risk penalty
+- [ ] If `report.approved == False` and `overall_score >= 60`: consider logging as shadow trade for learning
+- [ ] Store `(ticker, structure_type, overall_score, overall_grade, approved, as_of_date)` in trade journal for quality calibration over time
+- [ ] eTrading must provide: `open_position_count`, `portfolio_risk_pct`, `correlation_with_existing`, `strategy_concentration_pct`, `directional_score`, `drawdown_pct` — all from its own position/account DB
+
+---
+
+## 11. March 20 Addenda — Behavior Changes
+
+These are behavior changes to existing APIs (not new APIs). eTrading must update existing call sites.
+
+### 11.1 Minimum Credit Pre-Filter in `run_daily_checks()`
+
+`run_daily_checks()` now returns immediately (before running any of the 10 checks) if `entry_credit < $0.50`. The returned `ValidationReport` contains a single `FAIL` check named `"minimum_credit"` and `report.is_ready == False`.
+
+**What eTrading must do:** The existing check `if not report.is_ready: return` already handles this correctly. No code changes needed. However, the rejection reason should be surfaced to the user — check `report.checks[0].name == "minimum_credit"` to show a specific "credit too low" message rather than a generic validation failure.
+
+```python
+report = run_daily_checks(ticker, trade_spec, entry_credit=0.30, ...)
+if not report.is_ready:
+    if report.checks and report.checks[0].name == "minimum_credit":
+        log(f"SKIPPED (credit ${entry_credit:.2f} below minimum $0.50) — not viable after commissions")
+    else:
+        log(f"BLOCKED: {report.failures} check(s) failed")
+    return
+```
+
+The pre-filter threshold is `$0.50` per spread ($50/contract). Below this, commissions (~$1.30/contract round-trip for a 2-leg spread) consume a material fraction of the credit and the trade has no edge.
+
+### 11.2 Momentum Override in `score_entry_level()`
+
+`score_entry_level()` now **caps the score at 0.65** (the "wait" threshold) when MACD momentum strongly opposes the entry direction. This prevents "catching a falling knife" — a trade that looks oversold by RSI/Bollinger but has accelerating selling momentum will not score above "wait".
+
+**Trigger conditions:**
+- `direction="bullish"` and `macd_histogram < 0` and `|macd_histogram| > 1 ATR` → cap at 0.65
+- `direction="bearish"` and `macd_histogram > 0` and `|macd_histogram| > 1 ATR` → cap at 0.65
+
+The `EntryLevelScore.rationale` field includes a `"Momentum override: MACD hist X.XX (Y.Yz ATR) — selling/buying accelerating"` note when the cap fires.
+
+**What eTrading must do:** No API changes. The score itself is already capped — just display `score.rationale` in the UI so the trader sees why the score is "wait" despite other indicators being favorable. For `direction="neutral"` (IC, straddle), the cap never fires.
+
+### 11.3 Strategy Switching in `AdjustmentService.recommend_action()`
+
+`recommend_action()` now accepts an optional `entry_regime_id` parameter. When provided, it enables a new decision branch:
+
+**New decision rule:** If `position_status == TESTED` and `entry_regime_id` was R1/R2 (mean-reverting) but `current_regime_id == R3` (trending), the recommendation is `CONVERT_TO_DIAGONAL` instead of DO_NOTHING.
+
+```python
+decision: AdjustmentDecision = ma.adjustment.recommend_action(
+    trade_spec=trade_spec,
+    regime=current_regime_result,
+    technicals=tech,
+    entry_regime_id=2,   # NEW: regime at trade entry, stored in position DB
+)
+
+# If regime shifted from MR to trending while the IC was open:
+# decision.action == AdjustmentType.CONVERT_TO_DIAGONAL (urgency: "soon")
+# decision.rationale == "Regime shifted R2->R3 (trending): convert to bearish diagonal..."
+```
+
+**`CONVERT_TO_CALENDAR`** is defined in `AdjustmentType` but not yet wired into any decision path. It is reserved for future use when IV term structure analysis is available. Do not check for it in the current monitoring loop.
+
+**Two new `AdjustmentType` values** (added to the existing enum — update any exhaustive match/switch statements):
+
+| Value | Status | Meaning |
+|---|---|---|
+| `CONVERT_TO_DIAGONAL` | Active | Close IC, open diagonal aligned with trend direction |
+| `CONVERT_TO_CALENDAR` | Reserved (not yet wired) | Convert to calendar spread (future use) |
+
+**What eTrading must do:**
+- Store `entry_regime_id` in position DB when trade is entered (already required per section 9.8)
+- Pass `entry_regime_id` to `recommend_action()` in the monitoring loop
+- Handle `CONVERT_TO_DIAGONAL` in the order execution layer (same mechanics as `CONVERT`: close all IC legs, open diagonal legs from `decision.detail.new_legs`)
+- Add `CONVERT_TO_DIAGONAL` and `CONVERT_TO_CALENDAR` to any exhaustive switch/match on `AdjustmentType` to avoid unhandled-case errors
+
+### 11.4 IV Rank Quality by Ticker Type (Check #10)
+
+Check #10 (`iv_rank_quality`) added to `run_daily_checks()` uses ticker-type-specific thresholds — not a single global threshold. The `ticker_type` parameter (`"etf"`, `"equity"`, or `"index"`) must be set correctly:
+
+| Ticker type | Good (enter) | Wait | Avoid |
+|---|---|---|---|
+| ETF | IV rank ≥ 30 | 20–30 | < 20 |
+| Equity | IV rank ≥ 45 | 30–45 | < 30 |
+| Index (SPX, NDX) | IV rank ≥ 25 | 15–25 | < 15 |
+
+The check produces PASS/WARN/FAIL (`is_ready` is only False if FAIL, which requires IV rank below the "avoid" threshold for the type). Passing `ticker_type="etf"` for an individual stock like AAPL will generate spuriously optimistic pass/warn results.
+
+**What eTrading must do:** Determine `ticker_type` from the instrument type stored in the ticker registry or broker metadata, and pass it on every `run_daily_checks()` call. Default `"etf"` is only safe for actual ETFs.
+
+### 11.5 Integration Checklist — March 20 Changes
+
+| Change | eTrading action required |
+|---|---|
+| Min credit pre-filter | Display `"minimum_credit"` rejection distinctly (no code change to gate logic) |
+| Momentum override | Display `score.rationale` in entry UI — no logic change needed |
+| `CONVERT_TO_DIAGONAL` | Handle in order execution layer; pass `entry_regime_id` to `recommend_action()` |
+| `CONVERT_TO_CALENDAR` | Add to exhaustive match/switch as passthrough (not yet actionable) |
+| `ticker_type` in check #10 | Determine from instrument metadata, pass correctly on every `run_daily_checks()` call |
+| `audit_decision()` | New API — wire into pre-trade flow after validation passes (see section 10) |
