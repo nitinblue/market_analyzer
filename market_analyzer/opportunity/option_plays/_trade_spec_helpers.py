@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import date, time
 
 from market_analyzer.models.opportunity import LegAction, LegSpec, OrderSide, StructureType, TradeSpec
-from market_analyzer.models.vol_surface import TermStructurePoint, VolatilitySurface
+from market_analyzer.models.vol_surface import SkewSlice, TermStructurePoint, VolatilitySurface
 
 
 def _get_instrument_info(ticker: str):
@@ -115,6 +115,7 @@ def build_iron_condor_legs(
     expiration: date,
     dte: int,
     atm_iv: float,
+    skew: SkewSlice | None = None,
 ) -> tuple[list[LegSpec], float]:
     """Build iron condor legs. Returns (legs, wing_width_points)."""
     # Short strike distance from price (in ATR multiples)
@@ -126,6 +127,16 @@ def build_iron_condor_legs(
 
     short_put = compute_otm_strike(price, atr, short_mult, "put", price)
     short_call = compute_otm_strike(price, atr, short_mult, "call", price)
+
+    # Skew adjustment: shift short strikes toward richest IV premium
+    if skew is not None:
+        from market_analyzer.features.entry_levels import select_skew_optimal_strike
+        put_optimal = select_skew_optimal_strike(price, atr, regime_id, skew, "put")
+        if put_optimal.iv_advantage_pct >= 5.0:
+            short_put = put_optimal.optimal_strike
+        call_optimal = select_skew_optimal_strike(price, atr, regime_id, skew, "call")
+        if call_optimal.iv_advantage_pct >= 5.0:
+            short_call = call_optimal.optimal_strike
     long_put = snap_strike(short_put - wing_width, price)
     long_call = snap_strike(short_call + wing_width, price)
     wing_width_points = short_put - long_put

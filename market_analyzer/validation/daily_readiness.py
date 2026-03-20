@@ -1,6 +1,6 @@
 """Daily readiness and adversarial check orchestrators.
 
-run_daily_checks() — 7-check pre-trade validation.
+run_daily_checks() — 8-check pre-trade validation.
 run_adversarial_checks() — 3-check stress test.
 
 Both return a ValidationReport that is consumed by the CLI and functional tests.
@@ -8,8 +8,12 @@ Both return a ValidationReport that is consumed by the CLI and functional tests.
 from __future__ import annotations
 
 from datetime import date
+from typing import TYPE_CHECKING
 
 from market_analyzer.models.opportunity import TradeSpec
+
+if TYPE_CHECKING:
+    from market_analyzer.models.levels import LevelsAnalysis
 from market_analyzer.trade_lifecycle import (
     check_income_entry,
     compute_income_yield,
@@ -41,8 +45,9 @@ def run_daily_checks(
     iv_rank: float | None = None,
     iv_percentile: float | None = None,
     contracts: int = 1,
+    levels: LevelsAnalysis | None = None,
 ) -> ValidationReport:
-    """Run the 7-check daily pre-trade validation suite.
+    """Run the 8-check daily pre-trade validation suite.
 
     Checks (in order):
       1. commission_drag    — fees vs credit
@@ -52,6 +57,7 @@ def run_daily_checks(
       5. ev_positive        — expected value is positive
       6. entry_quality      — IV rank, DTE, RSI, regime confirmation
       7. exit_discipline    — trade spec has profit target, stop loss, exit DTE
+      8. strike_proximity   — short strikes backed by S/R levels
 
     Args:
         ticker: Underlying symbol.
@@ -66,6 +72,7 @@ def run_daily_checks(
         iv_rank: IV rank 0–100 (optional, improves POP accuracy).
         iv_percentile: IV percentile 0–100 (optional).
         contracts: Number of contracts for yield computation.
+        levels: LevelsAnalysis from ma.levels.analyze() (optional, enables strike proximity check).
     """
     checks: list[CheckResult] = []
 
@@ -171,6 +178,37 @@ def run_daily_checks(
         severity=exit_sev,
         message=exit_msg,
     ))
+
+    # ── Check 8: Strike proximity to S/R levels ──
+    if levels is not None:
+        from market_analyzer.features.entry_levels import compute_strike_support_proximity
+        atr_value = current_price * atr_pct / 100
+        proximity = compute_strike_support_proximity(trade_spec, levels, atr=atr_value)
+        if proximity.all_backed:
+            checks.append(CheckResult(
+                name="strike_proximity",
+                severity=Severity.PASS,
+                message=f"Short strikes backed by S/R levels (score {proximity.overall_score:.0%})",
+                detail=proximity.summary,
+                value=proximity.overall_score,
+                threshold=0.5,
+            ))
+        else:
+            checks.append(CheckResult(
+                name="strike_proximity",
+                severity=Severity.WARN,
+                message=f"Short strikes not fully backed (score {proximity.overall_score:.0%})",
+                detail=proximity.summary,
+                value=proximity.overall_score,
+                threshold=0.5,
+            ))
+    else:
+        checks.append(CheckResult(
+            name="strike_proximity",
+            severity=Severity.WARN,
+            message="No levels data — cannot assess strike proximity to S/R",
+            detail="Pass levels from ma.levels.analyze() for strike proximity check",
+        ))
 
     return ValidationReport(
         ticker=ticker,

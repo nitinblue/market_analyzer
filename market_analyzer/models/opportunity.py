@@ -495,6 +495,10 @@ class TradeSpec(BaseModel):
     entry_window_start: time | None = None  # Earliest time to submit order (e.g., 09:45)
     entry_window_end: time | None = None  # Latest time to submit order (e.g., 14:00)
     entry_window_timezone: str = "US/Eastern"  # Timezone for entry_window_start/end
+    entry_mode: str | None = None  # "limit" or "market"
+    limit_price: float | None = None  # Target limit order price
+    pullback_levels: list[dict] | None = None  # Serialized PullbackAlert list
+    strike_proximity_score: float | None = None  # 0-1 from compute_strike_support_proximity
     exit_plan: ExitPlan | None = None  # First-class exit plan (REQ-3)
     currency: str = "USD"  # Currency for all dollar amounts
     lot_size: int = 100  # Contract multiplier (100 for US equities, 10 for mini options)

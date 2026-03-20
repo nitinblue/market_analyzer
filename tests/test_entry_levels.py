@@ -490,3 +490,128 @@ class TestPullbackLevels:
         alerts = compute_pullback_levels(580.0, levels, atr=5.0)
         assert len(alerts) == 2
         assert alerts[0].alert_price > alerts[1].alert_price
+
+
+# ---------------------------------------------------------------------------
+# Task 7: Wire Skew into build_iron_condor_legs + TradeSpec entry fields
+# ---------------------------------------------------------------------------
+
+from market_analyzer.opportunity.option_plays._trade_spec_helpers import build_iron_condor_legs
+
+
+class TestSkewWiredIntoIC:
+    def test_no_skew_preserves_original_behavior(self) -> None:
+        legs_no_skew, wing = build_iron_condor_legs(
+            price=580.0, atr=5.0, regime_id=1,
+            expiration=date(2026, 4, 17), dte=30, atm_iv=0.22,
+        )
+        assert len(legs_no_skew) == 4
+        short_put = [l for l in legs_no_skew if l.role == "short_put"][0]
+        assert short_put.strike == 575.0
+
+    def test_with_steep_skew_shifts_strikes(self) -> None:
+        skew = _make_skew(atm_iv=0.22, put_skew=0.08, call_skew=0.03)
+        legs_with_skew, wing = build_iron_condor_legs(
+            price=580.0, atr=5.0, regime_id=1,
+            expiration=date(2026, 4, 17), dte=30, atm_iv=0.22,
+            skew=skew,
+        )
+        legs_no_skew, _ = build_iron_condor_legs(
+            price=580.0, atr=5.0, regime_id=1,
+            expiration=date(2026, 4, 17), dte=30, atm_iv=0.22,
+        )
+        short_put_skewed = [l for l in legs_with_skew if l.role == "short_put"][0]
+        short_put_no_skew = [l for l in legs_no_skew if l.role == "short_put"][0]
+        assert short_put_skewed.strike <= short_put_no_skew.strike
+
+    def test_flat_skew_no_change(self) -> None:
+        skew = _make_skew(atm_iv=0.22, put_skew=0.005, call_skew=0.003)
+        legs_flat, _ = build_iron_condor_legs(
+            price=580.0, atr=5.0, regime_id=1,
+            expiration=date(2026, 4, 17), dte=30, atm_iv=0.22, skew=skew,
+        )
+        legs_none, _ = build_iron_condor_legs(
+            price=580.0, atr=5.0, regime_id=1,
+            expiration=date(2026, 4, 17), dte=30, atm_iv=0.22,
+        )
+        sp_flat = [l for l in legs_flat if l.role == "short_put"][0]
+        sp_none = [l for l in legs_none if l.role == "short_put"][0]
+        assert sp_flat.strike == sp_none.strike
+
+
+class TestTradeSpecEntryFields:
+    def test_new_fields_default_none(self) -> None:
+        ts = TradeSpec(
+            ticker="SPY",
+            legs=[_make_leg("short_put", LegAction.SELL_TO_OPEN, "put", 570.0)],
+            underlying_price=580.0, target_dte=30,
+            target_expiration=date(2026, 4, 17), spec_rationale="test",
+        )
+        assert ts.entry_mode is None
+        assert ts.limit_price is None
+        assert ts.pullback_levels is None
+        assert ts.strike_proximity_score is None
+
+
+# ---------------------------------------------------------------------------
+# Task 8: Wire proximity check into daily validation
+# ---------------------------------------------------------------------------
+
+from market_analyzer.validation.daily_readiness import run_daily_checks
+from market_analyzer.validation.models import Severity
+
+
+class TestStrikeProximityInDailyChecks:
+    def _run_daily_with_levels(self, supports, resistances):
+        legs = [
+            _make_leg("short_put", LegAction.SELL_TO_OPEN, "put", 570.0),
+            _make_leg("long_put", LegAction.BUY_TO_OPEN, "put", 565.0),
+            _make_leg("short_call", LegAction.SELL_TO_OPEN, "call", 590.0),
+            _make_leg("long_call", LegAction.BUY_TO_OPEN, "call", 595.0),
+        ]
+        ts = _make_trade_spec(legs)
+        levels = _make_levels(supports, resistances)
+        return run_daily_checks(
+            ticker="SPY", trade_spec=ts, entry_credit=3.00,
+            regime_id=1, atr_pct=0.86, current_price=580.0,
+            avg_bid_ask_spread_pct=1.0, dte=30, rsi=50.0,
+            levels=levels,
+        )
+
+    def test_backed_strikes_pass(self) -> None:
+        report = self._run_daily_with_levels(
+            supports=[(571.0, 0.85, ["sma_200", "swing_support"])],
+            resistances=[(592.0, 0.80, ["swing_resistance"])],
+        )
+        prox = [c for c in report.checks if c.name == "strike_proximity"]
+        assert len(prox) == 1
+        assert prox[0].severity == Severity.PASS
+
+    def test_unbacked_strikes_warn(self) -> None:
+        report = self._run_daily_with_levels(supports=[], resistances=[])
+        prox = [c for c in report.checks if c.name == "strike_proximity"]
+        assert len(prox) == 1
+        assert prox[0].severity == Severity.WARN
+
+    def test_no_levels_data_warn(self) -> None:
+        legs = [
+            _make_leg("short_put", LegAction.SELL_TO_OPEN, "put", 570.0),
+            _make_leg("long_put", LegAction.BUY_TO_OPEN, "put", 565.0),
+        ]
+        ts = _make_trade_spec(legs)
+        report = run_daily_checks(
+            ticker="SPY", trade_spec=ts, entry_credit=3.00,
+            regime_id=1, atr_pct=0.86, current_price=580.0,
+            avg_bid_ask_spread_pct=1.0, dte=30, rsi=50.0,
+            levels=None,
+        )
+        prox = [c for c in report.checks if c.name == "strike_proximity"]
+        assert len(prox) == 1
+        assert prox[0].severity == Severity.WARN
+
+    def test_total_checks_now_8(self) -> None:
+        report = self._run_daily_with_levels(
+            supports=[(571.0, 0.85, ["sma_200"])],
+            resistances=[(592.0, 0.80, ["swing_resistance"])],
+        )
+        assert len(report.checks) == 8
