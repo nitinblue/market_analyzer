@@ -52,8 +52,11 @@ def check_gamma_stress(
     if max_loss <= 0:
         return CheckResult(
             name="gamma_stress",
-            severity=Severity.FAIL,
-            message="Max loss is zero or negative — invalid trade parameters",
+            severity=Severity.WARN,
+            message=(
+                "Cannot assess gamma risk: entry credit meets or exceeds wing width "
+                "(max_loss ≤ 0). Connect broker for accurate quotes."
+            ),
         )
 
     risk_reward = max_loss / max_profit if max_profit > 0 else 999.0
@@ -166,8 +169,11 @@ def check_breakeven_spread(
     if max_loss <= 0 or max_profit <= 0:
         return CheckResult(
             name="breakeven_spread",
-            severity=Severity.FAIL,
-            message="Cannot compute break-even: invalid trade parameters",
+            severity=Severity.WARN,
+            message=(
+                "Cannot compute break-even spread: entry credit meets or exceeds wing width "
+                "(max_loss ≤ 0 or credit ≤ 0). Connect broker for accurate quotes."
+            ),
         )
 
     # ATR-based rough POP estimate (regime-neutral, ~R1 conditions)

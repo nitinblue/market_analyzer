@@ -191,6 +191,40 @@ class TestPOPEstimate:
         # EV should reflect POP × profit - (1-POP) × loss
         assert isinstance(pop.expected_value, float)
 
+    def test_max_loss_is_positive_for_valid_ic(self):
+        """Regression: max_loss must be positive for a 5-wide IC with credit < wing width."""
+        pop = estimate_pop(
+            _ic_spec(), entry_price=0.72, regime_id=1,
+            atr_pct=1.2, current_price=221.0,
+        )
+        assert pop is not None
+        assert pop.max_loss > 0, f"max_loss should be positive, got {pop.max_loss}"
+        # For 5-wide IC with $0.72 credit: max_loss = (5.0 - 0.72) * 100 = $428
+        assert abs(pop.max_loss - 428.0) < 1.0, f"Expected ~$428, got {pop.max_loss}"
+
+    def test_max_loss_zero_when_credit_exceeds_wing_returns_degraded_result(self):
+        """Regression: when credit estimate exceeds wing width, return degraded POPEstimate
+        with max_loss=0 and a data_gap — do NOT silently use negative max_loss."""
+        # 5-wide IC but entry_price=6.10 (overestimated without broker)
+        pop = estimate_pop(
+            _ic_spec(), entry_price=6.10, regime_id=1,
+            atr_pct=1.2, current_price=221.0,
+        )
+        assert pop is not None, "Should return degraded result, not None"
+        assert pop.max_loss == 0.0, f"max_loss should be 0.0 (degraded), got {pop.max_loss}"
+        assert pop.expected_value == 0.0
+        assert len(pop.data_gaps) > 0, "Should have a data_gap explaining why EV is unavailable"
+        assert pop.trade_quality == "poor"
+
+    def test_max_profit_correct_for_5_wide_ic(self):
+        """Regression: max_profit = credit × lot_size = 0.72 × 100 = $72."""
+        pop = estimate_pop(
+            _ic_spec(), entry_price=0.72, regime_id=1,
+            atr_pct=1.2, current_price=221.0,
+        )
+        assert pop is not None
+        assert abs(pop.max_profit - 72.0) < 1.0, f"Expected max_profit ~$72, got {pop.max_profit}"
+
 
 # ── F10: Income Entry Check ──
 

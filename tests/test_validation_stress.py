@@ -71,3 +71,41 @@ class TestBreakevenSpread:
         result = check_breakeven_spread(_ic_spec(), entry_credit=1.50, atr_pct=1.0)
         assert result.value is not None
         assert result.value > 0  # break-even spread pct
+
+
+# ── Regression: graceful degradation when credit estimate exceeds wing width ──
+
+
+class TestGammaStressGracefulDegradation:
+    """Bug fix: stress checks must WARN (not FAIL) when parameters are invalid.
+
+    Previously both checks returned Severity.FAIL with "max loss is zero or negative"
+    when entry_credit >= wing_width. FAIL means "trade is dangerous", but the real
+    issue is insufficient data — so WARN is correct.
+    """
+
+    def test_gamma_stress_warns_not_fails_when_credit_exceeds_wing(self) -> None:
+        """Regression: credit > wing_width should return WARN, not FAIL."""
+        # 5-wide IC but credit = 6.10 (overestimated without broker)
+        result = check_gamma_stress(_ic_spec(wing_width=5.0), entry_credit=6.10, atr_pct=1.0)
+        assert result.severity == Severity.WARN, (
+            f"Expected WARN (insufficient data), got {result.severity}: {result.message}"
+        )
+        assert "broker" in result.message.lower() or "cannot" in result.message.lower()
+
+    def test_gamma_stress_warns_when_credit_equals_wing(self) -> None:
+        """Edge case: credit exactly equals wing width → max_loss = 0 → WARN."""
+        result = check_gamma_stress(_ic_spec(wing_width=5.0), entry_credit=5.0, atr_pct=1.0)
+        assert result.severity == Severity.WARN
+
+    def test_breakeven_spread_warns_not_fails_when_credit_exceeds_wing(self) -> None:
+        """Regression: invalid params should return WARN, not FAIL."""
+        result = check_breakeven_spread(_ic_spec(wing_width=5.0), entry_credit=6.10, atr_pct=1.0)
+        assert result.severity == Severity.WARN, (
+            f"Expected WARN (insufficient data), got {result.severity}: {result.message}"
+        )
+
+    def test_breakeven_spread_warns_when_credit_is_zero(self) -> None:
+        """Edge case: zero credit → no edge to measure → WARN."""
+        result = check_breakeven_spread(_ic_spec(), entry_credit=0.0, atr_pct=1.0)
+        assert result.severity == Severity.WARN

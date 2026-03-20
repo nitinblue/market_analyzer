@@ -747,6 +747,47 @@ def estimate_pop(
             max_profit = (wing - entry_price) * lot_size * contracts
             max_loss = entry_price * lot_size * contracts
 
+        # Guard: entry_price must not exceed wing_width (would imply free money or bad estimate)
+        if max_loss <= 0:
+            gaps: list[DataGap] = []
+            gaps.append(DataGap(
+                field="max_loss",
+                reason=(
+                    f"entry_price ${entry_price:.2f} ≥ wing_width {wing:.2f} — "
+                    "credit estimate exceeds wing width; max_loss invalid. "
+                    "Connect broker for accurate pricing."
+                ),
+                impact="high",
+                affects="EV, R:R, Kelly sizing, and stress tests are all unreliable",
+            ))
+            if iv_rank is None:
+                gaps.append(DataGap(
+                    field="pop",
+                    reason="no IV rank — using ATR-only expected move",
+                    impact="medium",
+                    affects="POP estimate may be 10-15% off without IV calibration",
+                ))
+            regime_names = {1: "R1 Low-Vol MR", 2: "R2 High-Vol MR", 3: "R3 Low-Vol Trend", 4: "R4 High-Vol Trend"}
+            iv_note = f", IV rank {iv_rank:.0f}" if iv_rank is not None else ""
+            return POPEstimate(
+                pop_pct=round(pop, 4),
+                expected_value=0.0,
+                max_profit=round(max_profit, 2),
+                max_loss=0.0,
+                risk_reward_ratio=99.0,
+                trade_quality="poor",
+                trade_quality_score=0.0,
+                method="regime_historical",
+                regime_id=regime_id,
+                notes=(
+                    f"Regime {regime_names.get(regime_id, f'R{regime_id}')}: "
+                    f"expected {dte}d move ±${adjusted_move:.1f} "
+                    f"(ATR {atr_pct:.1f}%, regime factor {regime_factor:.2f}{iv_note}) — "
+                    "EV unavailable: credit estimate exceeds wing width"
+                ),
+                data_gaps=gaps,
+            )
+
         ev = pop * max_profit - (1 - pop) * max_loss
 
         regime_names = {1: "R1 Low-Vol MR", 2: "R2 High-Vol MR", 3: "R3 Low-Vol Trend", 4: "R4 High-Vol Trend"}

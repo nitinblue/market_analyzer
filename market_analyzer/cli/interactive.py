@@ -1735,9 +1735,17 @@ Requires --broker connection."""
                     pass  # fall through to estimate
 
             if entry_credit is None or entry_credit <= 0:
-                # Fallback: estimate from IV — approximate IC credit ≈ front_iv × price × 0.05
+                # Fallback: estimate from IV — approximate IC credit per spread.
+                # Heuristic: wing_width × front_iv × 0.40 captures ~20-30% of the
+                # wing width as credit at typical IV levels. This is tighter than the
+                # old `front_iv × price × 0.05` which overestimates on high-priced tickers.
+                # Example: 5-wide GLD ($426, IV 28.6%): 5 × 0.286 × 0.40 = $0.57/share
+                # (realistic range for a 5-wide IC is $0.60–$1.80)
                 front_iv = vol.front_iv if vol else 0.20
-                entry_credit = round(front_iv * current_price * 0.05, 2)
+                wing_pts = spec.wing_width_points if spec.wing_width_points else 5.0
+                entry_credit = round(wing_pts * front_iv * 0.40, 2)
+                # Floor at $0.05/share so we never feed zero into stress checks
+                entry_credit = max(entry_credit, 0.05)
                 credit_source = "IV estimate (no broker quotes)"
                 print(f"  {_styled('⚠ WARN', 'yellow')}  {'broker_quotes':<22s}  "
                       f"No live quotes — using credit estimate ${entry_credit:.2f} ({credit_source})")
