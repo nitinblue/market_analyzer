@@ -412,3 +412,71 @@ class TestQuoteSourceProperty:
         qs = OptionQuoteService(market_data=MockMarketData())
         svc = AdjustmentService(quote_service=qs)
         assert "real quotes" in svc.quote_source
+
+
+class TestStrategySwitch:
+    """Tests for regime-change strategy switching in recommend_action()."""
+
+    def test_r1_to_r3_converts_to_diagonal(self) -> None:
+        """TESTED + R1->R3 regime change -> CONVERT_TO_DIAGONAL."""
+        svc = AdjustmentService()
+        # Price near short put (580) within 1 ATR (8) to trigger TESTED
+        spec = _make_iron_condor(price=600, short_put=580, short_call=620)
+        tech = _make_technicals(price=583.0, atr=8.0)
+        regime = _make_regime(3)
+
+        decision = svc.recommend_action(spec, regime, tech, entry_regime_id=1)
+        assert decision.action == AdjustmentType.CONVERT_TO_DIAGONAL
+        assert "R1" in decision.rationale and "R3" in decision.rationale
+
+    def test_r2_to_r3_converts_to_diagonal(self) -> None:
+        """TESTED + R2->R3 regime change -> CONVERT_TO_DIAGONAL."""
+        svc = AdjustmentService()
+        spec = _make_iron_condor(price=600, short_put=580, short_call=620)
+        tech = _make_technicals(price=583.0, atr=8.0)
+        regime = _make_regime(3)
+
+        decision = svc.recommend_action(spec, regime, tech, entry_regime_id=2)
+        assert decision.action == AdjustmentType.CONVERT_TO_DIAGONAL
+
+    def test_no_entry_regime_uses_existing_logic(self) -> None:
+        """Without entry_regime_id, no strategy switching — uses existing logic."""
+        svc = AdjustmentService()
+        spec = _make_iron_condor(price=600, short_put=580, short_call=620)
+        tech = _make_technicals(price=583.0, atr=8.0)
+        regime = _make_regime(3)
+
+        decision = svc.recommend_action(spec, regime, tech)
+        # Existing logic: TESTED + R3 -> ROLL_AWAY
+        assert decision.action == AdjustmentType.ROLL_AWAY
+
+    def test_safe_position_no_switching(self) -> None:
+        """SAFE position doesn't trigger switching even with regime change."""
+        svc = AdjustmentService()
+        spec = _make_iron_condor(price=600, short_put=580, short_call=620)
+        tech = _make_technicals(price=600.0, atr=8.0)
+        regime = _make_regime(3)
+
+        decision = svc.recommend_action(spec, regime, tech, entry_regime_id=1)
+        assert decision.action == AdjustmentType.DO_NOTHING
+
+    def test_r1_to_r4_still_closes(self) -> None:
+        """TESTED + R4 -> CLOSE_FULL, even with entry_regime_id provided."""
+        svc = AdjustmentService()
+        spec = _make_iron_condor(price=600, short_put=580, short_call=620)
+        tech = _make_technicals(price=583.0, atr=8.0)
+        regime = _make_regime(4)
+
+        decision = svc.recommend_action(spec, regime, tech, entry_regime_id=1)
+        assert decision.action == AdjustmentType.CLOSE_FULL
+
+    def test_r3_to_r3_no_switching(self) -> None:
+        """Same regime entry and current -> no switching (not MR->trending)."""
+        svc = AdjustmentService()
+        spec = _make_iron_condor(price=600, short_put=580, short_call=620)
+        tech = _make_technicals(price=583.0, atr=8.0)
+        regime = _make_regime(3)
+
+        decision = svc.recommend_action(spec, regime, tech, entry_regime_id=3)
+        # Not R1/R2 -> R3, so no switching; existing R3 logic: ROLL_AWAY
+        assert decision.action == AdjustmentType.ROLL_AWAY

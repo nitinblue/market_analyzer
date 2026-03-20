@@ -20,6 +20,8 @@ class AdjustmentType(StrEnum):
     NARROW_UNTESTED = "narrow_untested"
     ADD_WING = "add_wing"
     CONVERT = "convert"
+    CONVERT_TO_DIAGONAL = "convert_to_diagonal"
+    CONVERT_TO_CALENDAR = "convert_to_calendar"
 
 
 class PositionStatus(StrEnum):

@@ -135,6 +135,7 @@ class AdjustmentService:
         regime: RegimeResult,
         technicals: TechnicalSnapshot,
         vol_surface: VolatilitySurface | None = None,
+        entry_regime_id: int | None = None,
     ) -> AdjustmentDecision:
         """Return a single deterministic adjustment action for systematic trading.
 
@@ -210,6 +211,23 @@ class AdjustmentService:
             )
 
         if status == PositionStatus.TESTED:
+            # Strategy switching: if regime changed from MR to trending
+            if entry_regime_id is not None and entry_regime_id in (1, 2) and regime_id == 3:
+                trend = technicals.trend_direction if hasattr(technicals, 'trend_direction') else None
+                trend_desc = "bullish" if trend == "up" else "bearish" if trend == "down" else "unknown"
+                return AdjustmentDecision(
+                    action=AdjustmentType.CONVERT_TO_DIAGONAL,
+                    urgency="soon",
+                    rationale=(
+                        f"Regime shifted R{entry_regime_id}->R3 (trending): "
+                        f"convert to {trend_desc} diagonal to align with trend direction"
+                    ),
+                    detail=self._find_adjustment(analysis.adjustments, AdjustmentType.CONVERT_TO_DIAGONAL)
+                           or self._find_adjustment(analysis.adjustments, AdjustmentType.CONVERT),
+                    position_status=status,
+                    regime_id=regime_id,
+                )
+
             if regime_id == 4:
                 return AdjustmentDecision(
                     action=AdjustmentType.CLOSE_FULL,
