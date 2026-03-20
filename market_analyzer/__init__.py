@@ -597,6 +597,23 @@ from market_analyzer.trade_lifecycle import (
     assess_overnight_risk,
 )
 
+# Decision audit framework
+from market_analyzer.models.decision_audit import (
+    DecisionReport,
+    GradedCheck,
+    LegAudit,
+    TradeAudit,
+    PortfolioAudit,
+    RiskAudit,
+)
+from market_analyzer.features.decision_audit import (
+    audit_decision,
+    audit_legs,
+    audit_trade,
+    audit_portfolio,
+    audit_risk,
+)
+
 __all__ = [
     # Config
     "Settings",

@@ -2463,6 +2463,131 @@ Requires --broker connection."""
         except Exception as e:
             print(f"Error: {e}")
 
+    def do_audit(self, arg: str) -> None:
+        """Full 4-level trade decision audit: audit TICKER [CAPITAL]
+
+        Evaluates a proposed iron condor at leg, trade, portfolio, and risk levels.
+        Produces a Decision Report Card with scores and grades.
+
+        Usage: audit TICKER [CAPITAL]
+          TICKER  — underlying symbol (default: SPY)
+          CAPITAL — account size in dollars (default: 35000)
+
+        Example: audit SPY 50000
+        """
+        parts = arg.strip().split()
+        ticker = parts[0].upper() if parts else "SPY"
+        capital = float(parts[1]) if len(parts) > 1 else 35000.0
+
+        try:
+            ma = self.ma
+            regime = ma.regime.detect(ticker)
+            tech = ma.technicals.snapshot(ticker)
+            vol = ma.vol_surface.surface(ticker)
+            levels = ma.levels.analyze(ticker)
+
+            from market_analyzer.opportunity.option_plays.iron_condor import assess_iron_condor
+            ic = assess_iron_condor(ticker, regime, tech, vol)
+            if ic.trade_spec is None:
+                print(f"No trade spec for {ticker}")
+                return
+
+            ts = ic.trade_spec
+            wing = ts.wing_width_points or 5.0
+            ec = wing * vol.front_iv * 0.40 if vol else 1.00
+
+            from market_analyzer.trade_lifecycle import estimate_pop
+            pop = estimate_pop(ts, ec, regime.regime.value, tech.atr_pct, tech.current_price)
+
+            from market_analyzer.features.entry_levels import score_entry_level
+            entry = score_entry_level(tech, levels, direction="neutral")
+
+            from market_analyzer.features.position_sizing import (
+                compute_position_size,
+                PortfolioExposure,
+                compute_kelly_fraction,
+            )
+            kelly_f = compute_kelly_fraction(pop.pop_pct, pop.max_profit, pop.max_loss)
+            sz = compute_position_size(
+                pop_pct=pop.pop_pct,
+                max_profit=pop.max_profit,
+                max_loss=pop.max_loss,
+                capital=capital,
+                risk_per_contract=wing * ts.lot_size,
+                wing_width=wing,
+                regime_id=regime.regime.value,
+                exposure=PortfolioExposure(open_position_count=0, max_positions=5),
+            )
+
+            from market_analyzer.validation.stress_scenarios import check_gamma_stress, check_vega_shock
+            gamma = check_gamma_stress(ts, ec, tech.atr_pct)
+            vega = check_vega_shock(ts, ec)
+            stress_ok = gamma.severity.value != "fail" and vega.severity.value != "fail"
+
+            skew = vol.skew_by_expiry[0] if vol and vol.skew_by_expiry else None
+
+            from market_analyzer.features.decision_audit import audit_decision
+            report = audit_decision(
+                ticker=ticker,
+                trade_spec=ts,
+                levels=levels,
+                skew=skew,
+                atr=tech.atr,
+                pop_pct=pop.pop_pct,
+                expected_value=pop.expected_value,
+                entry_credit=ec,
+                entry_score=entry.overall_score,
+                regime_id=regime.regime.value,
+                atr_pct=tech.atr_pct,
+                capital=capital,
+                contracts=sz.recommended_contracts,
+                stress_passed=stress_ok,
+                kelly_fraction=kelly_f,
+            )
+
+            has_broker = getattr(self.ma, "market_data", None) is not None
+            if not has_broker:
+                print(_styled(
+                    "  *** ESTIMATED DATA — No broker connected ***",
+                    "yellow",
+                ))
+
+            print(f"\nDECISION AUDIT — {ticker} {ts.structure_type or 'IC'} — R{regime.regime.value}")
+            print("=" * 55)
+
+            if report.leg_audit:
+                la = report.leg_audit
+                print(f"\nLEG LEVEL ({len(la.checks)} checks) — {la.score}/100 {la.grade}")
+                for c in la.checks:
+                    print(f"  {c.grade:3s}  {c.name:<25s} {c.detail}")
+
+            ta = report.trade_audit
+            print(f"\nTRADE LEVEL ({len(ta.checks)} checks) — {ta.score}/100 {ta.grade}")
+            for c in ta.checks:
+                print(f"  {c.grade:3s}  {c.name:<25s} {c.detail}")
+
+            pa = report.portfolio_audit
+            print(f"\nPORTFOLIO LEVEL ({len(pa.checks)} checks) — {pa.score}/100 {pa.grade}")
+            for c in pa.checks:
+                print(f"  {c.grade:3s}  {c.name:<25s} {c.detail}")
+
+            ra = report.risk_audit
+            print(f"\nRISK LEVEL ({len(ra.checks)} checks) — {ra.score}/100 {ra.grade}")
+            for c in ra.checks:
+                print(f"  {c.grade:3s}  {c.name:<25s} {c.detail}")
+
+            print(f"\n{'=' * 55}")
+            verdict_color = "green" if report.approved else "red"
+            print(_styled(
+                f"OVERALL: {report.overall_score}/100 {report.overall_grade} — "
+                f"{'APPROVED' if report.approved else 'REJECTED'}",
+                verdict_color,
+            ))
+            print("=" * 55)
+
+        except Exception as e:
+            print(f"Error: {e}")
+
     def do_adjust(self, arg: str) -> None:
         """Analyze trade adjustments for a ticker.\nUsage: adjust TICKER"""
         tickers = self._parse_tickers(arg)
