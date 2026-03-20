@@ -432,3 +432,97 @@ class TestUnifiedPositionSize:
         )
         assert result.recommended_contracts >= 0
         assert "correlation_penalty" in result.components
+
+
+# ---------------------------------------------------------------------------
+# Task 9: AdjustmentOutcome + analyze_adjustment_effectiveness()
+# ---------------------------------------------------------------------------
+
+
+from datetime import date as dt_date  # noqa: E402
+from market_analyzer.models.adjustment import AdjustmentOutcome, AdjustmentEffectiveness  # noqa: E402
+from market_analyzer.features.position_sizing import analyze_adjustment_effectiveness  # noqa: E402
+
+
+class TestAdjustmentEffectiveness:
+    def _make_outcome(
+        self, adj_type: str = "roll_away", cost: float = -50.0,
+        pnl: float = 100.0, profitable: bool = True,
+        regime: int = 1, status: str = "tested",
+    ) -> AdjustmentOutcome:
+        return AdjustmentOutcome(
+            trade_id="test-1", adjustment_type=adj_type,
+            adjustment_date=dt_date(2026, 3, 1), cost=cost,
+            subsequent_pnl=pnl, was_profitable=profitable,
+            regime_at_adjustment=regime, position_status_at_adjustment=status,
+        )
+
+    def test_empty_outcomes(self) -> None:
+        result = analyze_adjustment_effectiveness([])
+        assert result.total_outcomes == 0
+        assert "No adjustment data" in result.recommendations[0]
+
+    def test_single_type_win_rate(self) -> None:
+        outcomes = [
+            self._make_outcome(profitable=True),
+            self._make_outcome(profitable=True),
+            self._make_outcome(profitable=False),
+        ]
+        result = analyze_adjustment_effectiveness(outcomes)
+        assert result.total_outcomes == 3
+        assert result.by_type["roll_away"]["win_rate"] == pytest.approx(0.67, abs=0.01)
+        assert result.by_type["roll_away"]["count"] == 3
+
+    def test_multiple_types(self) -> None:
+        outcomes = [
+            self._make_outcome(adj_type="roll_away", profitable=True),
+            self._make_outcome(adj_type="roll_away", profitable=True),
+            self._make_outcome(adj_type="close_full", profitable=False),
+        ]
+        result = analyze_adjustment_effectiveness(outcomes)
+        assert "roll_away" in result.by_type
+        assert "close_full" in result.by_type
+
+    def test_regime_grouping(self) -> None:
+        outcomes = [
+            self._make_outcome(regime=1, profitable=True),
+            self._make_outcome(regime=2, profitable=False),
+            self._make_outcome(regime=2, profitable=True),
+        ]
+        result = analyze_adjustment_effectiveness(outcomes)
+        assert 1 in result.by_regime
+        assert 2 in result.by_regime
+
+    def test_recommendations_generated(self) -> None:
+        outcomes = [
+            self._make_outcome(adj_type="roll_away", profitable=True),
+            self._make_outcome(adj_type="roll_away", profitable=True),
+            self._make_outcome(adj_type="roll_away", profitable=True),
+        ]
+        result = analyze_adjustment_effectiveness(outcomes)
+        assert any("ROLL_AWAY" in r for r in result.recommendations)
+
+    def test_avoid_recommendation_low_win_rate(self) -> None:
+        outcomes = [
+            self._make_outcome(adj_type="roll_out", profitable=False),
+            self._make_outcome(adj_type="roll_out", profitable=False),
+            self._make_outcome(adj_type="roll_out", profitable=True),
+        ]
+        result = analyze_adjustment_effectiveness(outcomes)
+        assert any("Avoid" in r and "ROLL_OUT" in r for r in result.recommendations)
+
+    def test_avg_cost_calculation(self) -> None:
+        outcomes = [
+            self._make_outcome(cost=-100.0),
+            self._make_outcome(cost=-50.0),
+            self._make_outcome(cost=0.0),
+        ]
+        result = analyze_adjustment_effectiveness(outcomes)
+        assert result.by_type["roll_away"]["avg_cost"] == pytest.approx(-50.0, abs=0.01)
+
+    def test_serialization(self) -> None:
+        outcomes = [self._make_outcome()]
+        result = analyze_adjustment_effectiveness(outcomes)
+        d = result.model_dump()
+        assert "by_type" in d
+        assert "recommendations" in d

@@ -89,3 +89,25 @@ class AdjustmentAnalysis(BaseModel):
     adjustments: list[AdjustmentOption]
     recommendation: str
     summary: str
+
+
+class AdjustmentOutcome(BaseModel):
+    """Outcome tracking for a single adjustment decision."""
+
+    trade_id: str
+    adjustment_type: str  # AdjustmentType value
+    adjustment_date: date
+    cost: float  # What the adjustment cost (negative = credit received)
+    subsequent_pnl: float  # P&L from adjustment date to close
+    was_profitable: bool  # cost + subsequent_pnl > 0
+    regime_at_adjustment: int
+    position_status_at_adjustment: str  # PositionStatus value
+
+
+class AdjustmentEffectiveness(BaseModel):
+    """Aggregate effectiveness analysis of past adjustments."""
+
+    by_type: dict[str, dict]  # Per adjustment type: win_rate, avg_cost, avg_subsequent_pnl
+    by_regime: dict[int, dict]  # Per regime: which adjustments work best
+    recommendations: list[str]  # "ROLL_AWAY wins 62% in R2, skip in R4"
+    total_outcomes: int

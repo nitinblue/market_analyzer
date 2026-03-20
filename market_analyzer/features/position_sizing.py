@@ -445,3 +445,96 @@ def compute_position_size(
         rationale=" | ".join(parts),
         components=components,
     )
+
+
+from market_analyzer.models.adjustment import AdjustmentEffectiveness, AdjustmentOutcome  # noqa: E402
+
+
+def analyze_adjustment_effectiveness(
+    outcomes: list[AdjustmentOutcome],
+) -> AdjustmentEffectiveness:
+    """Analyze historical adjustment outcomes to learn which adjustments work.
+
+    Groups outcomes by adjustment type and regime, computes win rates and
+    average P&L, and generates actionable recommendations.
+
+    Args:
+        outcomes: List of past adjustment outcomes.
+
+    Returns:
+        AdjustmentEffectiveness with per-type and per-regime statistics.
+    """
+    if not outcomes:
+        return AdjustmentEffectiveness(
+            by_type={}, by_regime={}, recommendations=["No adjustment data available"],
+            total_outcomes=0,
+        )
+
+    # Group by type
+    by_type: dict[str, list[AdjustmentOutcome]] = {}
+    for o in outcomes:
+        by_type.setdefault(o.adjustment_type, []).append(o)
+
+    type_stats: dict[str, dict] = {}
+    for adj_type, type_outcomes in by_type.items():
+        wins = sum(1 for o in type_outcomes if o.was_profitable)
+        total = len(type_outcomes)
+        type_stats[adj_type] = {
+            "count": total,
+            "win_rate": round(wins / total, 2) if total > 0 else 0.0,
+            "avg_cost": round(sum(o.cost for o in type_outcomes) / total, 2),
+            "avg_subsequent_pnl": round(sum(o.subsequent_pnl for o in type_outcomes) / total, 2),
+        }
+
+    # Group by regime
+    by_regime_raw: dict[int, list[AdjustmentOutcome]] = {}
+    for o in outcomes:
+        by_regime_raw.setdefault(o.regime_at_adjustment, []).append(o)
+
+    regime_stats: dict[int, dict] = {}
+    for regime_id, regime_outcomes in by_regime_raw.items():
+        # Find best adjustment type for this regime
+        regime_by_type: dict[str, list[AdjustmentOutcome]] = {}
+        for o in regime_outcomes:
+            regime_by_type.setdefault(o.adjustment_type, []).append(o)
+
+        best_type = ""
+        best_rate = 0.0
+        for adj_type, adj_outcomes in regime_by_type.items():
+            wins = sum(1 for o in adj_outcomes if o.was_profitable)
+            rate = wins / len(adj_outcomes) if adj_outcomes else 0.0
+            if rate > best_rate:
+                best_rate = rate
+                best_type = adj_type
+
+        regime_stats[regime_id] = {
+            "count": len(regime_outcomes),
+            "best_type": best_type,
+            "best_win_rate": round(best_rate, 2),
+        }
+
+    # Generate recommendations
+    recommendations: list[str] = []
+    for adj_type, stats in type_stats.items():
+        if stats["count"] >= 3:
+            rate_pct = stats["win_rate"] * 100
+            if stats["win_rate"] >= 0.60:
+                recommendations.append(
+                    f"{adj_type.upper()} wins {rate_pct:.0f}% of the time "
+                    f"(n={stats['count']}, avg P&L ${stats['avg_subsequent_pnl']:.0f})"
+                )
+            elif stats["win_rate"] < 0.40:
+                recommendations.append(
+                    f"Avoid {adj_type.upper()} — only {rate_pct:.0f}% win rate "
+                    f"(n={stats['count']})"
+                )
+
+    if not recommendations:
+        recommendations.append("Insufficient data for reliable recommendations (need 3+ per type)")
+
+    return AdjustmentEffectiveness(
+        by_type=type_stats,
+        by_regime=regime_stats,
+        recommendations=recommendations,
+        total_outcomes=len(outcomes),
+    )
