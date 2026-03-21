@@ -1980,3 +1980,110 @@ The check produces PASS/WARN/FAIL (`is_ready` is only False if FAIL, which requi
 | `CONVERT_TO_CALENDAR` | Add to exhaustive match/switch as passthrough (not yet actionable) |
 | `ticker_type` in check #10 | Determine from instrument metadata, pass correctly on every `run_daily_checks()` call |
 | `audit_decision()` | New API — wire into pre-trade flow after validation passes (see section 10) |
+
+---
+
+## 12. Crash Sentinel — Market Health Monitoring
+
+eTrading MUST run the crash sentinel on every monitoring cycle (minimum every 15 minutes during market hours). The sentinel returns a signal level and playbook phase that directly controls position management.
+
+### API
+
+```python
+from market_analyzer import assess_crash_sentinel, SentinelSignal
+
+report = assess_crash_sentinel(
+    regime_results={
+        "SPY": {"regime_id": 2, "confidence": 1.0, "r4_prob": 0.0},
+        "QQQ": {"regime_id": 4, "confidence": 0.96, "r4_prob": 0.96},
+        "IWM": {"regime_id": 1, "confidence": 0.99, "r4_prob": 0.0},
+        "GLD": {"regime_id": 1, "confidence": 1.0, "r4_prob": 0.0},
+        "TLT": {"regime_id": 2, "confidence": 1.0, "r4_prob": 0.0},
+    },
+    iv_ranks={"SPY": 43, "QQQ": 43, "IWM": 48, "GLD": 68, "TLT": 45},
+    environment="cautious",      # From ma.context.assess().environment_label
+    trading_allowed=True,        # From ma.context.assess().trading_allowed
+    position_size_factor=0.75,   # From ma.context.assess().position_size_factor
+    spy_atr_pct=1.6,             # From ma.technicals.snapshot("SPY").atr_pct
+    spy_rsi=29.6,                # From ma.technicals.snapshot("SPY").rsi.value
+)
+```
+
+### Signal Levels
+
+| Signal | Meaning | eTrading Action |
+|--------|---------|-----------------|
+| **GREEN** | Normal operations | Standard income trading, all gates normal |
+| **YELLOW** | Elevated risk | Reduce max_risk_pct to 20%, avoid R4 tickers, tighten stops to 2.0x |
+| **ORANGE** | Pre-crash | CLOSE all positions with DTE > 30, tighten stops to 1.5x, NO new entries |
+| **RED** | Crash active | CLOSE ALL positions immediately, 100% cash, halt all automated trading |
+| **BLUE** | Post-crash opportunity | Deploy per playbook phase (stabilization or recovery) |
+
+### Playbook Phases + Sizing Overrides
+
+eTrading should apply `report.sizing_params` directly to `PortfolioExposure`:
+
+```python
+if report.signal == SentinelSignal.RED:
+    # HALT — close everything
+    for position in open_positions:
+        execute_market_close(position)
+
+elif report.signal == SentinelSignal.ORANGE:
+    # Close long-dated, tighten stops
+    for position in open_positions:
+        if position.dte_remaining > 30:
+            execute_market_close(position)
+        else:
+            update_stop(position, multiplier=1.5)
+
+elif report.signal == SentinelSignal.BLUE:
+    # Apply playbook sizing
+    params = report.sizing_params
+    exposure = PortfolioExposure(
+        max_positions=params.get("max_positions", 5),
+        max_risk_pct=params.get("max_risk_pct", 0.25),
+        drawdown_halt_pct=params.get("drawdown_halt_pct", 0.10),
+    )
+    safety = params.get("safety_factor", 0.50)
+    # Use these overrides for all compute_position_size calls
+```
+
+| Phase | max_positions | max_risk_pct | safety_factor | drawdown_halt | DTE |
+|-------|---------------|--------------|---------------|---------------|-----|
+| normal | 5 | 25% | 0.50 (half Kelly) | 10% | 30-45 |
+| elevated | 5 | 20% | 0.50 | 10% | 21-35 |
+| pre_crash | 0 | 0% | N/A | N/A | close all |
+| crash | 0 | 0% | N/A | N/A | 100% cash |
+| stabilization | 3 | 15% | 0.25 (quarter Kelly) | 5% | 21 |
+| recovery | 5 | 25% | 0.50 | 10% | 21-35 |
+
+### SentinelReport Fields
+
+| Field | Type | What eTrading uses it for |
+|-------|------|--------------------------|
+| `signal` | SentinelSignal | Master switch for trading automation |
+| `playbook_phase` | str | Which phase of crash playbook is active |
+| `sizing_params` | dict | Override PortfolioExposure parameters |
+| `actions` | list[str] | Human-readable action items (for alerts/dashboard) |
+| `reasons` | list[str] | Why the signal was triggered |
+| `r4_count` | int | How many tickers are in explosive regime |
+| `avg_iv_rank` | float | Average IV rank (high = rich premiums for BLUE phase) |
+| `max_r4_probability` | float | Highest R4 probability across universe |
+
+### Monitoring Schedule
+
+| Signal | Check frequency |
+|--------|----------------|
+| GREEN | Every 30 minutes |
+| YELLOW | Every 15 minutes |
+| ORANGE | Every 10 minutes |
+| RED | Every 5 minutes (watching for R4 -> R2 transition) |
+| BLUE | Every 15 minutes (watching for opportunity window close) |
+
+### Integration Requirement
+
+eTrading MUST store the sentinel signal history. This enables:
+1. Tracking signal transitions (GREEN -> YELLOW -> ORANGE timeline)
+2. Post-crash analysis (how early did the sentinel warn?)
+3. Playbook compliance auditing (did we actually close positions on ORANGE?)
