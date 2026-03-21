@@ -24,6 +24,7 @@ This manual follows a trader's day — what you do first in the morning, how you
 12. [Capability Reference](#12-capability-reference)
 13. [Multi-Market: US + India](#13-multi-market-us--india)
 14. [Appendix: Models & Data Structures](#14-appendix-models--data-structures)
+15. [Quant's Cookbook: Creative API Combinations](#15-quants-cookbook--creative-api-combinations)
 
 ---
 
@@ -680,6 +681,91 @@ Every TradeSpec carries `entry_window_start` and `entry_window_end`:
 - **Earnings:** 10:00-14:30 (US) / 09:30-14:00 (India)
 
 Only submit orders within the window. Outside the window = unfavorable fills.
+
+### Profitability Gate — do_validate
+
+Before placing any trade, run the profitability gate. This runs 7 checks that answer one question: **is this trade actually profitable for a small account after fees, slippage, and real-world constraints?**
+
+```
+validate SPY
+validate SPY --suite adversarial
+validate SPY --suite full
+```
+
+**What it checks (daily suite):**
+
+| Check | What it catches | Threshold |
+|-------|----------------|-----------|
+| `commission_drag` | Fees eating your credit — $0.65×4 legs on a $0.50 IC is a loser | PASS <10% drag, WARN 10-25%, FAIL >25% |
+| `fill_quality` | Wide bid/ask means you'll get filled at the offer, not the mid | PASS ≤1.5% spread, WARN 1.5-3%, FAIL >3% |
+| `margin_efficiency` | Low ROC means capital is tied up for nothing | PASS ≥15% annualized ROC, WARN 10-15%, FAIL <10% |
+| `pop_gate` | Is the probability of profit high enough to overcome the risk/reward? | PASS ≥65% POP |
+| `ev_positive` | Expected value: (POP × profit) - ((1-POP) × max_loss) must be positive | PASS if EV > 0 |
+| `entry_quality` | Is today's regime and timing appropriate for this strategy? | PASS in entry window + regime match |
+| `exit_discipline` | Does the trade have a defined 50% profit target, 2× stop, and DTE exit? | PASS if all three defined |
+
+**What it checks (adversarial suite):**
+
+| Check | What it tests | Threshold |
+|-------|--------------|-----------|
+| `gamma_stress` | Your IC if underlying moves 2σ in 24 hours — P&L impact | PASS if risk:reward <5×, WARN <10×, FAIL ≥10× |
+| `vega_shock` | Your IC if VIX spikes 30% overnight — long vs short vega structures | PASS if loss <25% of credit received |
+| `breakeven_spread` | What bid/ask spread makes this trade EV-negative? | PASS if breakeven >2% spread |
+
+**Reading the output:**
+
+```
+DAILY VALIDATION — SPY — 2026-03-19
+─────────────────────────────────────────
+PASS  commission_drag       IC credit $1.80 covers $0.52 round-trip fees (drag: 7.1%)
+PASS  fill_quality          Spread 1.2% — survives natural fill
+WARN  margin_efficiency     ROC 11.4% annualized — marginal (target ≥15%)
+PASS  pop_gate              POP 71.4% ≥ 65% minimum
+PASS  ev_positive           EV +$52 per contract
+PASS  entry_quality         R1 regime, entry window open
+PASS  exit_discipline       TP 50%, SL 2× credit, close ≤21 DTE
+─────────────────────────────────────────
+RESULT: READY TO TRADE (6/7 passed, 1 warning)
+```
+
+**Decision rule:** `is_ready = True` when there are zero FAIL checks. Warnings are tradeable but log them. A FAIL on `commission_drag` means the math doesn't work — don't trade it regardless of how good the setup looks.
+
+**Python API (for programmatic use):**
+
+```python
+from market_analyzer import run_daily_checks, run_adversarial_checks
+
+# Daily profitability gate
+report = run_daily_checks(
+    ticker="SPY",
+    trade_spec=trade_spec,        # From assess_iron_condor or any assessor
+    entry_credit=1.80,            # From broker quotes
+    regime_id=1,                  # From ma.regime.detect()
+    atr_pct=0.85,                 # From technicals.snapshot().atr_pct
+    current_price=580.0,
+    avg_bid_ask_spread_pct=1.2,   # From vol_surface or broker
+    dte=35,
+    rsi=52.0,
+    iv_rank=42.0,
+)
+
+if report.is_ready:
+    # Proceed to sizing and execution
+    pass
+else:
+    for check in report.failures:
+        print(f"BLOCKED by {check.name}: {check.message}")
+
+# Adversarial gate (run before any income trade)
+stress = run_adversarial_checks(
+    ticker="SPY",
+    trade_spec=trade_spec,
+    entry_credit=1.80,
+    atr_pct=0.85,
+)
+```
+
+**Key insight:** The daily gate catches trades that look good on paper but fail in execution. The adversarial gate catches trades that survive normal markets but blow up in stress. Run both before entering any income trade.
 
 ---
 
@@ -1648,3 +1734,621 @@ The system never hides what it doesn't know. If broker is down, IV rank is missi
 *1331 tests. 61 CLI commands. US + India markets. Zerodha + TastyTrade brokers.*
 *Options + equities + futures + capital deployment. 75 position-aware functions.*
 *5 investment strategies. 13 stress test scenarios. 17 trade gates. 22 macro assets tracked.*
+
+---
+
+## 15. Quant's Cookbook — Creative API Combinations
+
+> Think of market_analyzer as a set of Lego blocks. Each individual API tells you one thing. But the real edge comes from **combining them** — stacking regime detection with vol surface with profitability gates to make decisions no single metric could make alone.
+>
+> This section is written from a quant's perspective: not "here's what the API returns" but "here's how a systematic trader would USE these together to find and execute high-probability trades."
+
+---
+
+### Recipe 1: The Full Entry Decision Stack
+
+**The problem:** A trade might look good by any single metric — high IV rank, clean regime, good technicals — but still be a loser after fees, slippage, and adverse market conditions.
+
+**The solution:** Gate every entry through a 5-layer decision stack, each layer eliminating a different failure mode.
+
+```python
+# Layer 1: Is today safe to trade at all?
+ctx = ma.context.assess()
+if not ctx.trading_allowed:
+    return  # Black swan — protect capital
+
+# Layer 2: Is this instrument in the right regime?
+regime = ma.regime.detect("SPY")
+if regime.regime == RegimeID.R4:
+    return  # Explosive vol — no income trades
+
+# Layer 3: Does the opportunity have positive expected value?
+ic = assess_iron_condor("SPY", regime, technicals, vol_surface)
+if ic.verdict == Verdict.NO_GO:
+    return  # Assessor found a hard stop
+
+# Layer 4: Does it survive the profitability gate?
+report = run_daily_checks("SPY", ic.trade_spec, entry_credit=1.80,
+                           regime_id=regime.regime.value, ...)
+if not report.is_ready:
+    return  # Commission drag, fill quality, or ROC failure
+
+# Layer 5: Does it survive adversarial stress?
+stress = run_adversarial_checks("SPY", ic.trade_spec, 1.80, atr_pct=0.85)
+if stress.failures:
+    return  # Doesn't survive 2σ move or vol shock
+
+# All gates passed — now size and execute
+```
+
+**Why this works:** Each layer catches a different failure mode. The assessor catches structural problems (wrong regime, flat skew). The profitability gate catches economic problems (fees, fill quality). The adversarial gate catches tail risk. A trade that passes all 5 layers is genuinely high-probability.
+
+---
+
+### Recipe 2: Regime-Adaptive Position Sizing (Kelly-Inspired)
+
+**The problem:** A 5-wide IC on SPY has the same structure whether it's R1 (calm) or R3 (trending), but the actual risk is radically different. Fixed sizing ignores regime.
+
+**The solution:** Scale position size by regime confidence AND current drawdown state.
+
+```python
+regime = ma.regime.detect("SPY")
+dashboard = compute_risk_dashboard(open_positions, account_nlv=50000, peak_nlv=52000,
+                                    regime_id=regime.regime.value)
+
+# Regime-based base size (contracts)
+regime_factors = {
+    RegimeID.R1: 1.0,   # Full size — calm, mean-reverting
+    RegimeID.R2: 0.75,  # 75% — elevated vol, wider swings
+    RegimeID.R3: 0.50,  # 50% — trending, income trades underperform
+    RegimeID.R4: 0.25,  # 25% — explosive, defined risk only
+}
+base_factor = regime_factors[regime.regime]
+
+# Confidence adjustment: scale down if HMM isn't sure
+# 80%+ confidence → full; 60-80% → partial; <60% → half
+confidence_factor = min(1.0, regime.confidence / 0.80)
+
+# Drawdown adjustment: ease off as you approach circuit breaker
+# 0-5% drawdown → full; 5-8% → 75%; 8-10% → 50%; >10% → HALT
+drawdown_pct = dashboard.drawdown_pct
+if drawdown_pct >= 0.10:
+    return  # Circuit breaker — no new trades
+drawdown_factor = max(0.50, 1.0 - (drawdown_pct / 0.10))
+
+# Final size
+contracts = max(1, round(base_contracts * base_factor * confidence_factor * drawdown_factor))
+```
+
+**The insight:** A regime at 60% confidence is saying "I'm not sure." That uncertainty should translate directly into position size, not just a warning message.
+
+---
+
+### Recipe 3: Volatility Term Structure Timing (When to Enter Calendars)
+
+**The problem:** Calendar spreads look the same structurally whether vol is in contango or backwardation — but they only make money in one condition.
+
+**The solution:** Use the vol surface to time calendar entries with mathematical precision.
+
+```python
+vol = ma.vol_surface.compute("SPY")
+
+# The calendar edge: front month IV must be elevated vs back month
+iv_differential = vol.iv_differential_pct  # (front_iv - back_iv) / back_iv * 100
+
+# Entry conditions ranked by quality:
+if iv_differential >= 10 and vol.is_backwardation:
+    # IDEAL: Front IV significantly elevated, term structure inverted
+    # → Enter calendar (sell expensive front, buy cheap back)
+    # → IV crush on front will compress faster than back
+    quality = "ideal"
+
+elif iv_differential >= 5:
+    # GOOD: Decent differential
+    quality = "good"
+
+elif iv_differential >= 2:
+    # MARGINAL: Thin edge — run check_margin_efficiency first
+    report = run_daily_checks(..., iv_rank=iv_rank)
+    # Only enter if ROC ≥ 15% despite thin differential
+    quality = "marginal"
+
+else:
+    # NO EDGE: Front and back IV are flat — calendar has no structural advantage
+    # A calendar with flat vol is a coin flip on direction
+    return  # No trade
+
+# Add profitability gate to confirm economics work
+calendar = assess_calendar("SPY", regime, technicals, vol)
+report = run_daily_checks("SPY", calendar.trade_spec, entry_credit, ...)
+```
+
+**The insight:** The IV differential is the "reason" a calendar makes money. When it's near zero, you're not selling overpriced vol — you're just taking on gamma risk for no compensation. The vol surface API makes this quantifiable: `vol.iv_differential_pct >= 5%` is your entry filter.
+
+---
+
+### Recipe 4: The 0DTE ORB Decision Engine
+
+**The problem:** On 0DTE, you have one decision in the first 30 minutes: is today a range day or a breakout day? The wrong answer is expensive.
+
+**The solution:** Combine ORB range analysis with regime to make a data-driven call.
+
+```python
+# After 10:00 AM — ORB window complete
+technicals = ma.technicals.snapshot("SPY")  # ORB auto-fetched if broker connected
+zero_dte = assess_zero_dte("SPY", regime, technicals, vol_surface, phase)
+
+# The ORB tells you everything:
+orb = zero_dte.orb_decision
+
+if orb.range_pct < 0.30:
+    # Narrow range (less than 0.3% of price) = energy compressed = breakout coming
+    # → Iron Man (long IC) profits from explosive move in either direction
+    # → Set strikes just outside ORB range to catch the move
+    strategy = ZeroDTEStrategy.IRON_MAN
+
+elif orb.range_pct > 1.5:
+    # Wide range already set = market showed its hand
+    # → Standard short IC, put short strike at ORB low, call short strike at ORB high
+    # → The range is the range — collect theta within it
+    strategy = ZeroDTEStrategy.IRON_CONDOR
+
+elif orb.direction == "bullish" and regime.regime in (RegimeID.R1, RegimeID.R3):
+    # Directional bias from first 30 min + regime confirms trend
+    # → Bull call spread above ORB range, capturing continuation
+    strategy = ZeroDTEStrategy.DIRECTIONAL_SPREAD
+
+# The zero_dte assessor already made this decision — read it
+print(zero_dte.strategy)       # Which strategy was selected
+print(orb.decision_text)       # Plain English: why this strategy
+print(orb.key_levels)          # ORB high, low, extension targets T1/T2
+```
+
+**The insight:** Most 0DTE traders pick a strategy before the market opens. This approach waits 30 minutes for real data, then makes a systematic decision. A 0.3% ORB on SPY means an expected move of ~$1.74 on a $580 underlying — the market is coiled. An Iron Man bought at ORB edges profits from any move >= the ORB range width.
+
+---
+
+### Recipe 5: Cross-Market Morning Edge (US -> India Gap Fade)
+
+**The problem:** India opens 13+ hours after US closes. Most retail traders guess the NIFTY opening. You can calculate it.
+
+**The solution:** Use cross-market analysis to predict the India opening gap, then fade it when regime says mean-revert.
+
+```python
+# At 9:00 AM IST (before India opens):
+us_analysis = analyze_cross_market("SPY", "NIFTY", us_ohlcv, india_ohlcv,
+                                    us_regime_id=1, india_regime_id=1)
+
+predicted_gap = us_analysis.predicted_india_gap_pct
+confidence = us_analysis.prediction_confidence
+
+# US closed -1.8% → predicting NIFTY gap-down ~1.0%
+if predicted_gap < -0.8 and confidence > 0.6:
+    india_regime = ma.regime.detect("NIFTY")
+
+    if india_regime.regime in (RegimeID.R1, RegimeID.R2):
+        # Mean-reverting regime + predicted gap = gap fade opportunity
+        # NIFTY opens at -1% → sell puts 50-80 pts below opening price
+        # Gap fills 65% of the time within first 30 minutes
+
+        # Gate: India black swan check first
+        india_ctx = ma.context.assess()  # With India market set
+        if india_ctx.trading_allowed:
+            # Enter NIFTY credit spread: sell put 80 pts below open, buy put 150 pts below
+            entry_level = nifty_open_price - 80  # Short put strike
+            wing = entry_level - 70              # Long put strike
+```
+
+**The insight:** The `prediction_confidence` (R-squared) tells you how reliable the correlation has been recently. When R-squared > 0.60, the US->India overnight linkage is strong enough to trade. When < 0.40, the markets are diverging — don't use the prediction.
+
+**Advanced:** Combine with `analyze_cross_market` sync_status. DIVERGENT markets (where India has been going its own way) are better for standalone NIFTY analysis. SYNCHRONIZED markets are better for cross-market gap fades.
+
+---
+
+### Recipe 6: The Regime Transition Early Warning System
+
+**The problem:** By the time a regime is officially detected as R4, half the damage is done. You want to start defending your portfolio when the transition is just beginning.
+
+**The solution:** Watch the HMM probability vector — not just the current label — for regime transition signals.
+
+```python
+regime = ma.regime.detect("SPY", debug=True)
+
+# The probability vector is the leading indicator:
+probs = regime.regime_probabilities  # {1: 0.52, 2: 0.31, 3: 0.08, 4: 0.09}
+
+# Current: R1 (52% confidence) — normal income trade day
+# But R2 probability is 31% — elevated, watching
+
+# Early warning thresholds:
+r2_rising = probs[2] > 0.30   # R2 probability elevated
+r4_rising = probs[4] > 0.15   # R4 creeping in — danger signal
+
+if r4_rising:
+    # Don't wait for R4 confirmation — start de-risking NOW
+    # 1. No new IC entries (even if current label is R1)
+    # 2. Close any ICs with DTE > 30 (too much time for R4 to do damage)
+    # 3. Tighten stops on existing ICs from 2× to 1.5× credit
+    print("EARLY WARNING: R4 probability rising. Defensive mode.")
+
+elif r2_rising:
+    # R1 → R2 transition forming
+    # 1. Widen IC wings by 10-15% on any new entries
+    # 2. Reduce position size by 25%
+    # 3. Prefer iron butterfly over IC (profits from vol expansion in R2)
+
+# Combine with ATR trend to confirm:
+tech = ma.technicals.snapshot("SPY")
+if r2_rising and tech.atr_pct > 1.2:  # ATR expanding
+    # Both regime model AND price action saying vol is picking up
+    # Higher conviction signal — act more aggressively
+```
+
+**The insight:** A 15% R4 probability in the HMM is saying "1 in 7 chance we're already in explosive vol." That's not a small tail risk — it's your model telling you to stay alert. The probability vector is your actual conviction signal; the regime label is just the argmax.
+
+---
+
+### Recipe 7: Sector Rotation from Macro Research
+
+**The problem:** You're scanning the same 10 tickers every day. But macro shifts — REFLATION, STAGFLATION, RISK_OFF — move money into different sectors. You should be scanning where the money is flowing.
+
+**The solution:** Use macro research to identify sectors of strength, then screen within those sectors.
+
+```python
+from market_analyzer import generate_research_report, RESEARCH_ASSETS
+
+# Weekly (or daily pre-market with fresh data)
+data = {ticker: ds.get_ohlcv(ticker) for ticker in RESEARCH_ASSETS}
+report = generate_research_report(data, "daily")
+
+# Read where money is flowing
+favor = report.regime.favor_sectors    # e.g., ["energy", "commodity"] in stagflation
+avoid = report.regime.avoid_sectors    # e.g., ["tech", "bonds"]
+size_factor = report.regime.position_size_factor  # 0.5 in risk-off
+
+# Map sectors to tickers
+sector_to_tickers = {
+    "energy": ["XLE", "USO", "MRO"],
+    "commodity": ["GLD", "SLV", "COPX"],
+    "tech": ["QQQ", "XLK", "NVDA"],
+    "bonds": ["TLT", "SHY"],
+    "finance": ["XLF", "JPM"],
+    "healthcare": ["XLV", "JNJ"],
+}
+
+scan_universe = []
+for sector in favor:
+    scan_universe.extend(sector_to_tickers.get(sector, []))
+
+# Now rank within the high-conviction sectors
+ranking = ma.ranking.rank(
+    tickers=scan_universe,
+    skip_intraday=True,
+    debug=True,
+)
+
+# Apply macro sizing to all approved trades
+approved = filter_trades_with_portfolio(ranking.top_trades, open_positions, ...)
+for trade in approved.approved:
+    trade.trade_spec.leg_quantity = round(trade.trade_spec.leg_quantity * size_factor)
+```
+
+**The insight:** In a STAGFLATION regime, scanning SPY, QQQ, and IWM is exactly wrong — those are the sectors to avoid. The research report's `favor_sectors` list is forward-looking: it tells you where to hunt. Combine this with the regime-specific strategy selection (R1=income, R3=directional) and you have sector + structure simultaneously.
+
+---
+
+### Recipe 8: The Mechanical Adjustment Protocol
+
+**The problem:** Most traders know intellectually to "roll at 21 DTE" or "close at 2x loss" but execute it inconsistently under pressure. The system should make this decision without emotion.
+
+**The solution:** Run `check_trade_health` on every open position, then feed the result into the adjustment analyzer. One deterministic action per position.
+
+```python
+from market_analyzer import check_trade_health, monitor_exit_conditions
+from market_analyzer import AdjustmentService
+
+adj_service = AdjustmentService(quote_service=ma.quotes)
+
+for position in open_positions:
+    # Step 1: Should we exit?
+    exit_signal = monitor_exit_conditions(
+        trade_spec=position.trade_spec,
+        current_price=current_price,
+        entry_price=position.entry_price,
+        days_held=position.days_held,
+        regime=current_regime,
+    )
+
+    if exit_signal.should_exit:
+        print(f"EXIT {position.ticker}: {exit_signal.reason}")
+        # Reason: "profit_target_hit" / "stop_loss_hit" / "dte_exit" / "regime_change"
+        continue
+
+    # Step 2: If not exiting, should we adjust?
+    health = check_trade_health(
+        trade_spec=position.trade_spec,
+        current_price=current_price,
+        entry_price=position.entry_price,
+        regime=current_regime,
+    )
+
+    if health.status == "BREACHED":
+        adjustment = adj_service.analyze(position.trade_spec, current_regime, technicals)
+        # The top recommendation is the deterministic action
+        action = adjustment.recommended_adjustments[0]
+        print(f"ADJUST {position.ticker}: {action.description}")
+        # Never "wait and see" — always the defined action
+```
+
+**The insight:** `monitor_exit_conditions` returns `exit_signal.reason` — which is one of four things: profit target hit, stop loss hit, DTE exit, or regime change. The adjustment analyzer returns a ranked list of actions — the first one is always the right move. This eliminates the "should I roll or close?" paralysis that costs small account traders thousands of dollars per year.
+
+---
+
+### Recipe 9: Shadow Portfolio — Learning Whether Your Gates Work
+
+**The problem:** Your quality gate blocks 30% of trades. Are those blocked trades actually losers? Or are you leaving money on the table?
+
+**The solution:** Track what would have happened to every blocked trade, then analyze whether the gate is calibrated correctly.
+
+```python
+from market_analyzer import analyze_gate_effectiveness
+
+# eTrading stores: (a) trades that were BLOCKED with their gate reason
+# (b) what price the trade would have closed at (shadow P&L)
+# (c) actual P&L of trades that DID go through
+
+effectiveness = analyze_gate_effectiveness(
+    gate_history=gate_history,           # Every gate decision, reason, trade spec
+    shadow_outcomes=shadow_pnl,          # Hypothetical P&L if blocked trades had gone through
+    actual_outcomes=actual_pnl,          # Real P&L of approved trades
+)
+
+# The key numbers:
+print(f"Approved win rate: {effectiveness.actual_win_rate:.0%}")    # 67%
+print(f"Shadow win rate: {effectiveness.shadow_win_rate:.0%}")      # 71%
+
+# If shadow > actual → gates are too tight (blocking good trades)
+if effectiveness.gates_too_tight:
+    print("Gates too tight — these gates are blocking winners:")
+    for gate in effectiveness.gates_too_tight:
+        print(f"  {gate.name}: {gate.shadow_win_rate:.0%} win rate when blocked")
+        # e.g., "quality_score: 73% win rate when blocked" → lower the threshold
+
+# If actual > shadow → gates are working (blocking losers correctly)
+if effectiveness.actual_win_rate > effectiveness.shadow_win_rate:
+    print("Gates working correctly — blocked trades were losers")
+```
+
+**The insight:** This is how the system learns from its own decisions. Most trading systems backtest entry logic but never analyze their risk filters. A quality gate that blocks trades with 70% win rates is destroying your edge. This API makes that visible in production, not just in hindsight.
+
+---
+
+### Recipe 10: The Full Weekly Calibration Loop
+
+**The problem:** The system was calibrated on historical data. Markets change. Rankings that worked 3 months ago may be over-weighting factors that no longer predict well.
+
+**The solution:** Every Sunday, feed the week's trade outcomes back into the system and let it re-calibrate its own scoring weights.
+
+```python
+from market_analyzer import calibrate_weights, TradeOutcome
+
+# Build TradeOutcome list from your journal/eTrading DB
+outcomes = [
+    TradeOutcome(
+        ticker="SPY", strategy="iron_condor",
+        entry_date=date(2026, 3, 11), exit_date=date(2026, 3, 18),
+        entry_credit=1.80, exit_debit=0.90,   # Closed at 50% — WINNER
+        max_profit=180, max_loss=320,
+        regime_at_entry=RegimeID.R1, actual_pop=1,  # 1=won, 0=lost
+        exit_reason="profit_target",
+    ),
+    # ... more outcomes
+]
+
+new_weights = calibrate_weights(outcomes)
+
+# What changed?
+print(new_weights.regime_weight_delta)    # R1 weight +0.05 (R1 trades outperforming)
+print(new_weights.iv_rank_weight_delta)   # IV rank weight +0.03 (high IV rank trades winning)
+print(new_weights.commentary)             # "Iron condor win rate 71% in R1 — increase R1 alignment weight"
+
+# Apply to next week's ranking
+ranking = ma.ranking.rank(tickers, weights=new_weights.weights)
+```
+
+**The insight:** `calibrate_weights` is running a lightweight regression: which features in your ranked trades best predicted actual outcomes? If high IV-rank trades are winning at 75% and low IV-rank trades at 52%, the calibrator increases IV-rank weight. If R2 iron condors are losing more than expected, it reduces R2 alignment for IC specifically. This is live, production learning without needing a full ML pipeline.
+
+---
+
+### Recipe 11: Multi-Leg Arbitrage — Diagonal vs Calendar Decision
+
+**The problem:** Both calendars and diagonals profit from IV decay, but in different market conditions. Choosing wrong costs ROC.
+
+**The solution:** Let the regime + vol surface combination tell you which structure to enter.
+
+```python
+vol = ma.vol_surface.compute("SPY")
+regime = ma.regime.detect("SPY")
+tech = ma.technicals.snapshot("SPY")
+
+calendar = assess_calendar("SPY", regime, tech, vol)
+diagonal = assess_diagonal("SPY", regime, tech, vol)
+
+# Decision framework:
+if regime.regime in (RegimeID.R1, RegimeID.R2) and vol.iv_differential_pct >= 5:
+    # CALENDAR: neutral market, IV differential present
+    # Want ATM strikes, no directional bias
+    # Best in R1: theta works, vol steady
+    pick = calendar
+
+elif regime.regime == RegimeID.R3 and tech.rsi.value > 55:
+    # DIAGONAL (bull call diagonal): mild uptrend, want some directional exposure
+    # Buy deep ITM long-dated call (lower strike), sell short-dated OTM call (higher)
+    # Profits from both theta AND the uptrend
+    pick = diagonal
+
+elif regime.regime == RegimeID.R3 and tech.rsi.value < 45:
+    # DIAGONAL (bear put diagonal): mild downtrend
+    # Buy deep ITM long-dated put, sell short-dated OTM put
+    pick = diagonal
+
+# Confirm economics on the chosen structure
+report = run_daily_checks(
+    "SPY", pick.trade_spec, entry_credit=pick.trade_spec.max_profit / 100,
+    regime_id=regime.regime.value, ...
+)
+# Only enter if ROC ≥ 15% — calendars and diagonals can have marginal ROC
+```
+
+**The insight:** The assessors give you GO/NO_GO + a trade spec. But you're choosing between two GO assessors — this is where the qualitative logic lives. R1 + IV differential = calendar. R3 + trend = diagonal. The vol surface `iv_differential_pct` and the regime label together make this a systematic rule, not a judgment call.
+
+---
+
+### Recipe 12: The Earnings Volatility Harvest
+
+**The problem:** IV spikes into earnings — often to extreme levels. Most traders avoid earnings because of the binary risk. But IV always collapses after earnings. Can you harvest the IV crush systematically?
+
+**The solution:** Combine the earnings assessor, IV rank, and vega shock check to find earnings plays where the IV crush math works.
+
+```python
+from market_analyzer import assess_earnings
+
+# Find earnings in next 5-14 days in your watchlist
+for ticker in watchlist:
+    earnings = assess_earnings(ticker, regime, technicals, vol_surface, fundamentals)
+
+    if earnings.verdict == Verdict.NO_GO:
+        continue
+
+    # Key metrics for earnings vol harvesting:
+    iv_rank = metrics.iv_rank  # Should be > 70% for good crush potential
+    iv_pct = vol.front_iv      # Actual IV level — is it overpriced?
+
+    # The crush math: if IV is 60% pre-earnings and typically drops to 35% post
+    # → IV crush of ~40% = significant premium collapse
+    if iv_rank > 70 and vol.front_iv > 0.45:
+        # High IV rank + elevated front IV = premium is likely overpriced
+
+        # Structure choice by regime:
+        # R1/R2: Short straddle/strangle (defined by wings) — sell the vol crush
+        # R3: Iron condor centered on expected move — sell vol but bounded
+        # R4: NO TRADE on earnings — explosive moves + high IV = max uncertainty
+
+        # Adversarial check: will the trade survive if the stock moves MORE than expected?
+        stress = run_adversarial_checks(ticker, earnings.trade_spec,
+                                         entry_credit, atr_pct)
+
+        if not stress.failures:
+            # Trade survives stress → earnings crush play is valid
+            print(f"{ticker}: IV {vol.front_iv:.0%} → crush candidate (IV rank {iv_rank})")
+```
+
+**The insight:** Earnings plays lose when: (1) the stock moves 2x the expected move — use `check_gamma_stress`; (2) you can't fill at the mid — use `check_fill_quality`; (3) fees eat the small credit — use `check_commission_drag`. These three checks together filter 80% of bad earnings plays before you even look at the company.
+
+---
+
+### Recipe 13: The Position-Level Greeks Budget
+
+**The problem:** You have 4 open ICs and they all have negative vega. A VIX spike hits and your whole portfolio bleeds simultaneously — correlated loss you didn't see coming.
+
+**The solution:** Use the risk dashboard to monitor portfolio-level Greeks, not just position-level.
+
+```python
+dashboard = compute_risk_dashboard(open_positions, account_nlv=50000, ...)
+
+# Portfolio-level Greeks view:
+net_delta = dashboard.greeks_summary.net_delta      # -0.08 (slightly bearish exposure)
+net_theta = dashboard.greeks_summary.net_theta      # +$18/day (earning time value)
+net_vega = dashboard.greeks_summary.net_vega        # -0.45 (short vol — VIX spike = pain)
+
+# VIX is at 16. If it spikes to 25 (+56%):
+# Estimated P&L impact = net_vega × IV_move = -0.45 × 0.09 × 100 × contracts
+# → This is why check_vega_shock exists — it quantifies this at trade level
+
+# Greeks-based decision rules:
+if abs(net_delta) > 0.25:
+    # Portfolio is directionally biased — add hedge or reduce delta
+    print("WARNING: Portfolio delta too high — add neutral position")
+
+if net_vega < -0.60:
+    # Too much short vol exposure — VIX spike will hurt everything simultaneously
+    # Solution: add a long vega trade (debit spread, long calendar) to reduce net vega
+    print("WARNING: Portfolio short vega concentration — add long vol position")
+
+    # The hedge: an SPY debit spread (buy call spread) adds positive delta AND positive vega
+    # Alternatively: a VIX call spread is a direct vol hedge
+```
+
+**The insight:** Short vol strategies (IC, iron butterfly, credit spreads) all have negative vega. If you have 5 of them, you've built a portfolio that loses money every time VIX rises. The `net_vega` check in the risk dashboard flags this before it becomes a problem. Target net_vega > -0.40 by periodically adding a long vol trade (PMCC, calendar, debit spread) to offset.
+
+---
+
+### Recipe 14: The Systematic India Expiry Day Play
+
+**The problem:** India options expire weekly — NIFTY on Thursday, BANKNIFTY on Wednesday, FINNIFTY on Tuesday. Expiry day has different dynamics (vol crush, gamma spikes) than normal days.
+
+**The solution:** Use the India context to detect expiry day, then select the right 0DTE strategy.
+
+```python
+ctx = ma.context.assess()
+
+if ctx.tradeable.india_weekly_expiry_today:
+    instrument = ctx.tradeable.india_expiry_instrument  # "NIFTY", "BANKNIFTY", or "FINNIFTY"
+
+    # Expiry day dynamics:
+    # 1. ATM options have very high gamma — any move is amplified
+    # 2. OTM options lose value rapidly — theta is maximal
+    # 3. First 30 min sets the range for the day (ORB is critical)
+
+    india_regime = ma.regime.detect(instrument)
+    india_vol = ma.vol_surface.compute(instrument)
+    india_tech = ma.technicals.snapshot(instrument)
+
+    # On expiry day: 0DTE is the ONLY structure (everything expires today)
+    zero_dte = assess_zero_dte(instrument, india_regime, india_tech, india_vol)
+
+    # Expiry day bias rules:
+    if india_regime.regime in (RegimeID.R1, RegimeID.R2):
+        # IC wins: sell ATM straddle ± 1.5 ATR wings, collect theta decay
+        # Key: must enter by 10:00 AM IST — the theta curve steepens after noon
+        pass
+
+    elif zero_dte.orb_decision.range_pct < 0.25:
+        # Narrow ORB on expiry = explosive move coming
+        # Iron Man: buy inner wings at ORB edges, sell farther wings
+        # Size: 50% of normal (gamma is dangerous on expiry day)
+        pass
+```
+
+**The insight:** India expiry day creates a mechanical edge: OTM options lose value 3x faster than normal on expiry morning. The BankNIFTY ICs entered at 9:30 AM with strikes 200 pts wide from spot have collected their premium by 1:00 PM in most sessions. The key filter is regime — R4 on expiry day means gaps are possible and the IC will breach. Use the regime gate without exception.
+
+---
+
+### Summary: The Mental Model
+
+Think of the MA API as having three tiers:
+
+```
+TIER 1 — WHAT IS THE MARKET DOING?
+  ma.regime.detect()           → Are we in R1/R2/R3/R4?
+  ma.context.assess()          → Is it safe to trade at all?
+  ma.technicals.snapshot()     → What is the price structure?
+  ma.vol_surface.compute()     → What is the vol surface saying?
+  generate_research_report()   → What is the macro environment?
+
+TIER 2 — WHAT SHOULD I TRADE?
+  assess_iron_condor() etc.    → Is this specific structure valid?
+  ma.ranking.rank()            → What ranks highest across all opportunities?
+  filter_trades_with_portfolio() → What fits my portfolio today?
+  evaluate_trade_gates()       → Scale or block any specific trade?
+
+TIER 3 — IS THIS TRADE ACTUALLY PROFITABLE?
+  run_daily_checks()           → Commission drag, fill quality, ROC, POP, EV
+  run_adversarial_checks()     → Survives gamma stress, vega shock, breakeven spread?
+  check_trade_health()         → Status of existing positions
+  monitor_exit_conditions()    → Should I exit now?
+```
+
+The Tier 1 APIs answer "what world are we in." The Tier 2 APIs answer "what fits this world." The Tier 3 APIs answer "will this actually make money after real-world constraints." All three tiers together = a complete systematic trading decision.
+
+**The edge is in Tier 3.** Most systematic platforms have Tier 1 and Tier 2. The profitability gate (Tier 3) is what separates a platform that makes money from one that only looks like it should make money.

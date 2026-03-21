@@ -533,8 +533,9 @@ class TestTimeOfDayUrgency:
         eod_signals = [s for s in result.signals if s.rule == "eod_tested"]
         assert len(eod_signals) == 0
 
-    def test_no_time_provided_backward_compat(self):
-        """time_of_day=None -> no eod signals, same behavior as before."""
+    def test_no_time_provided_uses_current_time(self):
+        """time_of_day=None -> auto-fetches current time. For 0DTE, eod_0dte fires if after 15:00."""
+        from datetime import datetime
         result = monitor_exit_conditions(
             trade_id="t1",
             ticker="SPY",
@@ -548,7 +549,13 @@ class TestTimeOfDayUrgency:
             time_of_day=None,
         )
         eod_signals = [s for s in result.signals if s.rule.startswith("eod_")]
-        assert len(eod_signals) == 0
+        now = datetime.now().time()
+        if now >= time(15, 0):
+            # After 15:00 — 0DTE force-close must fire
+            assert len(eod_signals) >= 1
+        else:
+            # Before 15:00 — no eod signal yet
+            assert len(eod_signals) == 0
 
 
 # ── G05: assess_overnight_risk ──

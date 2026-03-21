@@ -89,21 +89,23 @@ class TestIronCondorHardStops:
         assert result.verdict == Verdict.NO_GO
         assert any("R4" in s.name for s in result.hard_stops)
 
-    def test_r4_low_confidence_passes(self) -> None:
-        """R4 below threshold is not a hard stop."""
+    def test_r4_low_confidence_is_also_hard_stop(self) -> None:
+        """R4 always hard-stops IC — explosive moves destroy condors regardless of confidence."""
         result = assess_iron_condor("SPY", _regime(4, 0.50), _technicals(), _vol_surface())
-        assert not any("R4" in s.name for s in result.hard_stops)
+        assert result.verdict == Verdict.NO_GO
+        assert any("R4" in s.name for s in result.hard_stops)
 
     def test_r3_high_confidence_is_hard_stop(self) -> None:
-        """R3 at high confidence = hard stop (persistent trend blows through)."""
+        """R3 at any confidence = hard stop (persistent trend blows through)."""
         result = assess_iron_condor("SPY", _regime(3, 0.80), _technicals(), _vol_surface())
         assert result.verdict == Verdict.NO_GO
         assert any("R3" in s.name for s in result.hard_stops)
 
-    def test_r3_low_confidence_passes(self) -> None:
-        """R3 below threshold is not a hard stop."""
+    def test_r3_low_confidence_is_also_hard_stop(self) -> None:
+        """R3 always hard-stops IC — directional move will breach short strike regardless of confidence."""
         result = assess_iron_condor("SPY", _regime(3, 0.50), _technicals(), _vol_surface())
-        assert not any("R3" in s.name for s in result.hard_stops)
+        assert result.verdict == Verdict.NO_GO
+        assert any("R3" in s.name for s in result.hard_stops)
 
     def test_no_vol_surface_is_hard_stop(self) -> None:
         result = assess_iron_condor("SPY", _regime(1), _technicals(), vol_surface=None)

@@ -89,9 +89,11 @@ class TestCalendarHardStops:
         assert result.verdict == Verdict.NO_GO
         assert any("R4" in s.name for s in result.hard_stops)
 
-    def test_r4_low_confidence_passes(self) -> None:
+    def test_r4_low_confidence_is_also_hard_stop(self) -> None:
+        # R4 always hard-stops calendar regardless of confidence — explosive moves destroy calendars
         result = assess_calendar("SPY", _regime(4, 0.50), _technicals(), _vol_surface())
-        assert not any("R4" in s.name for s in result.hard_stops)
+        assert result.verdict == Verdict.NO_GO
+        assert any("R4" in s.name for s in result.hard_stops)
 
     def test_no_vol_surface_is_hard_stop(self) -> None:
         result = assess_calendar("SPY", _regime(), _technicals(), vol_surface=None)

@@ -257,11 +257,11 @@ def assess_calendar(
 def _check_hard_stops(regime, vol_surface, days_to_earnings, cfg, ticker: str | None = None) -> list[HardStop]:
     stops: list[HardStop] = []
 
-    # R4 at high confidence
-    if regime.regime == RegimeID.R4_HIGH_VOL_TREND and regime.confidence >= cfg.r4_confidence_threshold:
+    # R4 — directional moves destroy calendar spreads regardless of confidence
+    if regime.regime == RegimeID.R4_HIGH_VOL_TREND:
         stops.append(HardStop(
             name="R4 trending",
-            description="R4 (high-vol trending) with high confidence — directional moves destroy calendars",
+            description=f"R4 (high-vol trending) at {regime.confidence:.0%} — directional moves destroy calendars",
         ))
 
     # Max DTE enforcement — back leg may exceed market's max DTE

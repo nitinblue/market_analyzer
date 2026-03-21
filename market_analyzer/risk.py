@@ -2,7 +2,7 @@
 
 Seven risk management functions covering every dimension of portfolio risk:
 
-    RM1: compute_portfolio_var()           — Value at Risk from positions + ATR + regime
+    RM1: estimate_portfolio_loss()         — Expected loss from positions + ATR + regime
     RM2: check_portfolio_greeks()          — Net Greeks vs limits
     RM3: check_strategy_concentration()    — Too many of same strategy type
     RM4: check_directional_concentration() — Net bullish/bearish exposure
@@ -85,9 +85,10 @@ class GreeksCheckResult(BaseModel):
 class ExpectedLossResult(BaseModel):
     """Estimated portfolio loss — ATR-based, regime-adjusted.
 
-    NOT a formal VaR model. For defined-risk positions, this is simply max_loss.
+    Not a statistical VaR model. For defined-risk positions this is max_loss.
     For undefined risk, uses ATR × regime factor as expected move estimate.
-    Use stress_testing.run_stress_suite() for scenario-specific analysis.
+    For scenario-specific analysis ("what if market drops 5%?"), use
+    stress_testing.run_stress_suite() instead.
     """
 
     expected_loss_1d: float     # Expected worst-case 1-day loss (dollars)
@@ -100,8 +101,6 @@ class ExpectedLossResult(BaseModel):
     commentary: str
 
 
-# Keep VaRResult as alias for backward compat
-VaRResult = ExpectedLossResult
 
 
 class StrategyConcentration(BaseModel):
@@ -160,8 +159,8 @@ class RiskDashboard(BaseModel):
     # Greeks
     greeks: PortfolioGreeks | None
     greeks_within_limits: bool
-    # VaR
-    var: VaRResult | None
+    # Expected loss
+    expected_loss: ExpectedLossResult | None
     # Concentrations
     strategy_concentration: StrategyConcentration
     directional_exposure: DirectionalExposure
@@ -180,9 +179,9 @@ class RiskDashboard(BaseModel):
     commentary: list[str]  # Human-readable risk narrative
 
 
-# ── Regime factors for VaR ──────────────────────────────────────────────────
+# ── Regime factors for expected loss ────────────────────────────────────────
 
-_REGIME_VAR_FACTORS: dict[int, float] = {
+_REGIME_LOSS_FACTORS: dict[int, float] = {
     1: 0.40,  # R1: Low-Vol Mean Reverting — small moves expected
     2: 0.70,  # R2: High-Vol Mean Reverting — larger but bounded
     3: 1.10,  # R3: Low-Vol Trending — persistent directional
@@ -200,7 +199,7 @@ _DEFINED_RISK_STRUCTURES = frozenset({
 })
 
 
-# ── RM1: Portfolio VaR ─────────────────────────────────────────────────────
+# ── RM1: Portfolio Expected Loss ────────────────────────────────────────────
 
 
 def estimate_portfolio_loss(
@@ -213,7 +212,7 @@ def estimate_portfolio_loss(
 ) -> ExpectedLossResult:
     """Estimate expected portfolio loss — ATR-based, regime-adjusted.
 
-    NOT a formal VaR model. This is a practical expected loss estimate:
+    Practical expected loss estimate — not a statistical VaR model:
     - Defined-risk positions: expected loss = max_loss (loss is capped)
     - Undefined risk: expected loss = notional × ATR% × regime_factor × √days
     - Portfolio: correlation-adjusted aggregation
@@ -232,7 +231,7 @@ def estimate_portfolio_loss(
         ExpectedLossResult with expected and severe loss estimates.
     """
     if not positions:
-        return VaRResult(
+        return ExpectedLossResult(
             expected_loss_1d=0, expected_loss_5d=0, severe_loss_1d=0,
             loss_pct_of_nlv=0, total_max_loss=0, method="parametric_atr",
             per_position=[], commentary="No open positions.",
@@ -243,21 +242,21 @@ def estimate_portfolio_loss(
     corr_map = correlation_data or {}
 
     per_position: list[dict] = []
-    individual_vars: list[float] = []  # 1-day base VaR per position
+    individual_vars: list[float] = []  # 1-day expected loss per position
     tickers: list[str] = []
 
     for pos in positions:
         is_defined = pos.structure_type in _DEFINED_RISK_STRUCTURES
 
         if is_defined and pos.max_loss > 0:
-            # Defined risk: VaR = max_loss (worst case is known)
+            # Defined risk: expected loss = max_loss (worst case is known)
             base_var = pos.max_loss
             method = "max_loss"
         elif pos.notional_value > 0:
             # Undefined risk: parametric estimation
             atr_pct = atr_map.get(pos.ticker, 0.015)  # Default 1.5% if unknown
             regime_id = regime_map.get(pos.ticker, 2)  # Default R2 (conservative)
-            regime_factor = _REGIME_VAR_FACTORS.get(regime_id, 0.70)
+            regime_factor = _REGIME_LOSS_FACTORS.get(regime_id, 0.70)
             base_var = pos.notional_value * atr_pct * regime_factor
             method = "parametric_atr"
         else:
@@ -302,17 +301,17 @@ def estimate_portfolio_loss(
 
     # Commentary
     if var_pct < 2:
-        commentary = "Portfolio VaR is conservative. Risk is well-contained."
+        commentary = "Portfolio expected loss is conservative. Risk is well-contained."
     elif var_pct < 5:
-        commentary = "Portfolio VaR is moderate. Acceptable for income portfolio."
+        commentary = "Portfolio expected loss is moderate. Acceptable for income portfolio."
     elif var_pct < 10:
-        commentary = "Portfolio VaR is elevated. Consider reducing position sizes."
+        commentary = "Portfolio expected loss is elevated. Consider reducing position sizes."
     else:
-        commentary = "Portfolio VaR is HIGH. Reduce exposure immediately."
+        commentary = "Portfolio expected loss is HIGH. Reduce exposure immediately."
 
     total_max_loss = sum(p.max_loss for p in positions if p.max_loss > 0)
 
-    return VaRResult(
+    return ExpectedLossResult(
         expected_loss_1d=round(var_1d_95, 2),
         expected_loss_5d=round(var_5d_95, 2),
         severe_loss_1d=round(var_1d_99, 2),
@@ -322,10 +321,6 @@ def estimate_portfolio_loss(
         per_position=per_position,
         commentary=commentary,
     )
-
-
-# Backward compat alias
-compute_portfolio_var = estimate_portfolio_loss
 
 
 # ── RM2: Portfolio Greeks Check ─────────────────────────────────────────────
@@ -759,18 +754,18 @@ def compute_risk_dashboard(
     if open_count >= max_positions:
         alerts.append(f"At maximum positions ({open_count}/{max_positions})")
 
-    # ── RM1: VaR ──
-    var_result: VaRResult | None = None
+    # ── RM1: Expected Loss ──
+    loss_result: ExpectedLossResult | None = None
     if positions:
-        var_result = compute_portfolio_var(
+        loss_result = estimate_portfolio_loss(
             positions=positions,
             account_nlv=account_nlv,
             atr_by_ticker=atr_by_ticker,
             regime_by_ticker=regime_by_ticker,
             correlation_data=correlation_data,
         )
-        # VaR alerts removed — use stress scenarios for risk assessment
-        commentary.append(var_result.commentary)
+        # Use stress scenarios for scenario-specific risk assessment
+        commentary.append(loss_result.commentary)
 
     # ── RM2: Greeks ──
     greeks_result: GreeksCheckResult | None = None
@@ -854,9 +849,9 @@ def compute_risk_dashboard(
         risk_score += 20
     elif portfolio_risk_pct > 15:
         risk_score += 10
-    if var_result and var_result.loss_pct_of_nlv > 10:
+    if loss_result and loss_result.loss_pct_of_nlv > 10:
         risk_score += 20
-    elif var_result and var_result.loss_pct_of_nlv > 5:
+    elif loss_result and loss_result.loss_pct_of_nlv > 5:
         risk_score += 10
     if greeks_result and not greeks_result.within_limits:
         risk_score += 15
@@ -901,7 +896,7 @@ def compute_risk_dashboard(
         size_pct = min(size_pct, 0.75)
     if drawdown.drawdown_pct > circuit_breaker_pct * 0.7:
         size_pct = min(size_pct, 0.50)
-    if var_result and var_result.loss_pct_of_nlv > 5:
+    if loss_result and loss_result.loss_pct_of_nlv > 5:
         size_pct = min(size_pct, 0.75)
     if not can_open:
         size_pct = 0.0
@@ -918,7 +913,7 @@ def compute_risk_dashboard(
         portfolio_risk_pct=round(portfolio_risk_pct, 2),
         greeks=greeks_result.greeks if greeks_result else None,
         greeks_within_limits=greeks_result.within_limits if greeks_result else True,
-        var=var_result,
+        expected_loss=loss_result,
         strategy_concentration=strategy_conc,
         directional_exposure=directional,
         sector_concentration=sector_pcts,

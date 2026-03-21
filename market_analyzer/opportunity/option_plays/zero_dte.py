@@ -176,13 +176,13 @@ def _check_hard_stops(
             description=f"ATR {technicals.atr_pct:.2f}% > {cfg.max_atr_pct}% — moves too large for 0DTE.",
         ))
 
-    # R4 high confidence
-    if int(regime.regime) == 4 and regime.confidence > cfg.r4_confidence_threshold:
+    # R4 — explosive moves make short-gamma 0DTE structures too dangerous regardless of confidence
+    if int(regime.regime) == 4:
         stops.append(HardStop(
-            name="r4_high_confidence",
+            name="r4_explosive_moves",
             description=(
                 f"R4 (High-Vol Trending) at {regime.confidence:.0%} confidence "
-                f"— explosive moves, 0DTE is too dangerous."
+                f"— explosive moves, short-gamma 0DTE is too dangerous."
             ),
         ))
 

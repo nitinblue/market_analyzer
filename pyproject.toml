@@ -40,4 +40,5 @@ analyzer-cli = "market_analyzer.cli.interactive:main"
 [tool.pytest.ini_options]
 markers = [
     "integration: marks tests that hit real network APIs",
+    "daily: marks tests that validate daily trading pipeline readiness",
 ]

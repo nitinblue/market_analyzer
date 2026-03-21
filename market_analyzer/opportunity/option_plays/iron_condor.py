@@ -204,21 +204,19 @@ def assess_iron_condor(
 def _check_hard_stops(regime, vol_surface, days_to_earnings, front_iv, cfg) -> list[HardStop]:
     stops: list[HardStop] = []
 
-    # R4 at high confidence — explosive moves destroy condors
+    # R4 — explosive moves destroy condors regardless of confidence
     if regime.regime == RegimeID.R4_HIGH_VOL_TREND:
-        if regime.confidence >= cfg.r4_confidence_threshold:
-            stops.append(HardStop(
-                name="R4 trending",
-                description=f"R4 at {regime.confidence:.0%} — explosive moves destroy iron condors",
-            ))
+        stops.append(HardStop(
+            name="R4 trending",
+            description=f"R4 ({regime.confidence:.0%} confidence) — explosive trending moves destroy iron condors",
+        ))
 
-    # R3 at high confidence — persistent trend blows through one side
+    # R3 — persistent trend blows through one side regardless of confidence
     if regime.regime == RegimeID.R3_LOW_VOL_TREND:
-        if regime.confidence >= cfg.r3_confidence_threshold:
-            stops.append(HardStop(
-                name="R3 trending",
-                description=f"R3 trending at {regime.confidence:.0%} — directional move likely breaches short strike",
-            ))
+        stops.append(HardStop(
+            name="R3 trending",
+            description=f"R3 trending ({regime.confidence:.0%} confidence) — directional move will breach short strike",
+        ))
 
     if vol_surface is None:
         stops.append(HardStop(

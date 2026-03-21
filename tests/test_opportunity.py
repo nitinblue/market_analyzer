@@ -317,13 +317,15 @@ class TestZeroDTEHardStops:
         assert result.verdict == Verdict.NO_GO
         assert any(s.name == "atr_too_high" for s in result.hard_stops)
 
-    def test_r4_high_confidence_is_no_go(self):
-        result = assess_zero_dte(
-            "TEST", _make_regime(regime_id=4, confidence=0.85),
-            _make_technicals(), _make_macro(),
-        )
-        assert result.verdict == Verdict.NO_GO
-        assert any(s.name == "r4_high_confidence" for s in result.hard_stops)
+    def test_r4_is_always_no_go(self):
+        # R4 always hard-stops 0DTE regardless of confidence
+        for confidence in (0.50, 0.75, 0.85):
+            result = assess_zero_dte(
+                "TEST", _make_regime(regime_id=4, confidence=confidence),
+                _make_technicals(), _make_macro(),
+            )
+            assert result.verdict == Verdict.NO_GO
+            assert any(s.name == "r4_explosive_moves" for s in result.hard_stops)
 
     def test_no_hard_stops_can_be_go(self):
         result = assess_zero_dte(

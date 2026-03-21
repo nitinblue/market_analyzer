@@ -150,6 +150,37 @@ def assess_ratio_spread(
         regime, technicals, direction, confidence, cfg,
     )
 
+    # --- Naked leg hard stop — undefined risk not suitable for small accounts ---
+    if has_naked:
+        hard_stops.append(HardStop(
+            name="naked_leg_undefined_risk",
+            description=(
+                "Ratio spread has undefined risk on the naked leg. "
+                "A gap move (earnings, macro shock) can cause losses of 5-10x the premium collected. "
+                "Not suitable for accounts under $500K or without defined-risk approval."
+            ),
+        ))
+        return RatioSpreadOpportunity(
+            ticker=ticker,
+            as_of_date=today,
+            verdict=Verdict.NO_GO,
+            confidence=0.0,
+            hard_stops=hard_stops,
+            signals=signals,
+            strategy=_no_trade_rec(),
+            ratio_strategy=RatioSpreadStrategy.NO_TRADE,
+            regime_id=int(regime.regime),
+            regime_confidence=regime.confidence,
+            direction=direction,
+            has_naked_leg=True,
+            margin_warning="Blocked: naked leg carries undefined risk",
+            front_iv=front_iv,
+            put_skew=put_skew,
+            call_skew=call_skew,
+            days_to_earnings=days_to_earnings,
+            summary="NO_GO: naked leg undefined risk — not suitable for this account",
+        )
+
     # --- Trade spec ---
     trade_spec = _compute_trade_spec(ticker, technicals, regime, vol_surface, direction) if verdict != Verdict.NO_GO else None
 
@@ -161,8 +192,6 @@ def assess_ratio_spread(
         gaps.append(DataGap(field="skew", reason="vol surface not computed", impact="high", affects="skew assessment and strike selection"))
     if trade_spec is not None and trade_spec.max_entry_price is None:
         gaps.append(DataGap(field="max_entry_price", reason="broker not connected", impact="high", affects="entry pricing and POP"))
-    if has_naked:
-        gaps.append(DataGap(field="margin", reason="undefined risk on naked leg", impact="high", affects="margin requirement and max loss"))
 
     return RatioSpreadOpportunity(
         ticker=ticker,

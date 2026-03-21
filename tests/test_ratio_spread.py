@@ -163,23 +163,23 @@ class TestRatioSpreadStrategy:
 
 
 class TestRatioSpreadVerdict:
-    def test_r1_steep_skew_bullish_go(self) -> None:
-        """R1 + steep put skew + bullish → GO."""
+    def test_ratio_spread_always_no_go_naked_leg(self) -> None:
+        """All ratio spread strategies have a naked leg — always NO_GO for small accounts."""
         result = assess_ratio_spread(
             "SPY", _regime(1, 0.80), _technicals(rsi=60),
             _vol_surface(front_iv=0.28, put_skew=0.06, call_skew=0.02),
             _phase(2),
         )
-        assert result.verdict == Verdict.GO
+        assert result.verdict == Verdict.NO_GO
+        assert any("naked" in s.name.lower() for s in result.hard_stops)
 
-    def test_r2_low_confidence_passes(self) -> None:
-        """R2 with low confidence is not a hard stop, but should be cautious."""
+    def test_r2_also_no_go_naked_leg(self) -> None:
+        """R2 ratio spread also NO_GO — naked leg hard stop applies across all regimes."""
         result = assess_ratio_spread(
             "SPY", _regime(2, 0.50), _technicals(),
             _vol_surface(), _phase(2),
         )
-        # Not a hard stop since below R2 threshold, but not ideal
-        assert result.verdict in (Verdict.NO_GO, Verdict.CAUTION, Verdict.GO)
+        assert result.verdict == Verdict.NO_GO
 
 
 class TestRatioSpreadOutput:
@@ -187,10 +187,10 @@ class TestRatioSpreadOutput:
         result = assess_ratio_spread("SPY", _regime(1), _technicals(), _vol_surface(), _phase(2))
         assert isinstance(result, RatioSpreadOpportunity)
         assert result.ticker == "SPY"
-        assert result.front_iv > 0
-        assert result.direction in ("bullish", "bearish")
-        assert 0.0 <= result.confidence <= 1.0
-        assert "SPY" in result.summary
+        # Ratio spreads are always NO_GO (naked leg hard stop)
+        assert result.verdict == Verdict.NO_GO
+        assert result.has_naked_leg is True
+        assert len(result.hard_stops) > 0
 
     def test_hard_stop_produces_no_trade(self) -> None:
         result = assess_ratio_spread("SPY", _regime(4), _technicals(), _vol_surface())
