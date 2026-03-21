@@ -25,6 +25,7 @@
 18. [All Recommendations Return TradeSpec](#18-all-recommendations-return-tradespec)
 19. [Supported Brokers — What eTrading Needs to Know](#19-supported-brokers--what-etrading-needs-to-know)
 20. [India Market: eTrading Delayed Data Service (Planned)](#20-india-market-etrading-delayed-data-service-planned)
+21. [Desk Management APIs (March 21, 2026)](#21-desk-management-apis-march-21-2026)
 
 ---
 
@@ -2494,3 +2495,275 @@ Response:
 ```
 
 **Priority:** This unblocks India adoption. Build after Dhan broker is validated in production.
+
+---
+
+## 21. Desk Management APIs (March 21, 2026)
+
+6 pure functions for portfolio desk management, capital allocation, rebalancing, health monitoring, and instrument risk sizing. All stateless — no broker calls, no DB.
+
+### Import
+
+```python
+from market_analyzer.features.desk_management import (
+    recommend_desk_structure,
+    rebalance_desks,
+    evaluate_desk_health,
+    suggest_desk_for_trade,
+    compute_desk_risk_limits,
+    compute_instrument_risk,
+)
+from market_analyzer.models.portfolio import (
+    DeskRecommendation, DeskSpec, DeskHealthReport, DeskRiskLimits,
+    InstrumentRisk, RebalanceRecommendation, RiskTolerance, DeskHealth,
+)
+```
+
+---
+
+### API 1: `recommend_desk_structure()`
+
+Recommend how to split capital across trading desks based on risk tolerance and current regime.
+
+```python
+rec: DeskRecommendation = recommend_desk_structure(
+    total_capital=100_000,
+    risk_tolerance="moderate",   # "conservative" | "moderate" | "aggressive"
+    market="US",                 # "US" | "India"
+    regime={"SPY": 1, "QQQ": 2}, # optional — adjusts allocations
+)
+
+# rec.desks: list[DeskSpec]  — one per trading style
+# rec.unallocated_cash: float — cash reserve
+# rec.cash_reserve_pct: float — reserve as fraction
+# rec.regime_context: str     — human-readable regime adjustment explanation
+
+# Invariant: sum(d.capital_allocation for d in rec.desks) + rec.unallocated_cash == total_capital
+```
+
+**Desk structure by tolerance:**
+
+| Tolerance | Cash | Desks |
+|-----------|------|-------|
+| Conservative | 10% | income (40%), core (40%), 0dte (10%) |
+| Moderate | 8% | 0dte (15%), income (35%), core (30%), growth (12%) |
+| Aggressive | 5% | 0dte (20%), income (30%), directional (25%), core (20%) |
+
+**Regime adjustments applied automatically:**
+- R4 anywhere → +15% cash, 0DTE/directional halved
+- R2 majority → 0DTE −25%, income +freed capital
+- R3 → income −15%, directional +freed capital
+
+**India market:** `desk_expiry_day` replaces `desk_0dte`. Underlyings: NIFTY, BANKNIFTY. Includes lot-size note in rationale.
+
+**eTrading action required:**
+- Call on account creation, risk tolerance change, or major regime shift
+- Store `DeskSpec` list per user — use `desk_key` as stable identifier
+- Pass `regime` map from MA's latest regime detection for best results
+- `DeskSpec.risk_limits` dict contains `max_single_position_pct`, `circuit_breaker_pct`, `max_correlated_positions` — enforce these before each trade
+
+---
+
+### API 2: `rebalance_desks()`
+
+Check whether desks need rebalancing and compute adjustment targets.
+
+```python
+result: RebalanceRecommendation = rebalance_desks(
+    current_desks=[{"desk_key": "desk_income", "current_capital": 40_000}, ...],
+    target_desks=[{"desk_key": "desk_income", "target_capital": 35_000}, ...],
+    account_drawdown_pct=0.07,     # 7% drawdown
+    regime_changed=False,
+    days_since_last_rebalance=35,
+    drift_threshold_pct=0.20,      # 20% drift = trigger
+)
+
+# result.needs_rebalance: bool
+# result.trigger: "regime_change" | "drawdown" | "performance_drift" | "periodic" | "none"
+# result.adjustments: list[DeskAdjustment]  — each has desk_key, change (+ add / - reduce), reason
+```
+
+**Trigger priority:**
+1. `regime_changed=True` → reallocate to match new regime profile
+2. `account_drawdown_pct > 0.05` → reduce all desks proportionally
+3. Any desk drifted >20% from target → rebalance drifted desks only
+4. `days_since_last_rebalance > 30` → periodic sweep
+
+**eTrading action required:**
+- Check every morning before market open (or on regime change notification)
+- For `trigger="drawdown"`: all `adj.change` are negative — reduce positions to free capital
+- For `trigger="performance_drift"`: some desks grow (positive change), others shrink
+- Do NOT move capital if open positions block it — queue the rebalance for next trade closure
+
+---
+
+### API 3: `evaluate_desk_health()`
+
+Score a desk's performance from trade history.
+
+```python
+report: DeskHealthReport = evaluate_desk_health(
+    desk_key="desk_income",
+    trade_history=[
+        {"pnl": 200.0, "won": True, "days_held": 18.0},
+        {"pnl": -100.0, "won": False, "days_held": 22.0},
+        ...
+    ],
+    capital_deployed=35_000,
+    current_regime=2,                          # optional
+    desk_strategy_types=["iron_condor", "credit_spread"],  # optional
+)
+
+# report.health: DeskHealth  ("excellent"|"good"|"caution"|"poor"|"critical")
+# report.score: float  (0-1)
+# report.win_rate: float | None
+# report.profit_factor: float | None
+# report.capital_efficiency: float  (annualized ROC as fraction)
+# report.regime_fit: "well_suited" | "neutral" | "poor_fit"
+# report.issues: list[str]
+# report.suggestions: list[str]
+```
+
+**Health thresholds:**
+| Score | Health |
+|-------|--------|
+| ≥0.80 | excellent |
+| ≥0.65 | good |
+| ≥0.50 | caution |
+| ≥0.30 | poor |
+| <0.30 | critical |
+
+**eTrading action required:**
+- Build `trade_history` from closed positions (pnl, won=pnl>0, days_held=close_date−open_date)
+- Run weekly or after 10+ closed trades per desk
+- If `health == "critical"` → pause new entries on that desk until reviewed
+- If `regime_fit == "poor_fit"` → surface warning before next trade entry on this desk
+
+---
+
+### API 4: `suggest_desk_for_trade()`
+
+Route a proposed trade to the best-fit desk.
+
+```python
+result: dict = suggest_desk_for_trade(
+    desks=[d.model_dump() for d in rec.desks],  # from recommend_desk_structure
+    trade_dte=45,
+    strategy_type="iron_condor",
+    ticker="SPY",
+    existing_positions_by_desk={"desk_income": ["SPY", "GLD"], "desk_0dte": ["QQQ"]},
+)
+
+# result["desk_key"]: str | None   — best desk
+# result["reason"]: str            — why this desk was chosen
+# result["score"]: float           — match quality 0-1
+# result["alternatives"]: list[dict]  — runner-up desks
+```
+
+**Match criteria (weighted):**
+1. DTE range fit — 50 points
+2. Strategy type in desk's supported list — 30 points
+3. Capacity headroom (positions remaining) — 15 points
+4. Ticker not already in desk (correlation) — 5 points
+
+**eTrading action required:**
+- Call after `rank()` produces a candidate trade, before `filter_trades_with_portfolio()`
+- If `result["desk_key"]` is None → no desk has capacity, do not enter trade
+- If `result["score"] < 0.3` → poor fit, surface warning to trader
+- Store `desk_key` on each open position for health monitoring
+
+---
+
+### API 5: `compute_desk_risk_limits()`
+
+Get regime-adjusted position limits for a desk.
+
+```python
+limits: DeskRiskLimits = compute_desk_risk_limits(
+    desk_key="desk_income",
+    base_max_positions=10,
+    base_max_single_position_pct=0.12,
+    base_circuit_breaker_pct=0.07,
+    regime_id=2,
+    account_drawdown_pct=0.0,
+)
+
+# limits.max_positions: int
+# limits.max_single_position_pct: float
+# limits.max_portfolio_delta: float
+# limits.max_daily_loss_pct: float
+# limits.circuit_breaker_pct: float   (NOT scaled — hard stop)
+# limits.position_size_factor: float  (multiply base size by this)
+# limits.rationale: str
+```
+
+**Regime scaling:**
+| Regime | Income Desk | Directional Desk | size_factor |
+|--------|-------------|------------------|-------------|
+| R1 | 100% | 100% | 1.0 |
+| R2 | 80% | 80% | 0.8 |
+| R3 | 70% | 100% | 0.7 / 1.0 |
+| R4 | 50% | 50% | 0.5 |
++ drawdown >5%: additional 50% reduction on top
+
+**eTrading action required:**
+- Call on each regime change (or daily morning)
+- Apply `position_size_factor` to base contract quantity before entry
+- Enforce `circuit_breaker_pct` — if desk P&L hits this loss threshold, pause all new entries
+- `max_correlated_positions` applies per underlying (e.g. max 2 SPY trades per desk)
+
+---
+
+### API 6: `compute_instrument_risk()`
+
+Per-instrument risk sizing for position management.
+
+```python
+risk: InstrumentRisk = compute_instrument_risk(
+    ticker="SPY",
+    instrument_type="option_spread",   # "option_spread"|"equity_long"|"futures"|"naked_option"
+    position_value=150.0,
+    regime_id=2,
+    wing_width=5.0,    # option_spread: spread width in points
+    lot_size=100,      # US options = 100, NIFTY = 75, BANKNIFTY = 50
+)
+
+# risk.max_loss: float          — defined or estimated max loss
+# risk.expected_loss_1d: float  — expected 1-day loss (regime-scaled)
+# risk.margin_required: float   — margin to reserve
+# risk.risk_category: str       — "defined" | "undefined" | "equity"
+# risk.risk_method: str         — "max_loss" | "atr_based" | "margin_based"
+# risk.regime_factor: float     — multiplier used (R1=0.40, R2=0.70, R3=1.10, R4=1.50)
+# risk.rationale: str           — human-readable calculation trace
+```
+
+**Per instrument type:**
+- `option_spread`: `max_loss = wing_width × lot_size` (defined risk)
+- `equity_long`: `expected_loss_1d = position_value × atr_pct × regime_factor`
+- `futures`: `margin_required = contract_value × margin_pct × regime_factor`
+- `naked_option`: `max_loss = underlying_price × lot_size` — flagged as UNDEFINED RISK
+
+**India lot sizes:** NIFTY=75, BANKNIFTY=50, FINNIFTY=40 — pass via `lot_size` parameter.
+
+**eTrading action required:**
+- Call for every new position before entry to get `margin_required`
+- Sum `margin_required` across all desk positions to check against `DeskSpec.capital_allocation`
+- If `risk_category == "undefined"` and `DeskSpec.allow_undefined_risk == False` → BLOCK trade
+- Feed `expected_loss_1d` into risk dashboard for VaR-style reporting
+- For naked options: always surface `risk.rationale` to trader before approval
+
+---
+
+### Summary: Where Each API Fits in the Trade Pipeline
+
+```
+scan → rank → [suggest_desk_for_trade] → filter_trades_with_portfolio
+             → [compute_instrument_risk]  → evaluate_trade_gates
+             → [compute_desk_risk_limits] → entry
+                       ↓
+           [evaluate_desk_health]  (weekly, from closed trades)
+           [rebalance_desks]       (daily pre-market)
+           [recommend_desk_structure] (on account setup or regime shift)
+```
+
+**Critical invariant:** `rank()` output is NOT safe to execute directly. Always call `suggest_desk_for_trade()` → `filter_trades_with_portfolio()` → `evaluate_trade_gates()` before execution.

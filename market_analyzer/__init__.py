@@ -447,6 +447,27 @@ from market_analyzer.features.position_sizing import (
     compute_kelly_position_size,
 )
 
+# Portfolio desk management
+from market_analyzer.models.portfolio import (
+    DeskAdjustment,
+    DeskHealth,
+    DeskHealthReport,
+    DeskRecommendation,
+    DeskRiskLimits,
+    DeskSpec,
+    InstrumentRisk,
+    RebalanceRecommendation,
+    RiskTolerance,
+)
+from market_analyzer.features.desk_management import (
+    compute_desk_risk_limits,
+    compute_instrument_risk,
+    evaluate_desk_health,
+    rebalance_desks,
+    recommend_desk_structure,
+    suggest_desk_for_trade,
+)
+
 # Capital deployment engine (long-term systematic investing)
 from market_analyzer.capital_deployment import (
     AssetAllocation,

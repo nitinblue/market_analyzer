@@ -6364,6 +6364,233 @@ stratified by risk category (defined / semi_defined / undefined)."""
         from market_analyzer.cli._setup import run_setup_wizard
         run_setup_wizard()
 
+    def do_desk(self, arg: str) -> None:
+        """Recommend desk structure for a given capital amount.
+
+        Usage:
+            desk CAPITAL [TOLERANCE] [--regime R1,R2,...]
+            desk 100000                  # moderate, US market
+            desk 200000 conservative
+            desk 100000 aggressive --regime SPY:4,QQQ:3
+
+        TOLERANCE: conservative | moderate (default) | aggressive
+        --regime:  comma-separated ticker:regime pairs (e.g. SPY:4,QQQ:3)
+        """
+        from market_analyzer.features.desk_management import recommend_desk_structure
+
+        parts = arg.strip().split()
+        if not parts:
+            print("Usage: desk CAPITAL [TOLERANCE] [--regime TICKER:R,...]")
+            return
+
+        # Parse capital
+        try:
+            total_capital = float(parts[0].replace(",", ""))
+        except ValueError:
+            print(f"Invalid capital amount: {parts[0]}")
+            return
+
+        # Parse tolerance
+        risk_tolerance = "moderate"
+        if len(parts) > 1 and not parts[1].startswith("--"):
+            rt = parts[1].lower()
+            if rt in ("conservative", "moderate", "aggressive"):
+                risk_tolerance = rt
+            else:
+                print(f"Unknown tolerance '{parts[1]}'. Use: conservative | moderate | aggressive")
+                return
+
+        # Parse --regime
+        regime: dict[str, int] | None = None
+        if "--regime" in parts:
+            idx = parts.index("--regime")
+            if idx + 1 < len(parts):
+                regime = {}
+                for pair in parts[idx + 1].split(","):
+                    try:
+                        ticker_r, r_val = pair.split(":")
+                        regime[ticker_r.upper()] = int(r_val)
+                    except ValueError:
+                        print(f"Invalid regime pair: '{pair}' (expected TICKER:1-4)")
+                        return
+
+        market = self._market
+
+        try:
+            rec = recommend_desk_structure(
+                total_capital=total_capital,
+                risk_tolerance=risk_tolerance,
+                market=market,
+                regime=regime,
+            )
+
+            _print_header(
+                f"Desk Structure — ${total_capital:,.0f} | {risk_tolerance.capitalize()} | {market}"
+            )
+
+            print(f"\n  Cash Reserve: {_styled(f'${rec.unallocated_cash:,.0f}', 'yellow')} "
+                  f"({rec.cash_reserve_pct:.0%} of total)")
+            print(f"  Regime Context: {_styled(rec.regime_context, 'dim')}\n")
+
+            rows = []
+            for desk in rec.desks:
+                risk_flag = (
+                    _styled("YES", "red") if desk.allow_undefined_risk
+                    else _styled("no", "green")
+                )
+                rows.append([
+                    _styled(desk.desk_key, "bold"),
+                    desk.name,
+                    f"${desk.capital_allocation:,.0f}",
+                    f"{desk.capital_pct:.0%}",
+                    f"{desk.dte_min}-{desk.dte_max} DTE",
+                    desk.max_positions,
+                    risk_flag,
+                ])
+
+            print(tabulate(
+                rows,
+                headers=["Key", "Name", "Capital", "Pct", "DTE", "MaxPos", "Undef Risk"],
+                tablefmt="simple",
+            ))
+
+            print(f"\n  {_styled('Strategies per desk:', 'dim')}")
+            for desk in rec.desks:
+                strats = ", ".join(desk.strategy_types)
+                print(f"    {desk.desk_key:<20s}  {strats}")
+
+            print(f"\n  {_styled(rec.rationale, 'dim')}")
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+
+    def do_desk_health(self, arg: str) -> None:
+        """Evaluate desk health from trade history.
+
+        Usage:
+            desk_health DESK_KEY CAPITAL [--regime R] [--wins W --losses L]
+            desk_health desk_income 50000
+            desk_health desk_income 50000 --regime 2
+            desk_health desk_income 50000 --wins 8 --losses 2 --win_pnl 200 --loss_pnl -100
+
+        Simulates trade history from win/loss counts if provided.
+        """
+        from market_analyzer.features.desk_management import evaluate_desk_health
+
+        parts = arg.strip().split()
+        if len(parts) < 2:
+            print("Usage: desk_health DESK_KEY CAPITAL [--regime R] [--wins W --losses L]")
+            return
+
+        desk_key = parts[0]
+        try:
+            capital = float(parts[1].replace(",", ""))
+        except ValueError:
+            print(f"Invalid capital: {parts[1]}")
+            return
+
+        # Parse optional flags
+        regime_id: int | None = None
+        n_wins = 6
+        n_losses = 4
+        win_pnl = 200.0
+        loss_pnl = -100.0
+
+        i = 2
+        while i < len(parts):
+            flag = parts[i]
+            if flag == "--regime" and i + 1 < len(parts):
+                try:
+                    regime_id = int(parts[i + 1])
+                    i += 2
+                except ValueError:
+                    print(f"Invalid regime: {parts[i+1]}")
+                    return
+            elif flag == "--wins" and i + 1 < len(parts):
+                try:
+                    n_wins = int(parts[i + 1])
+                    i += 2
+                except ValueError:
+                    print(f"Invalid wins: {parts[i+1]}")
+                    return
+            elif flag == "--losses" and i + 1 < len(parts):
+                try:
+                    n_losses = int(parts[i + 1])
+                    i += 2
+                except ValueError:
+                    print(f"Invalid losses: {parts[i+1]}")
+                    return
+            elif flag == "--win_pnl" and i + 1 < len(parts):
+                try:
+                    win_pnl = float(parts[i + 1])
+                    i += 2
+                except ValueError:
+                    print(f"Invalid win_pnl: {parts[i+1]}")
+                    return
+            elif flag == "--loss_pnl" and i + 1 < len(parts):
+                try:
+                    loss_pnl = float(parts[i + 1])
+                    i += 2
+                except ValueError:
+                    print(f"Invalid loss_pnl: {parts[i+1]}")
+                    return
+            else:
+                i += 1
+
+        # Build synthetic trade history
+        trade_history = []
+        for _ in range(n_wins):
+            trade_history.append({"pnl": win_pnl, "won": True, "days_held": 20.0})
+        for _ in range(n_losses):
+            trade_history.append({"pnl": loss_pnl, "won": False, "days_held": 20.0})
+
+        try:
+            report = evaluate_desk_health(
+                desk_key=desk_key,
+                trade_history=trade_history,
+                capital_deployed=capital,
+                current_regime=regime_id,
+            )
+
+            _print_header(f"Desk Health — {desk_key}")
+
+            health_color = {
+                "excellent": "green",
+                "good": "green",
+                "caution": "yellow",
+                "poor": "red",
+                "critical": "red",
+            }.get(report.health.value, "white")
+
+            print(f"\n  Health:   {_styled(report.health.value.upper(), health_color)}")
+            print(f"  Score:    {report.score:.2f} / 1.00")
+
+            metrics_parts = []
+            if report.win_rate is not None:
+                metrics_parts.append(f"Win Rate: {report.win_rate:.0%}")
+            if report.profit_factor is not None:
+                pf_str = f"{report.profit_factor:.2f}" if report.profit_factor != float("inf") else "∞"
+                metrics_parts.append(f"Profit Factor: {pf_str}")
+            if report.avg_days_held is not None:
+                metrics_parts.append(f"Avg Days: {report.avg_days_held:.0f}")
+            metrics_parts.append(f"Cap Efficiency: {report.capital_efficiency:.1%}/yr")
+
+            print(f"  Metrics:  {' | '.join(metrics_parts)}")
+            print(f"  Regime Fit: {_styled(report.regime_fit, 'dim')}")
+
+            if report.issues:
+                print(f"\n  {_styled('Issues:', 'red')}")
+                for issue in report.issues:
+                    print(f"    - {issue}")
+
+            if report.suggestions:
+                print(f"\n  {_styled('Suggestions:', 'yellow')}")
+                for sug in report.suggestions:
+                    print(f"    → {sug}")
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+
     def do_quit(self, arg: str) -> bool:
         """Exit the REPL."""
         print("Goodbye.")
