@@ -7,10 +7,10 @@
 
 ## Test Suite
 
-- **Total tests: 1715** (as of 2026-03-20, collected by pytest)
+- **Total tests: 1820** (as of 2026-03-20, collected by pytest)
 - All passing: yes (confirmed by `pytest --co -q`)
 - Test locations:
-  - `tests/` — unit tests (~1670 tests)
+  - `tests/` — unit tests (~1775 tests)
   - `tests/functional/` — functional integration tests (45 tests, 8 modules)
 
 ---
@@ -187,6 +187,76 @@ Indicators assessed (9 total): VIX level + spike, credit spread widening, equity
 `SentinelReport.recommended_actions` — list of concrete steps
 
 **CLI:** `do_sentinel [TICKERS]` — displays signal color, dominant driver, and recommended actions
+
+---
+
+### Data Trust Framework (2026-03-20) — COMPLETED
+
+2-dimensional trust assessment on all outputs: **data quality** (broker/yfinance/heuristic) and **context quality** (calculation mode).
+
+**`models/transparency.py`:**
+- `CalculationMode` — `"full"` (default, portfolio-aware) or `"standalone"` (CLI/backtest)
+- `DataTrust` — source, score, degraded fields
+- `TrustReport` — overall trust 0–100%, actionability verdict
+- `ContextGap`, `DegradedField` — missing inputs detailed
+
+**Functions in `features/trust.py`:**
+- `compute_data_trust(...)` — scores broker/yfinance/heuristic sources
+- `compute_context_quality(..., mode="full")` — scores caller-provided context completeness
+- `compute_trust_report(..., mode="full")` — combined 2-D report
+
+**Default = full mode:** eTrading does not need signature changes; all calls are portfolio-aware BY DEFAULT. Missing critical context (levels, iv_rank, entry_credit) sets `is_actionable=False`.
+
+**CLI:** `context` and all opportunity assessments show trust breakdown in output.
+
+---
+
+### Monitoring Action with Closing TradeSpec (2026-03-20) — COMPLETED
+
+`MonitoringAction` model extended to include `closing_trade_spec: TradeSpec | None`:
+
+- `monitor_exit_conditions()` returns exit trigger: TP hit / SL hit / DTE expired / time-of-day urgency
+- When exit condition met, `closing_trade_spec` populated with pre-built STO/BTC legs to close position
+- eTrading directly executes closing spec without secondary computation
+- Wired: `check_trade_health()` also returns closing spec when exit urgent
+
+**CLI:** `monitor` command shows exit trigger and closing legs (if available).
+
+---
+
+### Position Stress Monitoring (2026-03-20) — COMPLETED
+
+New service in `service/stress_monitoring.py` and CLI `run_position_stress()`:
+
+- Takes open positions and stresses them on 13 predefined scenarios (-1%, -3%, -5%, -10%, VIX spike, flash crash, Black Monday, COVID, India crash, Fed surprise, etc.)
+- Returns `StressResult` per position per scenario: `estimated_loss_pct`, `max_loss_exceeded`, `urgency` flag
+- Pure functions — no broker required (uses ATR-based loss estimates)
+- Gracefully degrades when position Greeks unavailable
+
+**CLI:** `stress_test` command — runs on open positions with urgency escalation guidance.
+
+---
+
+### India TradeSpec Fixes (2026-03-20) — COMPLETED
+
+3 critical fixes for India equity/index option trade construction:
+
+1. **Strike snapping with `strike_interval` parameter** — India instruments use 5pt or 10pt steps; `snap_strike(price, strike_interval=5 or 10)` now respects market-specific tick sizes
+2. **Fallback setup legs** — trend_continuation assessor for NIFTY/BANKNIFTY now falls back to `build_setup_trade_spec()` instead of returning None
+3. **Equity long/short trade models** — `StructureType.EQUITY_LONG`, `EQUITY_SHORT` + builders for cash equity positions with ATR-based stops
+
+**Wired:** `AssessorFactory.assess_trend_continuation()` and `MarketRegistry` instrument metadata.
+
+**CLI:** `setup` command works for India tickers; `parse` correctly handles strike_interval.
+
+---
+
+### Crash Sentinel & Monitoring Actions
+
+All pre-trade and post-entry monitoring now wired to provide actionable `TradeSpec` outputs:
+- Entry failures → suggest alternative structures via `assess_*()` overflow paths
+- Exit triggers → `closing_trade_spec` ready for immediate submission
+- Stress alerts → urgency escalation tied to position monitoring
 
 ---
 

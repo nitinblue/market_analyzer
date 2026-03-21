@@ -2189,4 +2189,227 @@ report = compute_trust_report(mode="full", has_broker=True, has_iv_rank=True, ..
 assert report.is_actionable  # Must be True before executing any trade
 ```
 
+---
+
+## 14. MonitoringAction with Closing TradeSpec
+
+### New Field: `closing_trade_spec`
+
+`MonitoringAction` (from `models/exit.py`) now includes:
+```python
+closing_trade_spec: TradeSpec | None  # Pre-built legs to close position
+```
+
+### When Closing Spec Is Populated
+
+1. **TP Hit** — Closing spec = STO/BTC legs for profit-taking close
+2. **SL Hit** — Closing spec = STO/BTC legs for loss-cutting close
+3. **DTE Expired** — Closing spec = STO/BTC legs for DTE close
+4. **Urgency Escalation** (after 15:00 ET for 0DTE, 15:30 for others) — Force-close spec provided
+
+### Integration Pattern
+
+```python
+from market_analyzer.trade_lifecycle import monitor_exit_conditions
+
+result = monitor_exit_conditions(
+    trade_spec=position_trade_spec,
+    current_price=latest_price,
+    current_pnl_pct=0.35,
+    time_of_day=datetime.now().time(),
+    dte_remaining=12,
+)
+
+if result.exit_signal:
+    # Submit closing_trade_spec directly to broker
+    order_result = broker.submit_order(
+        trade_spec=result.monitoring_action.closing_trade_spec
+    )
+```
+
+### Benefit
+
+- No re-computation needed at exit time
+- Avoids ordering delays due to calculation overhead
+- Guaranteed consistency with entry logic (same strike snapping, lot size)
+
+---
+
+## 15. Position Stress Monitoring API
+
+### Overview
+
+`run_position_stress()` in `service/stress_monitoring.py` stresses open positions across 13 predefined scenarios without requiring broker Greeks.
+
+### Scenarios
+
+| Category | Triggers |
+|----------|----------|
+| **Price Moves** | -1%, -3%, -5%, -10% |
+| **Vol Spikes** | VIX +10, +20, +30 points |
+| **Tail Events** | Flash crash (-20% 1-day), Black Monday |
+| **Systemic Shocks** | COVID crash, India crash, Fed surprise (75bps) |
+
+### API
+
+```python
+from market_analyzer.service.stress_monitoring import run_position_stress
+
+result = run_position_stress(
+    positions=open_positions,  # list[PortfolioPosition]
+    technicals_map={'SPY': technical_snapshot, ...},
+    regime_id=current_regime_id,
+    atr_pct_map={'SPY': 0.0142, ...},
+)
+
+# result: StressSuiteResult
+#   .scenarios[i].positions[j].estimated_loss_pct
+#   .scenarios[i].positions[j].max_loss_exceeded
+#   .scenarios[i].positions[j].urgency  # NORMAL / ESCALATE / FORCE_CLOSE
+```
+
+### Urgency Escalation
+
+- **NORMAL** — Loss within expected range; continue monitoring
+- **ESCALATE** — Loss > 50% of max_loss; consider adjustment or partial close
+- **FORCE_CLOSE** — Loss > 100% of max_loss (only for undefined-risk structures like equity long); close immediately
+
+### When to Call
+
+- **Daily pre-market** — stress scenarios for all open positions
+- **After major moves** — re-stress if intraday drawdown > 2%
+- **Before earnings** — stress for events in next 7 days
+
+---
+
+## 16. India TradeSpec Fixes (P0-3 Done)
+
+### 1. Strike Snapping with `strike_interval`
+
+`snap_strike()` now respects market-specific tick sizes:
+
+```python
+from market_analyzer.opportunity.option_plays._trade_spec_helpers import snap_strike
+
+# US (1pt step)
+strike = snap_strike(price=580.5, current_ask=580.55, strike_interval=1)  # → 580.5
+
+# India equity options (5pt step)
+strike = snap_strike(price=19250, current_ask=19265, strike_interval=5)  # → 19250
+
+# India index options (10pt step, NIFTY)
+strike = snap_strike(price=23450, current_ask=23465, strike_interval=10)  # → 23450
+```
+
+**Wired:** `MarketRegistry.get_instrument(ticker)['strike_interval']` auto-loaded.
+
+### 2. Fallback Setup Legs for India Tickers
+
+`trend_continuation` assessor for NIFTY/BANKNIFTY now falls back to `build_setup_trade_spec()`:
+
+```python
+# Old: returned None if no trendline found
+# New: falls back to setup-based IC/credit spread
+
+result = assess_trend_continuation(
+    ticker='NIFTY',
+    regime_id=3,  # Low-vol trending
+    technicals=snapshot,
+)
+# Always returns trade_spec (never None) for India tickers
+```
+
+### 3. Equity Long/Short Trade Models
+
+New `StructureType` entries for cash equity positions:
+
+```python
+from market_analyzer import build_equity_trade_spec
+
+spec = build_equity_trade_spec(
+    ticker='NIFTY',
+    shares=1,
+    entry_price=23450,
+    stop_loss_pct=0.02,  # 2% ATR-based stop
+    target_price=23750,  # profit target
+    regime_id=3,
+)
+# spec.structure_type = "equity_long"
+# spec.legs[0] = equity entry leg
+# spec.exit_notes = ["Close at +2% target", "Stop at -2% ATR stop"]
+```
+
+**Benefit:** Unified trade model across options + equities. eTrading can execute both via same `TradeSpec` pipeline.
+
+---
+
+## 17. Stock Screener Data Quality
+
+### Known eTrading Mismatches
+
+**Issue P2-5:** Stock screener OHLCV period mismatch + dividend yield double-division.
+
+| Problem | eTrading Call | MA Expectation | Fix |
+|---------|---------------|----------------|-----|
+| OHLCV period | `get_ohlcv(ticker, period='1y')` | `days=365` parameter | Use `days=365` instead of `period='1y'` |
+| Dividend yield | `result.dividend_yield * 100` | Already a ratio (0.042 = 4.2%) | Remove `* 100` (yfinance returns ratio, not percentage) |
+
+**Example Fix (eTrading):**
+```python
+# Before (broken)
+ohlcv = ma.data_service.get_ohlcv(ticker, period='1y')  # Wrong parameter
+div_yield = ohlcv.dividend_yield * 100  # Double-divide
+
+# After (fixed)
+ohlcv = ma.data_service.get_ohlcv(ticker, days=365)  # Correct parameter
+div_yield = ohlcv.dividend_yield  # Already a ratio
+```
+
+**MA-Side OK:** APIs are correct; eTrading parameter contracts just need alignment.
+
+---
+
+## 18. All Recommendations Return TradeSpec
+
+### Change Summary
+
+Every opportunity assessor now returns a `trade_spec: TradeSpec | None` field.
+
+### Affected Assessors
+
+| Assessor | Returns TradeSpec |
+|----------|-------------------|
+| `assess_iron_condor()` | ✅ Yes (structure, legs, exit rules) |
+| `assess_iron_butterfly()` | ✅ Yes |
+| `assess_calendar()` | ✅ Yes |
+| `assess_zero_dte()` | ✅ Yes (+ ORB decision) |
+| `assess_ratio_spread()` | ✅ Yes |
+| `assess_diagonal()` | ✅ Yes |
+| `assess_leap()` | ✅ Yes |
+| `assess_earnings()` | ✅ Yes |
+| `assess_breakout()` | ✅ Yes (setup credit spread) |
+| `assess_momentum()` | ✅ Yes (setup debit spread) |
+| `assess_mean_reversion()` | ✅ Yes (setup IC or iron butterfly) |
+| `assess_orb()` | ✅ Yes (setup credit spread or iron man) |
+
+### Integration for eTrading
+
+```python
+# Every assessor call returns trade_spec
+from market_analyzer import ma
+
+result = ma.opportunity.assess_iron_condor(
+    ticker='SPY',
+    regime_id=1,
+    technicals=snapshot,
+    vol_surface=surface,
+)
+
+if result.trade_spec:
+    # Directly submit or score/filter
+    score = ma.ranking.score_trade(result.trade_spec, ...)
+```
+
+No more "no action" or menu selection — every result is actionable (or None).
+
 If `is_actionable` is False, DO NOT proceed with the trade. Fix the missing context first.

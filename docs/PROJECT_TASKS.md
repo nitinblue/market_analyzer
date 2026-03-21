@@ -121,18 +121,17 @@ From the March 20 review — items not yet implemented:
 | P2-2 | Richer LEAP/earnings assessors — earnings growth rate for LEAP scoring, vol crush magnitude history | leap/earnings assessors are thin; need deeper fundamental integration |
 | P2-3 | ML regime validation — track regime predictions vs actual price behavior; auto-retrain HMM | Track whether R2 actually mean-reverted, R3 actually trended |
 | P2-4 | POP calibration from actual outcomes — `calibrate_pop_factors(outcomes)` exists; requires eTrading to send closed trade outcomes | The live feedback loop is not running |
+| P2-5 | Stock screener OHLCV period mismatch — eTrading calls `get_ohlcv(ticker, period='1y')` but MA expects `days=` param. Dividend yield double-division (yfinance ratio × 100 again). | eTrading must fix: use `days=365` and remove dividend yield multiplication |
 
 ### P0 — Critical / Blocking eTrading
 
-These are tracked in `ETRADING_INTEGRATION.md` as P0. All fixes are eTrading-side, but MA may need to support.
-
-| # | Issue | Root Cause | MA Action Needed? |
-|---|-------|-----------|-------------------|
-| P0-1 | Scan → propose → deploy broken: 0/50 proposals ever approved | Thompson Sampling bandit priors not seeded from MA's `REGIME_STRATEGY_ALIGNMENT` matrix — R1 picks earnings/diagonal/leap instead of iron_condor/straddle | No MA change. eTrading must initialize bandit priors from `REGIME_STRATEGY_ALIGNMENT`. |
-| P0-2 | Scan takes 2+ min, HTTP request times out | Synchronous scan in request thread | No MA change. eTrading must make scan async with polling endpoint. |
-| P0-3 | NIFTY trend_continuation assessor produces no trade_spec / no legs | Assessor runs but returns no legs for NIFTY | Investigate IN3 equity fallback path for trend_continuation in India tickers. |
-| P0-4 | Mark-to-market broken: zero broker quotes for BAC equity | DXLink quote fetch returns empty for equity (non-option) symbols | Verify `fetch_quotes` in dxlink.py handles equity symbols — equity Quote subscription may need a separate path. |
-| P0-5 | Risk dashboard: `expected_loss` always null | `compute_risk_dashboard()` not called with real PortfolioPosition objects | No MA change — API is ready. eTrading must wire it. |
+| # | Issue | Status | MA Action |
+|---|-------|--------|-----------|
+| P0-1 | Scan → propose → deploy broken: 0/50 proposals | eTrading-side: Initialize bandit priors from `REGIME_STRATEGY_ALIGNMENT` | No MA change needed |
+| P0-2 | Scan takes 2+ min, HTTP timeout | eTrading-side: Make scan async with polling | No MA change needed |
+| P0-3 | NIFTY trend_continuation no trade_spec | ✅ DONE (2026-03-20) | Fallback to `build_setup_trade_spec()` + strike_interval support |
+| P0-4 | Mark-to-market: zero broker quotes for equity | eTrading-side: DXLink equity Quote subscription path | No MA change (API working) |
+| P0-5 | Risk dashboard expected_loss null | eTrading-side: Call `compute_risk_dashboard()` with positions | No MA change (API ready) |
 
 ### P1 — High Value (eTrading Bugs)
 
@@ -163,7 +162,9 @@ These are tracked in `ETRADING_INTEGRATION.md` as P0. All fixes are eTrading-sid
 - [ ] Update USER_MANUAL.md with all 7 new CLI commands from 2026-03-20: `entry_analysis`, `kelly`, `optimal_dte`, `exit_intelligence`, `audit`, `sentinel`, and expanded `validate` (checks #9 and #10)
 - [ ] Document `compute_benchmark_returns()` and `compute_alpha()` in USER_MANUAL.md if/when P2-E1 is implemented
 - [ ] Document `scan_vidura_opportunities()` in USER_MANUAL.md if/when P2-E2 is implemented
-- [ ] Update SYSTEMATIC_GAPS.md test count to 1715
+- [ ] Update SYSTEMATIC_GAPS.md test count to 1820
+- [ ] Document data trust framework (2-dim trust assessment, modes, trust report) in USER_MANUAL.md
+- [ ] Document position stress monitoring API and `run_position_stress()` CLI
 
 ---
 
