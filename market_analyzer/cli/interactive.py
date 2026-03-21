@@ -2214,6 +2214,22 @@ Requires --broker connection."""
 
             print(f"\n  {_styled('Commentary:', 'bold')} {result.commentary}")
 
+            # Position stress report
+            if result.position_stress:
+                ps = result.position_stress
+                checks = ps.get("checks", [])
+                failures = [c for c in checks if c.get("severity") == "fail"]
+                warnings = [c for c in checks if c.get("severity") == "warn"]
+                passed_count = sum(1 for c in checks if c.get("severity") == "pass")
+                print(f"\n  {_styled('Position Stress:', 'bold')} {passed_count}/{len(checks)} passed"
+                      + (f", {len(failures)} FAIL" if failures else "")
+                      + (f", {len(warnings)} warn" if warnings else ""))
+                for c in checks:
+                    sev = c.get("severity", "")
+                    color = "red" if sev == "fail" else "yellow" if sev == "warn" else "green"
+                    icon = "FAIL" if sev == "fail" else "WARN" if sev == "warn" else "PASS"
+                    print(f"    [{_styled(icon, color)}] {c.get('name', '?')}: {c.get('message', '')}")
+
         except Exception as exc:
             print(f"{_styled('ERROR:', 'red')} {exc}")
 

@@ -29,6 +29,7 @@ from market_analyzer.validation.stress_scenarios import (
     check_breakeven_spread,
     check_gamma_stress,
     check_vega_shock,
+    run_position_stress,
 )
 
 __all__ = [
@@ -44,4 +45,5 @@ __all__ = [
     "check_gamma_stress",
     "check_vega_shock",
     "check_breakeven_spread",
+    "run_position_stress",
 ]

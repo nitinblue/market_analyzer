@@ -221,3 +221,106 @@ def check_breakeven_spread(
         value=breakeven_spread_pct,
         threshold=2.0,
     )
+
+
+def run_position_stress(
+    trade_spec: TradeSpec,
+    current_credit_value: float,
+    current_atr_pct: float,
+    entry_credit: float,
+    days_held: int = 0,
+    dte_remaining: int = 30,
+) -> "ValidationReport":
+    """Run adversarial stress on an EXISTING position.
+
+    Unlike pre-trade adversarial checks which use entry credit,
+    this uses CURRENT market conditions to assess ongoing risk.
+
+    Key differences from pre-trade:
+    - ATR may have increased (regime shifted) → gamma stress worse
+    - IV may have spiked → vega shock assessment changes
+    - Spreads may have widened → breakeven spread tighter
+    - Position may be partially profitable → less risk to protect
+
+    Args:
+        trade_spec: The original TradeSpec.
+        current_credit_value: Current mid value of the position (may differ from entry).
+        current_atr_pct: CURRENT ATR as % of underlying (may have changed since entry).
+        entry_credit: Original entry credit.
+        days_held: Days since trade was opened.
+        dte_remaining: Days to expiration remaining.
+
+    Returns:
+        ValidationReport with 4 checks: gamma_stress, vega_shock,
+        breakeven_spread, and position_degradation.
+    """
+    from datetime import date
+    from market_analyzer.validation.models import CheckResult, Severity, Suite, ValidationReport
+
+    checks: list[CheckResult] = []
+
+    # 1. Gamma stress with CURRENT ATR (not entry ATR)
+    gamma = check_gamma_stress(trade_spec, entry_credit, current_atr_pct)
+    checks.append(gamma)
+
+    # 2. Vega shock
+    vega = check_vega_shock(trade_spec, entry_credit)
+    checks.append(vega)
+
+    # 3. Breakeven spread with CURRENT ATR
+    breakeven = check_breakeven_spread(trade_spec, entry_credit, current_atr_pct)
+    checks.append(breakeven)
+
+    # 4. Position-specific stress — has risk/reward degraded since entry?
+    wing = trade_spec.wing_width_points or 5.0
+    entry_max_loss = wing * 100 - entry_credit * 100
+    current_max_profit = current_credit_value * 100
+
+    if entry_max_loss > 0 and current_max_profit > 0:
+        current_rr = entry_max_loss / current_max_profit
+        entry_rr = entry_max_loss / (entry_credit * 100) if entry_credit > 0 else 999.0
+
+        if current_rr > entry_rr * 2.0:
+            # Risk/reward has DOUBLED since entry — position deteriorating
+            checks.append(CheckResult(
+                name="position_degradation",
+                severity=Severity.FAIL,
+                message=(
+                    f"R:R degraded from {entry_rr:.1f}:1 to {current_rr:.1f}:1 — "
+                    f"position has deteriorated significantly since entry"
+                ),
+                value=round(current_rr, 1),
+                threshold=round(entry_rr * 2.0, 1),
+            ))
+        elif current_rr > entry_rr * 1.5:
+            checks.append(CheckResult(
+                name="position_degradation",
+                severity=Severity.WARN,
+                message=(
+                    f"R:R degraded from {entry_rr:.1f}:1 to {current_rr:.1f}:1 — "
+                    f"monitor closely"
+                ),
+                value=round(current_rr, 1),
+                threshold=round(entry_rr * 1.5, 1),
+            ))
+        else:
+            checks.append(CheckResult(
+                name="position_degradation",
+                severity=Severity.PASS,
+                message=f"R:R stable at {current_rr:.1f}:1 (entry was {entry_rr:.1f}:1)",
+                value=round(current_rr, 1),
+                threshold=round(entry_rr * 2.0, 1),
+            ))
+    else:
+        checks.append(CheckResult(
+            name="position_degradation",
+            severity=Severity.WARN,
+            message="Cannot assess position degradation — invalid credit values",
+        ))
+
+    return ValidationReport(
+        ticker=trade_spec.ticker,
+        suite=Suite.ADVERSARIAL,
+        as_of=date.today(),
+        checks=checks,
+    )

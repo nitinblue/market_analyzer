@@ -611,6 +611,9 @@ from market_analyzer.trade_lifecycle import (
     assess_overnight_risk,
 )
 
+# Position stress monitoring (ongoing adversarial checks)
+from market_analyzer.validation.stress_scenarios import run_position_stress
+
 # Crash sentinel (market health monitoring)
 from market_analyzer.models.sentinel import SentinelReport, SentinelSignal, SentinelTicker
 from market_analyzer.features.crash_sentinel import assess_crash_sentinel
@@ -935,6 +938,7 @@ __all__ = [
     "OvernightRisk",
     "OvernightRiskLevel",
     "assess_overnight_risk",
+    "run_position_stress",
     # Currency conversion & cross-market exposure
     "CurrencyPair",
     "PositionExposure",

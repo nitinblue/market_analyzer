@@ -1369,6 +1369,7 @@ class TradeHealthCheck(BaseModel):
     commentary: str  # Human-readable decision justification for trading platform
     overnight_risk: OvernightRisk | None = None  # Late-day overnight gap risk assessment
     data_gaps: list[DataGap] = []
+    position_stress: dict | None = None  # Serialized ValidationReport from run_position_stress
 
 
 def check_trade_health(
@@ -1490,6 +1491,26 @@ def check_trade_health(
             overall_action = "close"
             status = "exit_triggered"
 
+    # 4. Ongoing adversarial stress (re-assess with CURRENT market conditions)
+    from market_analyzer.validation.stress_scenarios import run_position_stress
+    current_atr_pct = technicals.atr_pct if technicals and hasattr(technicals, "atr_pct") and technicals.atr_pct else 1.0
+    position_stress = run_position_stress(
+        trade_spec=trade_spec,
+        current_credit_value=current_mid_price,
+        current_atr_pct=current_atr_pct,
+        entry_credit=entry_price,
+        dte_remaining=dte_remaining,
+    )
+
+    # If any stress check FAILs, escalate commentary and overall action
+    stress_failures = [c for c in position_stress.checks if c.severity.value == "fail"]
+    if stress_failures:
+        for sf in stress_failures:
+            commentary_parts.append(f"STRESS: {sf.message}")
+        if overall_action not in ("close",):
+            overall_action = "adjust"
+            adjustment_needed = True
+
     # Summary
     parts = [f"{ticker}: {status.upper()}"]
     if exit_result.should_close:
@@ -1554,6 +1575,7 @@ def check_trade_health(
         summary=" | ".join(parts),
         commentary=" ".join(commentary_parts),
         overnight_risk=overnight_result,
+        position_stress=position_stress.model_dump(),
     )
 
 
