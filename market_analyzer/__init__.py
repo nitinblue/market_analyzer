@@ -299,6 +299,7 @@ from market_analyzer.models.transparency import (
     DataSource,
     DataTrust,
     DegradedField,
+    FitnessCategory,
     TrustLevel,
     TrustReport,
 )

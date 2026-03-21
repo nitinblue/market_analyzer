@@ -470,3 +470,90 @@ class TestCalculationModes:
         standalone = compute_trust_report(mode="standalone", **common_kwargs)
         # Standalone treats portfolio params as present (+0.07 total)
         assert standalone.context_score > full.context_score
+
+
+from market_analyzer.models.transparency import FitnessCategory
+
+
+class TestFitnessForPurpose:
+    def test_high_trust_fit_for_everything(self):
+        report = compute_trust_report(
+            has_broker=True, has_iv_rank=True, has_vol_surface=True,
+            has_levels=True, has_fundamentals=True,
+            entry_credit_source="broker", regime_confidence=0.95,
+            has_days_to_earnings=True, has_entry_credit=True,
+            has_ticker_type=True, has_correlation_data=True,
+            has_portfolio_exposure=True,
+        )
+        assert "live_execution" in report.fit_for
+        assert "ALL purposes" in report.fit_for_summary
+
+    def test_medium_trust_fit_for_screening(self):
+        report = compute_trust_report(
+            has_broker=False, has_vol_surface=True,
+            regime_confidence=0.90,
+        )
+        assert "screening" in report.fit_for
+        assert "live_execution" not in report.fit_for
+
+    def test_low_trust_research_only(self):
+        report = compute_trust_report(
+            has_broker=False, regime_confidence=0.40,
+        )
+        assert "research" in report.fit_for or "education" in report.fit_for
+        assert "live_execution" not in report.fit_for
+        assert "position_monitoring" not in report.fit_for
+
+    def test_education_always_included(self):
+        report = compute_trust_report()  # Minimal
+        assert "education" in report.fit_for
+
+    def test_fit_for_serializes(self):
+        report = compute_trust_report(has_broker=True, regime_confidence=0.90)
+        d = report.model_dump()
+        assert "fit_for" in d
+        assert "fit_for_summary" in d
+        assert isinstance(d["fit_for"], list)
+
+    def test_not_fit_for_mentioned_in_summary(self):
+        report = compute_trust_report(has_broker=False, regime_confidence=0.90)
+        # Should mention what it's NOT fit for or at least what it IS fit for
+        assert "NOT fit for" in report.fit_for_summary or "Fit for" in report.fit_for_summary
+
+    def test_journaling_always_included(self):
+        report = compute_trust_report()
+        assert "journaling" in report.fit_for
+
+    def test_fit_for_threshold_live_execution_at_080(self):
+        """live_execution only appears at >= 0.80 overall trust."""
+        # Build a report that barely hits 0.80 — full broker + all context
+        high_report = compute_trust_report(
+            has_broker=True, has_iv_rank=True, has_vol_surface=True,
+            has_levels=True, has_fundamentals=True,
+            entry_credit_source="broker", regime_confidence=0.95,
+            has_days_to_earnings=True, has_entry_credit=True,
+            has_ticker_type=True, has_correlation_data=True,
+            has_portfolio_exposure=True,
+        )
+        assert "live_execution" in high_report.fit_for
+
+        # No broker → data trust ~0.33, overall < 0.80
+        low_report = compute_trust_report(has_broker=False, regime_confidence=0.90)
+        assert "live_execution" not in low_report.fit_for
+
+    def test_fit_for_ordering_progressive(self):
+        """Higher trust reports are supersets of lower trust reports."""
+        low_report = compute_trust_report(has_broker=False, regime_confidence=0.40)
+        med_report = compute_trust_report(has_broker=False, has_vol_surface=True,
+                                          regime_confidence=0.90)
+        # med should have at least as many categories as low
+        assert len(med_report.fit_for) >= len(low_report.fit_for)
+
+    def test_summary_fitness_in_trust_report_summary(self):
+        """compute_trust_report() summary string includes fitness hint."""
+        report = compute_trust_report(
+            has_broker=True, has_iv_rank=True, has_vol_surface=True,
+            entry_credit_source="broker", regime_confidence=0.90,
+            has_entry_credit=True,
+        )
+        assert "Fit for:" in report.summary

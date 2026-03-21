@@ -1842,6 +1842,7 @@ Requires --broker connection."""
                 if _critical_gaps:
                     print(f" — MISSING: {', '.join(g.parameter for g in _critical_gaps)}", end="")
             print()
+            print(f"    {trust.fit_for_summary}")
             if not has_broker_conn:
                 print(f"    >> Connect broker (--broker --paper) for HIGH trust analysis.")
 
@@ -2658,6 +2659,7 @@ Requires --broker connection."""
                 if _critical_gaps:
                     print(f" — MISSING: {', '.join(g.parameter for g in _critical_gaps)}", end="")
             print()
+            print(f"  {trust.fit_for_summary}")
             if not has_broker_audit:
                 print("  >> Connect broker (--broker --paper) for HIGH trust analysis.")
 

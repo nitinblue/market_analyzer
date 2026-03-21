@@ -325,6 +325,20 @@ def compute_trust_report(
         critical = [g for g in ctx_gaps if g.importance == "critical"]
         if critical:
             parts.append(f"MISSING: {', '.join(g.parameter for g in critical)}")
+
+    # Fitness hint in summary
+    if overall >= 0.80:
+        fit_cats = "live execution"
+    elif overall >= 0.70:
+        fit_cats = "monitoring/risk"
+    elif overall >= 0.50:
+        fit_cats = "alerting/calibration"
+    elif overall >= 0.30:
+        fit_cats = "screening/research"
+    else:
+        fit_cats = "education only"
+    parts.append(f"Fit for: {fit_cats}")
+
     summary = " | ".join(parts)
 
     return TrustReport(

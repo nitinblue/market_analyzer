@@ -3,7 +3,21 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
+
+
+class FitnessCategory(StrEnum):
+    """What this data is suitable for."""
+    LIVE_EXECUTION = "live_execution"            # Real money trades
+    PAPER_TRADING = "paper_trading"              # Simulated execution
+    POSITION_MONITORING = "position_monitoring"  # Watching open positions
+    RISK_ASSESSMENT = "risk_assessment"          # Portfolio-level risk
+    SCREENING = "screening"                      # Finding trade candidates
+    RESEARCH = "research"                        # What-if, regime study
+    EDUCATION = "education"                      # Learning mechanics
+    CALIBRATION = "calibration"                  # Recording outcomes, tuning
+    ALERTING = "alerting"                        # Setting future alerts
+    JOURNALING = "journaling"                    # Documenting decisions
 
 
 class CalculationMode(StrEnum):
@@ -117,3 +131,54 @@ class TrustReport(BaseModel):
     def is_actionable(self) -> bool:
         """Can the caller trust this enough to act on it?"""
         return self.overall_trust >= 0.50
+
+    @computed_field
+    @property
+    def fit_for(self) -> list[str]:
+        """What this data is suitable for, based on trust score.
+
+        Returns string values (not enums) for clean serialization via MCP/eTrading.
+        """
+        result: list[FitnessCategory] = [
+            FitnessCategory.EDUCATION,
+            FitnessCategory.JOURNALING,
+        ]  # Always included
+
+        if self.overall_trust >= 0.20:
+            result.append(FitnessCategory.RESEARCH)
+        if self.overall_trust >= 0.30:
+            result.append(FitnessCategory.SCREENING)
+        if self.overall_trust >= 0.50:
+            result.extend([FitnessCategory.ALERTING, FitnessCategory.CALIBRATION])
+        if self.overall_trust >= 0.60:
+            result.append(FitnessCategory.PAPER_TRADING)
+        if self.overall_trust >= 0.70:
+            result.extend([FitnessCategory.POSITION_MONITORING, FitnessCategory.RISK_ASSESSMENT])
+        if self.overall_trust >= 0.80:
+            result.append(FitnessCategory.LIVE_EXECUTION)
+
+        return [c.value for c in result]
+
+    @computed_field
+    @property
+    def fit_for_summary(self) -> str:
+        """One-line summary of fitness: what it IS and is NOT suitable for."""
+        cat_values = set(self.fit_for)
+        cats = {FitnessCategory(v) for v in cat_values}
+
+        if FitnessCategory.LIVE_EXECUTION in cats:
+            return "Fit for ALL purposes including live execution"
+
+        fit_str = ", ".join(list(cat_values)[:4])  # Top 4
+
+        all_cats = list(FitnessCategory)
+        not_fit_important = [
+            c.value for c in all_cats
+            if c not in cats and c.value in (
+                "live_execution", "position_monitoring", "risk_assessment"
+            )
+        ]
+
+        if not_fit_important:
+            return f"Fit for: {fit_str}. NOT fit for: {', '.join(not_fit_important)}"
+        return f"Fit for: {fit_str}"

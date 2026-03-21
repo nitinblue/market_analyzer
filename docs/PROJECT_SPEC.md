@@ -784,9 +784,28 @@ TRUST: 35% LOW
   >> Actionable: NO — connect broker and pass full context
 ```
 
+### Fitness for Purpose
+
+`TrustReport` includes two computed fields that tell callers what the output is suitable for:
+
+| Overall Trust | Fit For |
+|---------------|---------|
+| ≥ 0.80 | live_execution (all purposes) |
+| ≥ 0.70 | position_monitoring, risk_assessment |
+| ≥ 0.60 | paper_trading |
+| ≥ 0.50 | alerting, calibration |
+| ≥ 0.30 | screening |
+| ≥ 0.20 | research |
+| always | education, journaling |
+
+- `report.fit_for` — `list[str]` of applicable `FitnessCategory` values (serializes via `model_dump()`)
+- `report.fit_for_summary` — one-line human-readable string: `"Fit for: screening, research. NOT fit for: live_execution, position_monitoring, risk_assessment"`
+
+eTrading should gate execution on `FitnessCategory.LIVE_EXECUTION in report.fit_for`.
+
 ### Models & Functions
 
-- `CalculationMode` — enum
+- `CalculationMode`, `FitnessCategory` — enums
 - `DataTrust`, `TrustReport` — from `models/transparency.py`
 - `compute_data_trust()`, `compute_context_quality()`, `compute_trust_report()` — from `features/trust.py`
 
@@ -930,4 +949,4 @@ A trade should only reach the broker after all 5 gates pass:
 | `models/decision_audit.py` | `DecisionAudit`, `LegAudit`, `TradeAudit`, `PortfolioAudit`, `RiskAudit` |
 | `models/sentinel.py` | `SentinelReport`, `SentinelSignal` (GREEN/YELLOW/ORANGE/RED/BLUE) |
 | `validation/models.py` | `ValidationReport`, `CheckResult`, `Severity`, `Suite` |
-| `models/transparency.py` | `CalculationMode`, `DataTrust`, `TrustReport`, `ContextGap`, `DegradedField`, `TrustLevel`, `DataSource` |
+| `models/transparency.py` | `CalculationMode`, `FitnessCategory`, `DataTrust`, `TrustReport`, `ContextGap`, `DegradedField`, `TrustLevel`, `DataSource` |
