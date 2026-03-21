@@ -38,6 +38,21 @@ The system gets better over time from REAL outcomes, not from curve-fitting hist
 
 ---
 
+## Action Items for Nitin (Manual — Cannot Be Automated)
+
+- [ ] **Rotate credentials** — .env has live TastyTrade + Zerodha + FRED tokens. Rotate ALL of them.
+- [ ] **Scan git history** — `git log --all -p | grep -i "client_secret\|refresh_token\|api_key"` — if anything found, use BFG Repo Cleaner to scrub.
+- [ ] **Add GitHub topics** — Settings → options-trading, systematic-trading, regime-detection, hmm, python, quant, income-trading, small-account
+- [ ] **Enable GitHub Discussions** — Settings → Features → Discussions
+- [ ] **Set branch protection on main** — Settings → Branches → Require PR reviews + status checks
+- [ ] **Create PyPI account** — https://pypi.org/account/register/
+- [ ] **Test pip install on clean machine** — Fresh venv, `pip install .`, verify `analyzer-cli` works
+- [ ] **Write launch announcement** — Reddit r/algotrading + Twitter (draft provided in repo)
+- [ ] **Decide on eTrading India data endpoint** — Architecture for delayed Dhan data serving
+- [ ] **Review USER_MANUAL.md** — Rewritten from scratch, needs your review
+
+---
+
 ## 1. Current State Assessment
 
 ### What Exists
