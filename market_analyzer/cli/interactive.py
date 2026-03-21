@@ -6425,39 +6425,55 @@ stratified by risk category (defined / semi_defined / undefined)."""
             )
 
             _print_header(
-                f"Desk Structure — ${total_capital:,.0f} | {risk_tolerance.capitalize()} | {market}"
+                f"Portfolio Allocation — ${total_capital:,.0f} | {risk_tolerance.capitalize()} | {market}"
             )
 
-            print(f"\n  Cash Reserve: {_styled(f'${rec.unallocated_cash:,.0f}', 'yellow')} "
+            # ── Asset class view ──────────────────────────────────────────────
+            print(f"\n  Cash Reserve: {_styled(f'${rec.cash_reserve_dollars:,.0f}', 'yellow')} "
                   f"({rec.cash_reserve_pct:.0%} of total)")
-            print(f"  Regime Context: {_styled(rec.regime_context, 'dim')}\n")
 
-            rows = []
+            if rec.regime_adjustments:
+                for note in rec.regime_adjustments:
+                    print(f"  {_styled('Regime:', 'dim')} {_styled(note, 'dim')}")
+
+            print(f"\n  {_styled('ASSET CLASS ALLOCATION', 'bold')}")
+            alloc_rows = []
+            for a in rec.allocations:
+                alloc_rows.append([
+                    _styled(a.asset_class.upper(), "bold"),
+                    f"${a.allocation_dollars:,.0f}",
+                    f"{a.allocation_pct:.0%}",
+                    f"${a.defined_risk_dollars:,.0f}",
+                    f"${a.undefined_risk_dollars:,.0f}",
+                ])
+            print(tabulate(
+                alloc_rows,
+                headers=["Asset Class", "Allocation", "Pct", "Defined", "Undefined"],
+                tablefmt="simple",
+            ))
+
+            # ── Desk view ─────────────────────────────────────────────────────
+            print(f"\n  {_styled('DESKS (derived from allocation)', 'bold')}")
+            desk_rows = []
             for desk in rec.desks:
                 risk_flag = (
                     _styled("YES", "red") if desk.allow_undefined_risk
                     else _styled("no", "green")
                 )
-                rows.append([
+                desk_rows.append([
                     _styled(desk.desk_key, "bold"),
-                    desk.name,
                     f"${desk.capital_allocation:,.0f}",
-                    f"{desk.capital_pct:.0%}",
-                    f"{desk.dte_min}-{desk.dte_max} DTE",
+                    f"{desk.dte_min}-{desk.dte_max}",
                     desk.max_positions,
                     risk_flag,
+                    ", ".join(desk.strategy_types[:3]) + ("..." if len(desk.strategy_types) > 3 else ""),
                 ])
 
             print(tabulate(
-                rows,
-                headers=["Key", "Name", "Capital", "Pct", "DTE", "MaxPos", "Undef Risk"],
+                desk_rows,
+                headers=["Desk", "Capital", "DTE", "MaxPos", "Undef", "Strategies"],
                 tablefmt="simple",
             ))
-
-            print(f"\n  {_styled('Strategies per desk:', 'dim')}")
-            for desk in rec.desks:
-                strats = ", ".join(desk.strategy_types)
-                print(f"    {desk.desk_key:<20s}  {strats}")
 
             print(f"\n  {_styled(rec.rationale, 'dim')}")
 

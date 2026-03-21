@@ -10,6 +10,19 @@ class RiskTolerance(StrEnum):
     AGGRESSIVE = "aggressive"
 
 
+class PortfolioAssetClass(StrEnum):
+    OPTIONS = "options"
+    STOCKS = "stocks"
+    METALS = "metals"
+    FUTURES = "futures"
+    CASH = "cash"
+
+
+class PortfolioRiskType(StrEnum):
+    DEFINED = "defined"        # Max loss is known (spreads, ICs)
+    UNDEFINED = "undefined"    # Max loss is NOT capped (naked, directional)
+
+
 class DeskHealth(StrEnum):
     EXCELLENT = "excellent"
     GOOD = "good"
@@ -93,3 +106,39 @@ class InstrumentRisk(BaseModel):
     risk_method: str            # "max_loss" | "atr_based" | "margin_based"
     regime_factor: float
     rationale: str
+
+
+class PortfolioAssetAllocation(BaseModel):
+    """Capital allocation for one asset class."""
+    asset_class: PortfolioAssetClass
+    allocation_pct: float           # % of total capital
+    allocation_dollars: float
+    defined_risk_pct: float         # % within this asset class that is defined risk
+    undefined_risk_pct: float       # % within this asset class that is undefined risk
+    defined_risk_dollars: float
+    undefined_risk_dollars: float
+    rationale: str
+
+
+class PortfolioAllocation(BaseModel):
+    """Complete portfolio allocation across asset classes."""
+    total_capital: float
+    risk_tolerance: str
+    cash_reserve_pct: float
+    cash_reserve_dollars: float
+    allocations: list[PortfolioAssetAllocation]
+    desks: list[DeskSpec]            # Concrete desks derived from allocations
+    regime_adjustments: list[str]    # What changed due to regime
+    rationale: str
+
+    @property
+    def unallocated_cash(self) -> float:
+        """Alias for cash_reserve_dollars (backward compatibility)."""
+        return self.cash_reserve_dollars
+
+    @property
+    def regime_context(self) -> str:
+        """Backward-compat: join regime_adjustments into a single string."""
+        if not self.regime_adjustments:
+            return "No regime data — using base allocations."
+        return " ".join(self.regime_adjustments)

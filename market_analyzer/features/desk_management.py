@@ -13,6 +13,9 @@ from market_analyzer.models.portfolio import (
     DeskRiskLimits,
     DeskSpec,
     InstrumentRisk,
+    PortfolioAssetAllocation,
+    PortfolioAssetClass,
+    PortfolioAllocation,
     RebalanceRecommendation,
     RiskTolerance,
 )
@@ -31,6 +34,109 @@ _US_GROWTH_UNDERLYINGS = ["QQQ", "AAPL", "NVDA", "META", "TSLA", "AMZN"]
 _INDIA_EXPIRY_UNDERLYINGS = ["NIFTY", "BANKNIFTY"]
 _INDIA_INCOME_UNDERLYINGS = ["NIFTY", "BANKNIFTY", "FINNIFTY"]
 _INDIA_CORE_UNDERLYINGS = ["NIFTY", "RELIANCE", "TCS", "INFY", "HDFCBANK"]
+
+_US_METALS_UNDERLYINGS = ["GLD", "SLV", "IAU", "GDXJ"]
+_US_WHEEL_UNDERLYINGS = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA"]
+_US_FUTURES_UNDERLYINGS = ["ES", "NQ", "GC", "SI", "CL"]
+
+
+# ---------------------------------------------------------------------------
+# Asset class allocation tables
+# ---------------------------------------------------------------------------
+
+# Base allocations by risk tolerance (cash + 4 asset classes = 1.0)
+_BASE_ALLOCATIONS: dict[str, dict[str, float]] = {
+    "conservative": {
+        "cash": 0.12,
+        "options": 0.30,
+        "stocks": 0.35,
+        "metals": 0.15,
+        "futures": 0.08,
+    },
+    "moderate": {
+        "cash": 0.08,
+        "options": 0.45,
+        "stocks": 0.25,
+        "metals": 0.15,
+        "futures": 0.07,
+    },
+    "aggressive": {
+        "cash": 0.05,
+        "options": 0.55,
+        "stocks": 0.20,
+        "metals": 0.10,
+        "futures": 0.10,
+    },
+}
+
+_BASE_ALLOCATIONS_INDIA: dict[str, dict[str, float]] = {
+    "conservative": {
+        "cash": 0.15,
+        "options": 0.35,
+        "stocks": 0.40,
+        "metals": 0.10,
+        "futures": 0.00,
+    },
+    "moderate": {
+        "cash": 0.10,
+        "options": 0.50,
+        "stocks": 0.30,
+        "metals": 0.10,
+        "futures": 0.00,
+    },
+    "aggressive": {
+        "cash": 0.07,
+        "options": 0.60,
+        "stocks": 0.25,
+        "metals": 0.08,
+        "futures": 0.00,
+    },
+}
+
+# (defined_risk_pct, undefined_risk_pct) within each asset class by tolerance
+_RISK_TYPE_SPLIT: dict[str, dict[str, tuple[float, float]]] = {
+    "conservative": {
+        "options": (1.00, 0.00),
+        "stocks": (0.80, 0.20),
+        "metals": (0.90, 0.10),
+        "futures": (1.00, 0.00),
+    },
+    "moderate": {
+        "options": (0.80, 0.20),
+        "stocks": (0.70, 0.30),
+        "metals": (0.80, 0.20),
+        "futures": (1.00, 0.00),
+    },
+    "aggressive": {
+        "options": (0.60, 0.40),
+        "stocks": (0.50, 0.50),
+        "metals": (0.70, 0.30),
+        "futures": (0.80, 0.20),
+    },
+}
+
+_ASSET_CLASS_RATIONALE: dict[str, dict[str, str]] = {
+    "options": {
+        "conservative": "Options defined-risk income only. No naked exposure.",
+        "moderate": "80% defined-risk income (ICs, spreads, calendars); 20% undefined (ratio spreads, strangles).",
+        "aggressive": "60% defined; 40% undefined risk — ratio spreads and strangles allowed.",
+    },
+    "stocks": {
+        "conservative": "Core equity holdings via wheel/CSP; minimal directional exposure.",
+        "moderate": "70% wheel/covered positions; 30% directional growth equity.",
+        "aggressive": "50/50 wheel and directional. Concentrated growth positions allowed.",
+    },
+    "metals": {
+        "conservative": "Primarily GLD/SLV spreads; small direct ETF position for inflation hedge.",
+        "moderate": "80% GLD/SLV option spreads; 20% direct ETF hold.",
+        "aggressive": "70% metal spreads; 30% direct ETF exposure.",
+    },
+    "futures": {
+        "conservative": "Futures option spreads only (defined risk). Small allocation for diversification.",
+        "moderate": "Futures option spreads only — defined risk, broker permitting.",
+        "aggressive": "Futures option spreads (80%) with small speculative directional (20%).",
+    },
+}
 
 
 def _dominant_regime(regime: dict[str, int] | None) -> int | None:
@@ -96,10 +202,17 @@ def recommend_desk_structure(
     regime: dict[str, int] | None = None,
     existing_desks: list[dict] | None = None,
     broker_capabilities: list[str] | None = None,
-) -> DeskRecommendation:
-    """Recommend a desk structure (capital allocation per trading style).
+) -> PortfolioAllocation:
+    """Recommend a desk structure via Asset Class → Risk Type → Desk pipeline.
 
     Pure function — no broker calls, no I/O.
+
+    Pipeline:
+      1. Compute asset class allocations based on risk tolerance
+      2. Compute defined/undefined split within each asset class
+      3. Apply regime adjustments (R2/R3/R4 overlays)
+      4. Generate DeskSpec objects from (asset_class, risk_type) buckets
+      5. Return PortfolioAllocation with both asset-level and desk-level views
 
     Args:
         total_capital: Total investable capital (USD or local currency).
@@ -110,65 +223,458 @@ def recommend_desk_structure(
         broker_capabilities: List of capabilities broker supports (e.g. ["naked_options"]).
 
     Returns:
-        DeskRecommendation with per-desk specs summing to total_capital.
+        PortfolioAllocation with asset allocations and derived desk specs.
     """
     tol = risk_tolerance.lower()
+    if tol not in ("conservative", "moderate", "aggressive"):
+        tol = "moderate"
     mkt = market.upper()
     dominant = _dominant_regime(regime)
 
-    # ── Base allocations by tolerance ────────────────────────────────────────
-    if tol == RiskTolerance.CONSERVATIVE:
-        cash_reserve_pct = 0.10
-        desks_raw = _conservative_desks(total_capital, cash_reserve_pct, mkt)
-    elif tol == RiskTolerance.AGGRESSIVE:
-        cash_reserve_pct = 0.05
-        desks_raw = _aggressive_desks(total_capital, cash_reserve_pct, mkt)
-    else:  # moderate (default)
-        cash_reserve_pct = 0.08
-        desks_raw = _moderate_desks(total_capital, cash_reserve_pct, mkt)
+    # ── Step 1: Base allocations by tolerance and market ─────────────────────
+    alloc_table = _BASE_ALLOCATIONS_INDIA if mkt == "INDIA" else _BASE_ALLOCATIONS
+    base = alloc_table.get(tol, alloc_table["moderate"])
+    cash_reserve_pct: float = base["cash"]
 
-    # ── Regime adjustments ────────────────────────────────────────────────────
-    regime_context = "No regime data — using base allocations."
+    # ── Step 2: Regime adjustments to allocation percentages ─────────────────
+    regime_adjustments: list[str] = []
+    options_pct = base["options"]
+    stocks_pct = base["stocks"]
+    metals_pct = base["metals"]
+    futures_pct = base["futures"]
+
     if dominant == 4:
-        # R4: increase cash, reduce 0DTE and directional by 50%
         cash_reserve_pct = min(cash_reserve_pct + 0.15, 0.30)
-        desks_raw = _apply_r4_adjustment(desks_raw, total_capital, cash_reserve_pct)
-        regime_context = (
-            "R4 (High-Vol Trending) detected — cash reserve increased to "
-            f"{cash_reserve_pct:.0%}, 0DTE/directional desks halved."
+        # Scale down other asset classes proportionally to make room for extra cash
+        non_cash_pct = 1.0 - cash_reserve_pct
+        original_non_cash = base["options"] + base["stocks"] + base["metals"] + base["futures"]
+        scale = non_cash_pct / original_non_cash if original_non_cash > 0 else 1.0
+        options_pct = base["options"] * scale
+        stocks_pct = base["stocks"] * scale
+        metals_pct = base["metals"] * scale
+        futures_pct = base["futures"] * scale
+        regime_adjustments.append(
+            f"R4 (High-Vol Trending) detected — cash reserve increased to "
+            f"{cash_reserve_pct:.0%}; all asset classes scaled down proportionally."
         )
     elif dominant == 2 and _majority_regime(regime, 2):
-        # R2 across board: reduce 0DTE by 25%, increase income
-        desks_raw = _apply_r2_adjustment(desks_raw, total_capital, cash_reserve_pct)
-        regime_context = "R2 (High-Vol Mean Reverting) majority — 0DTE reduced, income desk expanded."
+        options_pct = min(base["options"] + 0.05, 0.60)
+        # Take the 5% from stocks
+        stocks_pct = max(base["stocks"] - 0.05, 0.0)
+        regime_adjustments.append(
+            "R2 (High-Vol MR) majority — options allocation +5% (rich premium); "
+            "stocks reduced 5%."
+        )
     elif dominant == 3:
-        # R3: increase directional, reduce pure income
-        desks_raw = _apply_r3_adjustment(desks_raw, total_capital, cash_reserve_pct)
-        regime_context = "R3 (Low-Vol Trending) detected — directional desk expanded, income reduced."
-    elif dominant is not None:
-        regime_context = f"R{dominant} detected — base allocations suitable."
+        stocks_pct = min(base["stocks"] + 0.10, 0.50)
+        # Take 10% from options income
+        options_pct = max(base["options"] - 0.10, 0.10)
+        regime_adjustments.append(
+            "R3 (Low-Vol Trending) — stocks directional +10% (trending opportunity); "
+            "options income reduced 10%."
+        )
 
-    # ── Compute cash reserve ──────────────────────────────────────────────────
-    allocated = sum(d.capital_allocation for d in desks_raw)
-    unallocated = total_capital - allocated
+    if not regime_adjustments:
+        if dominant is not None:
+            regime_adjustments.append(f"R{dominant} detected — base allocations suitable.")
+        else:
+            regime_adjustments.append("No regime data — using base allocations.")
+
+    # ── Step 3: Build defined/undefined splits ────────────────────────────────
+    # For R4, force undefined risk to 0 for options and stocks
+    risk_splits = _RISK_TYPE_SPLIT.get(tol, _RISK_TYPE_SPLIT["moderate"])
+    if dominant == 4:
+        options_def, options_undef = 1.00, 0.00
+        stocks_def, stocks_undef = 1.00, 0.00
+        regime_adjustments.append("R4: undefined risk forced to 0% for options and stocks.")
+    else:
+        options_def, options_undef = risk_splits["options"]
+        stocks_def, stocks_undef = risk_splits["stocks"]
+    metals_def, metals_undef = risk_splits["metals"]
+    futures_def, futures_undef = risk_splits["futures"]
+
+    # ── Step 4: Build PortfolioAssetAllocation objects ────────────────────────
+    rationale_map = _ASSET_CLASS_RATIONALE
+
+    def _make_alloc(
+        asset_class: PortfolioAssetClass,
+        pct: float,
+        def_pct: float,
+        undef_pct: float,
+    ) -> PortfolioAssetAllocation:
+        dollars = total_capital * pct
+        return PortfolioAssetAllocation(
+            asset_class=asset_class,
+            allocation_pct=round(pct, 4),
+            allocation_dollars=round(dollars, 2),
+            defined_risk_pct=round(def_pct, 4),
+            undefined_risk_pct=round(undef_pct, 4),
+            defined_risk_dollars=round(dollars * def_pct, 2),
+            undefined_risk_dollars=round(dollars * undef_pct, 2),
+            rationale=rationale_map.get(asset_class.value, {}).get(tol, ""),
+        )
+
+    allocations: list[PortfolioAssetAllocation] = []
+    if options_pct > 0:
+        allocations.append(_make_alloc(PortfolioAssetClass.OPTIONS, options_pct, options_def, options_undef))
+    if stocks_pct > 0:
+        allocations.append(_make_alloc(PortfolioAssetClass.STOCKS, stocks_pct, stocks_def, stocks_undef))
+    if metals_pct > 0:
+        allocations.append(_make_alloc(PortfolioAssetClass.METALS, metals_pct, metals_def, metals_undef))
+    if futures_pct > 0:
+        allocations.append(_make_alloc(PortfolioAssetClass.FUTURES, futures_pct, futures_def, futures_undef))
+
+    # ── Step 5: Generate DeskSpec objects from allocations ────────────────────
+    cash_reserve_dollars = round(total_capital * cash_reserve_pct, 2)
+    desks = _build_desks_from_allocations(
+        allocations=allocations,
+        total_capital=total_capital,
+        tol=tol,
+        mkt=mkt,
+        dominant=dominant,
+    )
 
     # ── Build rationale ───────────────────────────────────────────────────────
     rationale = (
-        f"{risk_tolerance.capitalize()} desk structure for {mkt} market. "
-        f"Cash reserve: {cash_reserve_pct:.0%} (${unallocated:,.0f}). "
-        f"{len(desks_raw)} active desks covering income, core, and "
-        + ("expiry-day" if mkt == "INDIA" else "0DTE")
-        + " strategies."
+        f"{risk_tolerance.capitalize()} portfolio for {mkt} market. "
+        f"Cash reserve: {cash_reserve_pct:.0%} (${cash_reserve_dollars:,.0f}). "
+        f"{len(allocations)} asset classes, {len(desks)} active desks."
     )
 
-    return DeskRecommendation(
-        desks=desks_raw,
+    return PortfolioAllocation(
         total_capital=total_capital,
-        unallocated_cash=unallocated,
-        cash_reserve_pct=cash_reserve_pct,
+        risk_tolerance=tol,
+        cash_reserve_pct=round(cash_reserve_pct, 4),
+        cash_reserve_dollars=cash_reserve_dollars,
+        allocations=allocations,
+        desks=desks,
+        regime_adjustments=regime_adjustments,
         rationale=rationale,
-        regime_context=regime_context,
     )
+
+
+def _build_desks_from_allocations(
+    allocations: list[PortfolioAssetAllocation],
+    total_capital: float,
+    tol: str,
+    mkt: str,
+    dominant: int | None,
+) -> list[DeskSpec]:
+    """Generate concrete DeskSpec objects from asset class allocations.
+
+    Each (asset_class, risk_type) bucket becomes one or more desks with specific
+    strategy lists, DTE ranges, and position limits.
+    """
+    desks: list[DeskSpec] = []
+    allow_undefined = tol != "conservative"
+
+    for alloc in allocations:
+        ac = alloc.asset_class
+        defined_dollars = alloc.defined_risk_dollars
+        undefined_dollars = alloc.undefined_risk_dollars
+
+        if ac == PortfolioAssetClass.OPTIONS:
+            desks.extend(_option_desks(defined_dollars, undefined_dollars, tol, mkt, dominant))
+        elif ac == PortfolioAssetClass.STOCKS:
+            desks.extend(_stock_desks(defined_dollars, undefined_dollars, tol, mkt))
+        elif ac == PortfolioAssetClass.METALS:
+            desks.extend(_metals_desks(defined_dollars, undefined_dollars, tol, mkt))
+        elif ac == PortfolioAssetClass.FUTURES:
+            if alloc.allocation_dollars > 0:
+                desks.extend(_futures_desks(alloc.allocation_dollars, tol, mkt))
+
+    return desks
+
+
+def _option_desks(
+    defined_dollars: float,
+    undefined_dollars: float,
+    tol: str,
+    mkt: str,
+    dominant: int | None,  # noqa: ARG001 — used for R2/R4 0DTE adjustment
+) -> list[DeskSpec]:
+    """Build option desks: income_defined, 0dte_defined, income_undefined."""
+    result: list[DeskSpec] = []
+
+    if mkt == "INDIA" and defined_dollars > 0:
+        # India: expiry day + medium-term income
+        expiry_alloc = defined_dollars * 0.37  # ~37% to expiry day
+        income_alloc = defined_dollars * 0.63  # ~63% to income
+        result.append(DeskSpec(
+            desk_key="desk_expiry_day",
+            name="Expiry Day Trading",
+            capital_allocation=round(expiry_alloc, 2),
+            capital_pct=round(expiry_alloc / max(defined_dollars + undefined_dollars, 1), 4),
+            dte_min=0,
+            dte_max=2,
+            preferred_underlyings=_INDIA_EXPIRY_UNDERLYINGS,
+            strategy_types=["iron_condor", "credit_spread", "straddle_strangle"],
+            max_positions=3,
+            risk_limits=_build_risk_limits("desk_expiry_day", 3, 0.08, 0.04),
+            instrument_type="options",
+            allow_undefined_risk=tol == "aggressive",
+            rationale="India weekly expiry day desk (NIFTY/BANKNIFTY). Defined risk income.",
+        ))
+        result.append(DeskSpec(
+            desk_key="desk_income",
+            name="Medium-Term Income (India)",
+            capital_allocation=round(income_alloc, 2),
+            capital_pct=round(income_alloc / max(defined_dollars + undefined_dollars, 1), 4),
+            dte_min=7,
+            dte_max=30,
+            preferred_underlyings=_INDIA_INCOME_UNDERLYINGS,
+            strategy_types=["iron_condor", "credit_spread", "iron_butterfly"],
+            max_positions=6,
+            risk_limits=_build_risk_limits("desk_income", 6, 0.15, 0.07),
+            instrument_type="options",
+            allow_undefined_risk=False,
+            rationale="Weekly/monthly options income on NIFTY/BANKNIFTY/FINNIFTY.",
+        ))
+        if undefined_dollars > 0 and tol == "aggressive":
+            result.append(DeskSpec(
+                desk_key="desk_income_undefined",
+                name="Undefined Risk Income (India)",
+                capital_allocation=round(undefined_dollars, 2),
+                capital_pct=round(undefined_dollars / max(defined_dollars + undefined_dollars, 1), 4),
+                dte_min=3,
+                dte_max=14,
+                preferred_underlyings=_INDIA_INCOME_UNDERLYINGS,
+                strategy_types=["straddle_strangle", "ratio_spread"],
+                max_positions=3,
+                risk_limits=_build_risk_limits("desk_income_undefined", 3, 0.10, 0.05),
+                instrument_type="options",
+                allow_undefined_risk=True,
+                rationale="Undefined risk strangles and ratio spreads. Active management required.",
+            ))
+        return result
+
+    # US options
+    if defined_dollars > 0:
+        # R4: no 0DTE, all goes to medium-term income
+        if dominant == 4:
+            result.append(DeskSpec(
+                desk_key="desk_income_defined",
+                name="Defined-Risk Income",
+                capital_allocation=round(defined_dollars, 2),
+                capital_pct=round(defined_dollars / max(defined_dollars + undefined_dollars, 1), 4),
+                dte_min=21,
+                dte_max=60,
+                preferred_underlyings=_US_INCOME_UNDERLYINGS,
+                strategy_types=["iron_condor", "credit_spread", "calendar"],
+                max_positions=max(2, int(defined_dollars / 5000)),
+                risk_limits=_build_risk_limits("desk_income_defined", 6, 0.12, 0.07),
+                instrument_type="options",
+                allow_undefined_risk=False,
+                rationale="Defined-risk income only. R4: 0DTE disabled, medium-term focus.",
+            ))
+        else:
+            # Split defined between 30-60 DTE income and 0DTE
+            # R2: reduce 0DTE fraction (wider swings make 0DTE riskier)
+            # 0DTE gets 30% of defined dollars (moderate/aggressive) or 20% (conservative)
+            dte0_fraction = 0.20 if tol == "conservative" else 0.30
+            if dominant == 2:
+                dte0_fraction = dte0_fraction * 0.75  # R2: reduce 0DTE by 25%
+            dte0_alloc = defined_dollars * dte0_fraction
+            income_alloc = defined_dollars * (1.0 - dte0_fraction)
+
+            result.append(DeskSpec(
+                desk_key="desk_income_defined",
+                name="Defined-Risk Income",
+                capital_allocation=round(income_alloc, 2),
+                capital_pct=round(income_alloc / max(defined_dollars + undefined_dollars, 1), 4),
+                dte_min=30,
+                dte_max=60,
+                preferred_underlyings=_US_INCOME_UNDERLYINGS,
+                strategy_types=["iron_condor", "credit_spread", "iron_butterfly", "calendar", "diagonal"],
+                max_positions=max(4, int(income_alloc / 4000)),
+                risk_limits=_build_risk_limits("desk_income_defined", 8, 0.12, 0.07),
+                instrument_type="options",
+                allow_undefined_risk=False,
+                rationale="Primary income engine: 30-60 DTE defined-risk theta strategies.",
+            ))
+            result.append(DeskSpec(
+                desk_key="desk_0dte_defined",
+                name="0DTE Defined-Risk Income",
+                capital_allocation=round(dte0_alloc, 2),
+                capital_pct=round(dte0_alloc / max(defined_dollars + undefined_dollars, 1), 4),
+                dte_min=0,
+                dte_max=0,
+                preferred_underlyings=_US_0DTE_UNDERLYINGS,
+                strategy_types=["iron_condor", "iron_man", "credit_spread"],
+                max_positions=3,
+                risk_limits=_build_risk_limits("desk_0dte_defined", 3, 0.08, 0.04),
+                instrument_type="options",
+                allow_undefined_risk=False,
+                rationale="0DTE income: ICs and credit spreads. Defined risk only.",
+            ))
+
+    if undefined_dollars > 0 and tol != "conservative":
+        result.append(DeskSpec(
+            desk_key="desk_income_undefined",
+            name="Undefined-Risk Income",
+            capital_allocation=round(undefined_dollars, 2),
+            capital_pct=round(undefined_dollars / max(defined_dollars + undefined_dollars, 1), 4),
+            dte_min=14,
+            dte_max=45,
+            preferred_underlyings=_US_INCOME_UNDERLYINGS,
+            strategy_types=["ratio_spread", "straddle_strangle"],
+            max_positions=max(2, int(undefined_dollars / 4000)),
+            risk_limits=_build_risk_limits("desk_income_undefined", 4, 0.10, 0.05),
+            instrument_type="options",
+            allow_undefined_risk=True,
+            rationale="Ratio spreads and strangles. Moderate/aggressive only. Active management required.",
+        ))
+
+    return result
+
+
+def _stock_desks(
+    defined_dollars: float,
+    undefined_dollars: float,
+    tol: str,
+    mkt: str,
+) -> list[DeskSpec]:
+    """Build stock desks: wheel (defined) and equity_directional (undefined).
+
+    For conservative: undefined dollars are folded into the wheel desk (no separate
+    directional desk, but the capital is still allocated there as core equity holds).
+    """
+    result: list[DeskSpec] = []
+
+    if mkt == "INDIA":
+        core_underlyings = _INDIA_CORE_UNDERLYINGS
+    else:
+        core_underlyings = _US_CORE_UNDERLYINGS
+
+    total_stock_dollars = defined_dollars + undefined_dollars
+
+    if tol == "conservative":
+        # Conservative: all stock capital goes to wheel desk (no directional desk)
+        if total_stock_dollars > 0:
+            result.append(DeskSpec(
+                desk_key="desk_wheel",
+                name="Wheel Strategy (CSP → Assignment → CC)",
+                capital_allocation=round(total_stock_dollars, 2),
+                capital_pct=1.0,
+                dte_min=14,
+                dte_max=45,
+                preferred_underlyings=_US_WHEEL_UNDERLYINGS if mkt != "INDIA" else core_underlyings,
+                strategy_types=["credit_spread", "equity_long", "pmcc", "leap"],
+                max_positions=max(3, int(total_stock_dollars / 5000)),
+                risk_limits=_build_risk_limits("desk_wheel", 6, 0.18, 0.10),
+                instrument_type="mixed",
+                allow_undefined_risk=False,
+                rationale="CSP → assignment → covered call wheel. Defined risk. Conservative: no directional desk.",
+            ))
+        return result
+
+    if defined_dollars > 0:
+        result.append(DeskSpec(
+            desk_key="desk_wheel",
+            name="Wheel Strategy (CSP → Assignment → CC)",
+            capital_allocation=round(defined_dollars, 2),
+            capital_pct=round(defined_dollars / max(total_stock_dollars, 1), 4),
+            dte_min=14,
+            dte_max=45,
+            preferred_underlyings=_US_WHEEL_UNDERLYINGS if mkt != "INDIA" else core_underlyings,
+            strategy_types=["credit_spread", "equity_long", "pmcc", "leap"],
+            max_positions=max(3, int(defined_dollars / 5000)),
+            risk_limits=_build_risk_limits("desk_wheel", 6, 0.18, 0.10),
+            instrument_type="mixed",
+            allow_undefined_risk=False,
+            rationale="CSP → assignment → covered call wheel. Defined risk. Core equity compounding.",
+        ))
+
+    if undefined_dollars > 0:
+        directional_underlyings = _US_DIRECTIONAL_UNDERLYINGS if mkt != "INDIA" else core_underlyings
+        result.append(DeskSpec(
+            desk_key="desk_equity_directional",
+            name="Directional Equity",
+            capital_allocation=round(undefined_dollars, 2),
+            capital_pct=round(undefined_dollars / max(total_stock_dollars, 1), 4),
+            dte_min=14,
+            dte_max=45,
+            preferred_underlyings=directional_underlyings,
+            strategy_types=["debit_spread", "diagonal", "long_option", "equity_long"],
+            max_positions=max(2, int(undefined_dollars / 3000)),
+            risk_limits=_build_risk_limits("desk_equity_directional", 5, 0.15, 0.07),
+            instrument_type="mixed",
+            allow_undefined_risk=True,
+            rationale="Growth equity and directional spreads. Active in R3. Uses debit/diagonal spreads.",
+        ))
+
+    return result
+
+
+def _metals_desks(
+    defined_dollars: float,
+    undefined_dollars: float,
+    tol: str,
+    mkt: str,
+) -> list[DeskSpec]:
+    """Build metals desks: options spreads (defined) and direct ETF hold (undefined)."""
+    result: list[DeskSpec] = []
+
+    if defined_dollars > 0:
+        result.append(DeskSpec(
+            desk_key="desk_metals_options",
+            name="Metals Options Spreads",
+            capital_allocation=round(defined_dollars, 2),
+            capital_pct=round(defined_dollars / max(defined_dollars + undefined_dollars, 1), 4),
+            dte_min=21,
+            dte_max=60,
+            preferred_underlyings=_US_METALS_UNDERLYINGS,
+            strategy_types=["iron_condor", "credit_spread", "calendar"],
+            max_positions=max(2, int(defined_dollars / 4000)),
+            risk_limits=_build_risk_limits("desk_metals_options", 4, 0.20, 0.10),
+            instrument_type="options",
+            allow_undefined_risk=False,
+            rationale="GLD/SLV option spreads for income. Low correlation to equity desks.",
+        ))
+
+    if undefined_dollars > 0:
+        result.append(DeskSpec(
+            desk_key="desk_metals_core",
+            name="Metals Core ETF",
+            capital_allocation=round(undefined_dollars, 2),
+            capital_pct=round(undefined_dollars / max(defined_dollars + undefined_dollars, 1), 4),
+            dte_min=0,
+            dte_max=9999,
+            preferred_underlyings=["GLD", "SLV", "IAU"],
+            strategy_types=["equity_long"],
+            max_positions=3,
+            risk_limits=_build_risk_limits("desk_metals_core", 3, 0.40, 0.15),
+            instrument_type="equities",
+            allow_undefined_risk=False,
+            rationale="Direct GLD/SLV ETF hold. Inflation hedge. Long-term hold bias.",
+        ))
+
+    return result
+
+
+def _futures_desks(
+    total_dollars: float,
+    tol: str,
+    mkt: str,
+) -> list[DeskSpec]:
+    """Build futures desk: option spreads only for small accounts."""
+    if total_dollars <= 0:
+        return []
+    return [DeskSpec(
+        desk_key="desk_futures",
+        name="Futures Option Spreads",
+        capital_allocation=round(total_dollars, 2),
+        capital_pct=1.0,  # 100% of futures allocation
+        dte_min=14,
+        dte_max=60,
+        preferred_underlyings=_US_FUTURES_UNDERLYINGS,
+        strategy_types=["credit_spread", "iron_condor"],
+        max_positions=2,
+        risk_limits=_build_risk_limits("desk_futures", 2, 0.25, 0.10),
+        instrument_type="options",
+        allow_undefined_risk=tol == "aggressive",
+        rationale="Futures options spreads only. Broker must support futures options. Defined risk.",
+    )]
 
 
 def _conservative_desks(total: float, cash_pct: float, market: str) -> list[DeskSpec]:

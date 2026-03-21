@@ -456,6 +456,10 @@ from market_analyzer.models.portfolio import (
     DeskRiskLimits,
     DeskSpec,
     InstrumentRisk,
+    PortfolioAllocation,
+    PortfolioAssetAllocation,
+    PortfolioAssetClass,
+    PortfolioRiskType,
     RebalanceRecommendation,
     RiskTolerance,
 )

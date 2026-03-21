@@ -11,7 +11,13 @@ from market_analyzer.features.desk_management import (
     recommend_desk_structure,
     suggest_desk_for_trade,
 )
-from market_analyzer.models.portfolio import DeskHealth, RiskTolerance
+from market_analyzer.models.portfolio import (
+    DeskHealth,
+    PortfolioAllocation,
+    PortfolioAssetAllocation,
+    PortfolioAssetClass,
+    RiskTolerance,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -715,3 +721,129 @@ class TestComputeInstrumentRisk:
         result = compute_instrument_risk("XYZ", "exotic_swap", 10_000.0)
         assert result.max_loss > 0
         assert result.risk_category == "undefined"
+
+
+# ---------------------------------------------------------------------------
+# 7. TestAssetAllocation — new asset class → risk type → desk framework
+# ---------------------------------------------------------------------------
+
+class TestAssetAllocation:
+
+    def test_returns_portfolio_allocation(self):
+        rec = recommend_desk_structure(100_000, "moderate")
+        assert isinstance(rec, PortfolioAllocation)
+
+    def test_allocations_sum_to_100pct(self):
+        rec = recommend_desk_structure(100_000, "moderate")
+        total_pct = rec.cash_reserve_pct + sum(a.allocation_pct for a in rec.allocations)
+        assert total_pct == pytest.approx(1.0, abs=0.01)
+
+    def test_conservative_no_undefined_options(self):
+        rec = recommend_desk_structure(100_000, "conservative")
+        options = next((a for a in rec.allocations if a.asset_class == PortfolioAssetClass.OPTIONS), None)
+        assert options is not None
+        assert options.undefined_risk_pct == pytest.approx(0.0)
+
+    def test_aggressive_has_undefined_options(self):
+        rec = recommend_desk_structure(100_000, "aggressive")
+        options = next((a for a in rec.allocations if a.asset_class == PortfolioAssetClass.OPTIONS), None)
+        assert options is not None
+        assert options.undefined_risk_pct > 0.0
+
+    def test_r4_increases_cash(self):
+        r1 = recommend_desk_structure(100_000, "moderate", regime={"SPY": 1})
+        r4 = recommend_desk_structure(100_000, "moderate", regime={"SPY": 4})
+        assert r4.cash_reserve_pct > r1.cash_reserve_pct
+
+    def test_defined_plus_undefined_equals_allocation(self):
+        rec = recommend_desk_structure(100_000, "moderate")
+        for a in rec.allocations:
+            assert a.defined_risk_dollars + a.undefined_risk_dollars == pytest.approx(
+                a.allocation_dollars, abs=1
+            )
+
+    def test_india_no_futures_allocation(self):
+        rec = recommend_desk_structure(500_000, "moderate", market="India")
+        futures = [a for a in rec.allocations if a.asset_class == PortfolioAssetClass.FUTURES]
+        if futures:
+            assert futures[0].allocation_dollars == pytest.approx(0.0, abs=1)
+
+    def test_desks_derived_from_allocations(self):
+        rec = recommend_desk_structure(100_000, "moderate")
+        desk_capital = sum(d.capital_allocation for d in rec.desks)
+        alloc_capital = sum(a.allocation_dollars for a in rec.allocations)
+        assert desk_capital == pytest.approx(alloc_capital, abs=100)
+
+    def test_each_asset_class_present(self):
+        rec = recommend_desk_structure(100_000, "moderate")
+        classes = {a.asset_class for a in rec.allocations}
+        assert PortfolioAssetClass.OPTIONS in classes
+        assert PortfolioAssetClass.STOCKS in classes
+
+    def test_allocation_dollars_match_pct(self):
+        rec = recommend_desk_structure(100_000, "moderate")
+        for a in rec.allocations:
+            expected = 100_000 * a.allocation_pct
+            assert a.allocation_dollars == pytest.approx(expected, abs=1)
+
+    def test_cash_reserve_dollars_matches_pct(self):
+        rec = recommend_desk_structure(100_000, "moderate")
+        expected = 100_000 * rec.cash_reserve_pct
+        assert rec.cash_reserve_dollars == pytest.approx(expected, abs=1)
+
+    def test_regime_adjustments_populated(self):
+        rec = recommend_desk_structure(100_000, "moderate", regime={"SPY": 2, "QQQ": 2, "IWM": 2})
+        assert len(rec.regime_adjustments) > 0
+        assert len(rec.regime_context) > 0  # backward-compat property
+
+    def test_r4_forces_undefined_options_to_zero(self):
+        rec = recommend_desk_structure(100_000, "moderate", regime={"SPY": 4, "QQQ": 4})
+        options = next((a for a in rec.allocations if a.asset_class == PortfolioAssetClass.OPTIONS), None)
+        if options is not None:
+            assert options.undefined_risk_pct == pytest.approx(0.0)
+
+    def test_r4_forces_undefined_stocks_to_zero(self):
+        rec = recommend_desk_structure(100_000, "moderate", regime={"SPY": 4, "QQQ": 4})
+        stocks = next((a for a in rec.allocations if a.asset_class == PortfolioAssetClass.STOCKS), None)
+        if stocks is not None:
+            assert stocks.undefined_risk_pct == pytest.approx(0.0)
+
+    def test_total_capital_preserved_with_new_model(self):
+        rec = recommend_desk_structure(200_000, "moderate")
+        total = rec.cash_reserve_dollars + sum(a.allocation_dollars for a in rec.allocations)
+        assert total == pytest.approx(200_000, rel=1e-4)
+
+    def test_moderate_has_metals_desk(self):
+        rec = recommend_desk_structure(100_000, "moderate")
+        desk_keys = {d.desk_key for d in rec.desks}
+        assert "desk_metals_options" in desk_keys
+
+    def test_moderate_has_wheel_desk(self):
+        rec = recommend_desk_structure(100_000, "moderate")
+        desk_keys = {d.desk_key for d in rec.desks}
+        assert "desk_wheel" in desk_keys
+
+    def test_moderate_has_income_defined_desk(self):
+        rec = recommend_desk_structure(100_000, "moderate")
+        desk_keys = {d.desk_key for d in rec.desks}
+        assert "desk_income_defined" in desk_keys
+
+    def test_asset_allocation_rationale_non_empty(self):
+        rec = recommend_desk_structure(100_000, "moderate")
+        for a in rec.allocations:
+            assert len(a.rationale) > 0
+
+    def test_conservative_only_defined_risk_desks(self):
+        rec = recommend_desk_structure(100_000, "conservative")
+        all_defined = all(not d.allow_undefined_risk for d in rec.desks)
+        assert all_defined
+
+    def test_portfolio_allocation_type_annotations(self):
+        rec = recommend_desk_structure(100_000, "moderate")
+        assert isinstance(rec.allocations, list)
+        assert all(isinstance(a, PortfolioAssetAllocation) for a in rec.allocations)
+
+    def test_india_has_expiry_desk_via_new_framework(self):
+        rec = recommend_desk_structure(500_000, "moderate", market="India")
+        desk_keys = [d.desk_key for d in rec.desks]
+        assert any("expiry" in k for k in desk_keys)
