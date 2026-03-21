@@ -20,22 +20,25 @@ def run_setup_wizard() -> None:
     print("Which broker do you use?")
     print("  1. TastyTrade (US options — recommended)")
     print("  2. Zerodha (India NSE/NFO)")
-    print("  3. Interactive Brokers (template — requires manual setup)")
-    print("  4. Schwab (template — requires manual setup)")
-    print("  5. None — use free data only (yfinance)")
+    print("  3. Alpaca (US stocks + options — free tier, no funding required)")
+    print("  4. Interactive Brokers (requires TWS/Gateway running locally)")
+    print("  5. Schwab (requires OAuth2 setup)")
+    print("  6. None — use free data only (yfinance)")
     print()
 
-    choice = input("Enter choice [1-5]: ").strip()
+    choice = input("Enter choice [1-6]: ").strip()
 
     if choice == "1":
         _setup_tastytrade(config_dir)
     elif choice == "2":
         _setup_zerodha(config_dir)
     elif choice == "3":
-        _setup_ibkr_info()
+        _setup_alpaca(config_dir)
     elif choice == "4":
-        _setup_schwab_info()
+        _setup_ibkr(config_dir)
     elif choice == "5":
+        _setup_schwab(config_dir)
+    elif choice == "6":
         _setup_free(config_dir)
     else:
         print(f"Invalid choice: {choice!r}")
@@ -237,40 +240,291 @@ def _setup_zerodha(config_dir: Path) -> None:
     print("Note: Zerodha requires daily login. Run 'analyzer-cli --broker' to connect.")
 
 
+def _setup_alpaca(config_dir: Path) -> None:
+    """Alpaca broker setup — free tier, no funding required."""
+    print()
+    print("Alpaca Free Setup")
+    print("-" * 30)
+    print()
+    print("Get free API keys at: https://app.alpaca.markets/signup")
+    print("(No deposit or funding required for paper trading)")
+    print()
+
+    key = input("API Key ID: ").strip()
+    secret = input("API Secret: ").strip()
+
+    if not key or not secret:
+        print("Error: Both API Key and API Secret are required.")
+        return
+
+    paper = input("Use paper trading? [Y/n]: ").strip().lower() != "n"
+
+    # Save to broker.yaml
+    yaml_path = config_dir / "broker.yaml"
+    try:
+        import yaml
+    except ImportError:
+        print("Warning: PyYAML not installed — saving as env vars fallback")
+        _save_env_vars(config_dir, {
+            "ALPACA_API_KEY": key,
+            "ALPACA_API_SECRET": secret,
+        })
+        return
+
+    # Load existing config if present
+    cfg: dict = {}
+    if yaml_path.exists():
+        try:
+            with open(yaml_path) as f:
+                cfg = yaml.safe_load(f) or {}
+        except Exception:
+            pass
+
+    cfg["alpaca"] = {
+        "api_key": key,
+        "api_secret": secret,
+        "paper": paper,
+    }
+
+    with open(yaml_path, "w") as f:
+        yaml.dump(cfg, f, default_flow_style=False)
+
+    try:
+        yaml_path.chmod(0o600)
+    except Exception:
+        pass
+
+    print(f"\nSaved to {yaml_path}")
+
+    # Test connection
+    print("\nTesting connection...", end=" ", flush=True)
+    try:
+        from market_analyzer.broker.alpaca import connect_alpaca
+        md, mm, acct, _ = connect_alpaca(key, secret, paper=paper)
+        if acct is not None:
+            bal = acct.get_balance()
+            print(f"Connected! Account: ${bal.net_liquidating_value:,.2f}")
+        else:
+            print("Connected (account info unavailable)")
+    except ImportError:
+        print("alpaca-py not installed.")
+        print("Run: pip install 'market-analyzer[alpaca]'")
+    except Exception as e:
+        print(f"Failed: {e}")
+        print("Credentials saved — check them in ~/.market_analyzer/broker.yaml")
+
+
+def _setup_ibkr(config_dir: Path) -> None:
+    """IBKR broker setup."""
+    print()
+    print("Interactive Brokers Setup")
+    print("-" * 30)
+    print()
+    print("IBKR requires TWS or IB Gateway running locally.")
+    print()
+    print("Steps to complete before continuing:")
+    print("  1. pip install 'market-analyzer[ibkr]'")
+    print("  2. Start TWS or IB Gateway (paper: port 7497, live: port 7496)")
+    print("  3. In TWS: File > Global Configuration > API > Settings")
+    print("     - Enable 'Enable ActiveX and Socket Clients'")
+    print("     - Note the port number")
+    print()
+
+    host = input("TWS/Gateway host [127.0.0.1]: ").strip() or "127.0.0.1"
+    port_str = input("Port [7497 for paper, 7496 for live]: ").strip() or "7497"
+    client_id_str = input("Client ID [1]: ").strip() or "1"
+
+    try:
+        port = int(port_str)
+        client_id = int(client_id_str)
+    except ValueError:
+        print("Invalid port or client_id — must be integers.")
+        return
+
+    # Save to broker.yaml
+    yaml_path = config_dir / "broker.yaml"
+    try:
+        import yaml
+        cfg: dict = {}
+        if yaml_path.exists():
+            with open(yaml_path) as f:
+                cfg = yaml.safe_load(f) or {}
+        cfg["ibkr"] = {"host": host, "port": port, "client_id": client_id}
+        with open(yaml_path, "w") as f:
+            yaml.dump(cfg, f, default_flow_style=False)
+        try:
+            yaml_path.chmod(0o600)
+        except Exception:
+            pass
+        print(f"\nSaved to {yaml_path}")
+    except ImportError:
+        print("PyYAML not installed — config not saved.")
+
+    # Test connection
+    print("\nTesting connection...", end=" ", flush=True)
+    try:
+        from market_analyzer.broker.ibkr import connect_ibkr
+        md, _, acct, _ = connect_ibkr(host=host, port=port, client_id=client_id)
+        if acct is not None:
+            bal = acct.get_balance()
+            print(f"Connected! NLV: ${bal.net_liquidating_value:,.2f}")
+        else:
+            print("Connected!")
+    except ImportError:
+        print("ib_insync not installed.")
+        print("Run: pip install 'market-analyzer[ibkr]'")
+    except ConnectionError as e:
+        print(f"Failed: {e}")
+        print("Ensure TWS/IB Gateway is running and API access is enabled.")
+    except Exception as e:
+        print(f"Failed: {e}")
+
+
+def _setup_schwab(config_dir: Path) -> None:
+    """Schwab broker setup with OAuth2."""
+    print()
+    print("Charles Schwab Setup")
+    print("-" * 30)
+    print()
+    print("Requirements:")
+    print("  1. pip install 'market-analyzer[schwab]'")
+    print("  2. Register app at: https://developer.schwab.com/")
+    print("     - Create an app to get App Key + App Secret")
+    print("     - Set callback URL to: https://127.0.0.1")
+    print()
+
+    key = input("App Key: ").strip()
+    secret = input("App Secret: ").strip()
+
+    if not key or not secret:
+        print("Error: Both App Key and App Secret are required.")
+        return
+
+    callback = input("Callback URL [https://127.0.0.1]: ").strip() or "https://127.0.0.1"
+    token_path = str(config_dir / "schwab_token.json")
+
+    # Save to broker.yaml
+    yaml_path = config_dir / "broker.yaml"
+    try:
+        import yaml
+        cfg: dict = {}
+        if yaml_path.exists():
+            with open(yaml_path) as f:
+                cfg = yaml.safe_load(f) or {}
+        cfg["schwab"] = {
+            "app_key": key,
+            "app_secret": secret,
+            "callback_url": callback,
+            "token_path": token_path,
+        }
+        with open(yaml_path, "w") as f:
+            yaml.dump(cfg, f, default_flow_style=False)
+        try:
+            yaml_path.chmod(0o600)
+        except Exception:
+            pass
+        print(f"\nSaved to {yaml_path}")
+    except ImportError:
+        print("PyYAML not installed — config not saved.")
+
+    # Run OAuth2 flow
+    print()
+    print("Starting OAuth2 authentication flow...")
+    print("(A browser window will open. Log in to Schwab and authorize the app.)")
+    print()
+    try:
+        import schwab  # type: ignore[import]
+        schwab.auth.easy_client(
+            api_key=key,
+            app_secret=secret,
+            callback_url=callback,
+            token_path=token_path,
+        )
+        print(f"OAuth token saved to {token_path}")
+
+        # Test connection
+        print("\nTesting connection...", end=" ", flush=True)
+        from market_analyzer.broker.schwab import connect_schwab
+        md, mm, acct, _ = connect_schwab(key, secret, token_path=token_path)
+        if acct is not None:
+            bal = acct.get_balance()
+            print(f"Connected! NLV: ${bal.net_liquidating_value:,.2f}")
+        else:
+            print("Connected!")
+    except ImportError:
+        print("schwab-py not installed.")
+        print("Run: pip install 'market-analyzer[schwab]'")
+        print()
+        print("After installing, run this to complete OAuth setup:")
+        print(f"  import schwab")
+        print(f"  schwab.auth.easy_client('{key}', '<secret>', '{callback}', '{token_path}')")
+    except Exception as e:
+        print(f"OAuth setup failed: {e}")
+        print("Credentials saved. Re-run setup after fixing the issue.")
+
+
+# ---------------------------------------------------------------------------
+# Backward-compat aliases (old names kept for existing test compatibility)
+# ---------------------------------------------------------------------------
+
 def _setup_ibkr_info() -> None:
-    """IBKR info — not automated."""
+    """Legacy alias — prints IBKR setup instructions.
+
+    Kept for backward compatibility. New full setup: _setup_ibkr().
+    """
     print()
     print("Interactive Brokers")
     print("-" * 30)
     print()
     print("IBKR requires TWS or IB Gateway running locally.")
-    print("MA provides a template adapter — you'll need to customize it.")
+    print("market_analyzer provides a full broker integration.")
     print()
     print("Steps:")
-    print("  1. pip install ib_insync")
-    print("  2. Start TWS or IB Gateway on port 7497")
-    print("  3. Copy and customize: market_analyzer/adapters/ibkr_adapter.py")
-    print("  4. Wire into MarketAnalyzer via Python code")
-    print()
-    print("See: docs/DATA_INTERFACES.md for full guide")
+    print("  1. pip install ib_insync  (or: pip install 'market-analyzer[ibkr]')")
+    print("  2. Start TWS or IB Gateway on port 7497 (paper) or 7496 (live)")
+    print("  3. Enable API: File > Global Configuration > API > Settings")
+    print("     Enable 'Enable ActiveX and Socket Clients'")
+    print("  4. Run: analyzer-cli wizard  and choose 'Interactive Brokers'")
 
 
 def _setup_schwab_info() -> None:
-    """Schwab info — not automated."""
+    """Legacy alias — prints Schwab setup instructions.
+
+    Kept for backward compatibility. New full setup: _setup_schwab().
+    """
     print()
     print("Charles Schwab")
     print("-" * 30)
     print()
     print("Schwab API uses OAuth2 authentication.")
-    print("MA provides a template adapter — you'll need to customize it.")
+    print("market_analyzer provides a full broker integration.")
     print()
     print("Steps:")
-    print("  1. pip install schwab-py")
-    print("  2. Register at https://developer.schwab.com/")
-    print("  3. Copy and customize: market_analyzer/adapters/schwab_adapter.py")
-    print("  4. Wire into MarketAnalyzer via Python code")
-    print()
-    print("See: docs/DATA_INTERFACES.md for full guide")
+    print("  1. pip install schwab-py  (or: pip install 'market-analyzer[schwab]')")
+    print("  2. Register app at: https://developer.schwab.com/")
+    print("  3. Run: analyzer-cli wizard  and choose 'Schwab'")
+    print("     (OAuth browser flow will run automatically)")
+
+
+def _save_env_vars(config_dir: Path, env_vars: dict[str, str]) -> None:
+    """Save key=value pairs to ~/.market_analyzer/.env"""
+    env_path = config_dir / ".env"
+    lines = list(env_path.read_text().splitlines()) if env_path.exists() else []
+    for key, val in env_vars.items():
+        found = False
+        for i, line in enumerate(lines):
+            if line.startswith(f"{key}="):
+                lines[i] = f"{key}={val}"
+                found = True
+                break
+        if not found:
+            lines.append(f"{key}={val}")
+    env_path.write_text("\n".join(lines) + "\n")
+    try:
+        env_path.chmod(0o600)
+    except Exception:
+        pass
+    print(f"Saved to {env_path}")
 
 
 def _setup_free(config_dir: Path) -> None:
