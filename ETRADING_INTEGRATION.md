@@ -1,5 +1,5 @@
 # eTrading ↔ market_analyzer Integration Guide
-*Last updated: 2026-03-20 | Broker: tastytrade (data mode) | Server: localhost:8080*
+*Last updated: 2026-03-21 | Broker: tastytrade (data mode) | Server: localhost:8080*
 
 ---
 
@@ -18,6 +18,13 @@
 11. [March 20 Addenda — Behavior Changes](#11-march-20-addenda--behavior-changes)
 12. [Crash Sentinel — Market Health Monitoring](#12-crash-sentinel--market-health-monitoring)
 13. [Context-Aware Calculations — Full Mode Checklist](#13-context-aware-calculations--full-mode-checklist)
+14. [MonitoringAction with Closing TradeSpec](#14-monitoringaction-with-closing-tradespec)
+15. [Position Stress Monitoring API](#15-position-stress-monitoring-api)
+16. [India TradeSpec Fixes (P0-3 Done)](#16-india-tradespec-fixes-p0-3-done)
+17. [Stock Screener Data Quality](#17-stock-screener-data-quality)
+18. [All Recommendations Return TradeSpec](#18-all-recommendations-return-tradespec)
+19. [Supported Brokers — What eTrading Needs to Know](#19-supported-brokers--what-etrading-needs-to-know)
+20. [India Market: eTrading Delayed Data Service (Planned)](#20-india-market-etrading-delayed-data-service-planned)
 
 ---
 
@@ -1099,7 +1106,7 @@ The current `.env` file approach (`TASTYTRADE_REFRESH_TOKEN_LIVE`) is fine for *
 
 | Capability | Status |
 |-----------|--------|
-| Broker connection (tastytrade data mode) | ✅ |
+| Broker connection (6 brokers: TastyTrade, Alpaca, IBKR, Schwab, Zerodha, Dhan) | ✅ |
 | Portfolio/position sync from broker | ✅ |
 | Cross-market analysis (US→India) | ✅ |
 | Full macro research report (22 assets) | ✅ |
@@ -2413,3 +2420,77 @@ if result.trade_spec:
 No more "no action" or menu selection — every result is actionable (or None).
 
 If `is_actionable` is False, DO NOT proceed with the trade. Fix the missing context first.
+
+---
+
+## 19. Supported Brokers — What eTrading Needs to Know
+
+MA now supports 6 brokers. eTrading's `connect_from_sessions()` pattern works the same for all — pass pre-authenticated sessions, get the 4-tuple.
+
+| Broker | Market | Status | SDK | connect function |
+|--------|--------|--------|-----|-----------------|
+| TastyTrade | US | Full | `tastytrade` | `connect_tastytrade()` / `connect_from_sessions()` |
+| Alpaca | US | Full | `alpaca-py` | `connect_alpaca(api_key, secret)` |
+| IBKR | US/Global | Full | `ib_insync` | `connect_ibkr(host, port)` |
+| Schwab | US | Full | `schwab-py` | `connect_schwab(app_key, secret, token_path)` |
+| Zerodha | India | Full | `kiteconnect` | `connect_zerodha(api_key, access_token)` |
+| Dhan | India | Full | `dhanhq` | `connect_dhan(client_id, access_token)` |
+
+**For eTrading SaaS:** Every broker has a `connect_*_from_session()` variant that accepts pre-authenticated SDK sessions (eTrading manages auth/refresh).
+
+**What changes for eTrading:** NOTHING in the analysis pipeline. All brokers map to the same `OptionQuote`, `MarketMetrics`, `AccountBalance` models. The 27 context-aware APIs work identically regardless of which broker is connected.
+
+**Broker auto-detection:** `connect_broker()` in `cli/_broker.py` checks `~/.market_analyzer/broker.yaml` for `broker_type` field, or probes credentials in order: TastyTrade → Alpaca → Dhan → Schwab → IBKR.
+
+---
+
+## 20. India Market: eTrading Delayed Data Service (Planned)
+
+**Problem:** India has very limited free market data APIs. Unlike the US (where Alpaca offers free delayed quotes), India users without a Dhan/Zerodha account have no way to get option chain data with Greeks.
+
+**Solution:** eTrading hosts a delayed data endpoint using owner's Dhan credentials.
+
+**Architecture:**
+```
+India user (no broker)
+    → MA connects to eTrading data API (like any MarketDataProvider)
+        → eTrading server fetches from Dhan (owner's credentials)
+            → Cache with 10-20 min TTL
+                → Return delayed OptionQuote + Greeks to MA
+```
+
+**What eTrading builds:**
+1. REST endpoint: `GET /api/v1/india/option-chain/{ticker}` → returns cached Dhan option chain
+2. Cache layer: Redis or in-memory, 10-20 min TTL per ticker
+3. Rate limit: Dhan allows 20K requests/day, 1 per 3 seconds for option chain
+4. Serve: standard `OptionQuote` JSON format (same as all other brokers)
+
+**What MA needs:** A new `EtradingDataProvider` that calls eTrading's REST endpoint instead of Dhan directly. This is a simple HTTP adapter — ~50 lines of code.
+
+**Trust level for delayed data:**
+- Data quality: MEDIUM (real Dhan data, but delayed 10-20 min)
+- Fit for: screening, research, regime detection, paper trading, forward testing
+- NOT fit for: live execution (users need their own Dhan/Zerodha for that)
+
+**eTrading API contract:**
+```json
+GET /api/v1/india/option-chain/NIFTY
+
+Response:
+{
+  "ticker": "NIFTY",
+  "as_of": "2026-03-21T10:30:00+05:30",
+  "delay_minutes": 15,
+  "data_source": "dhan_delayed",
+  "quotes": [
+    {
+      "strike": 26000, "option_type": "call", "expiration": "2026-03-27",
+      "bid": 150.0, "ask": 155.0, "mid": 152.5,
+      "iv": 0.225, "delta": 0.55, "gamma": 0.002, "theta": -8.5, "vega": 12.0,
+      "volume": 50000, "open_interest": 250000
+    }
+  ]
+}
+```
+
+**Priority:** This unblocks India adoption. Build after Dhan broker is validated in production.
