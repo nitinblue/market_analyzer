@@ -23,6 +23,18 @@ Backtesting gives false confidence. It overfits to the past, assumes perfect fil
 
 MA's approach is different:
 
+### Every Trade Is Bespoke to YOU
+
+MA does not generate generic "buy SPY calls" signals. Every suggested trade is tailored to:
+
+- **Your portfolio** — what positions are already open, what's correlated, how much risk is deployed
+- **Your risk profile** — drawdown tolerance, max positions, circuit breaker threshold
+- **Your capital** — Kelly sizes to YOUR account, not a theoretical $100K model account
+- **Your market** — regime detection on YOUR watchlist tickers, not a global "market is bullish"
+- **Your history** — as you trade, `calibrate_weights()` tunes the system to YOUR outcomes
+
+Two traders with different accounts, different open positions, and different risk tolerances will get **different trade recommendations** from the same market data. The system doesn't say "this is a good trade." It says "this is a good trade **for you, right now, given what you already have.**"
+
 ### The Forward Testing Loop
 
 ```

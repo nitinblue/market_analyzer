@@ -12,7 +12,9 @@ There are tools for institutions (Bloomberg, expensive). There are tools for ret
 
 ### The Pitch
 
-"Start with proven income structures. The system tells you WHICH structure, WHAT strikes, HOW MANY contracts, and WHEN to exit. Start with 1 contract. Track what happens. The system learns from your real outcomes and gets better."
+"Every trade suggestion is bespoke to YOUR portfolio, YOUR risk profile, YOUR capital. The system tells you WHICH structure, WHAT strikes, HOW MANY contracts, and WHEN to exit — tailored to what you already own and what you can afford to lose. Start with 1 contract. Track what happens. The system learns from YOUR real outcomes and gets better for YOU."
+
+Two traders with different accounts, different open positions, and different risk tolerances get **different recommendations** from the same market data. This isn't a signal service — it's a personal trading intelligence system.
 
 ### Core Differentiators (What Nobody Else Has)
 
