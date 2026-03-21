@@ -5292,6 +5292,142 @@ Requires --broker connection."""
         except Exception as e:
             print(f"Error: {e}")
 
+    def do_sentinel(self, arg: str) -> None:
+        """Crash sentinel — check market health signal: sentinel [TICKERS]
+
+        Signals:
+          GREEN  — Normal operations. Income trading as usual.
+          YELLOW — Elevated risk. Tighten stops, reduce new entries.
+          ORANGE — Pre-crash. Close positions, raise cash.
+          RED    — Crash active. 100% cash. Wait for R4→R2 transition.
+          BLUE   — Post-crash opportunity. Deploy per crash playbook.
+
+        Examples:
+            sentinel                        — default tickers (SPY QQQ IWM GLD TLT)
+            sentinel SPY QQQ IWM GLD TLT    — explicit tickers
+        """
+        from market_analyzer.features.crash_sentinel import assess_crash_sentinel
+
+        # Parse optional ticker list
+        parts = arg.strip().upper().split()
+        tickers = parts if parts else ["SPY", "QQQ", "IWM", "GLD", "TLT"]
+
+        try:
+            ma = self._get_ma()
+
+            # --- Collect regime results ---
+            regime_results: dict[str, dict] = {}
+            for ticker in tickers:
+                try:
+                    r = ma.regime.detect(ticker)
+                    r4_prob = (
+                        r.regime_probabilities.get(4, 0.0)
+                        if r.regime_probabilities
+                        else 0.0
+                    )
+                    regime_results[ticker] = {
+                        "regime_id": r.regime.value,
+                        "confidence": r.confidence,
+                        "r4_prob": r4_prob,
+                    }
+                except Exception as e:
+                    print(_styled(f"  Skipping {ticker}: {e}", "dim"))
+
+            # --- Collect IV ranks (broker only — no fake data) ---
+            iv_ranks: dict[str, float] = {}
+            for ticker in tickers:
+                try:
+                    m = ma.quotes.get_metrics(ticker)
+                    if m and m.iv_rank is not None:
+                        iv_ranks[ticker] = m.iv_rank
+                except Exception:
+                    pass
+
+            # --- Context ---
+            environment = "normal"
+            trading_allowed = True
+            position_size_factor = 1.0
+            try:
+                ctx = ma.context.assess()
+                trading_allowed = ctx.trading_allowed
+                environment = ctx.environment_label
+                position_size_factor = ctx.position_size_factor
+            except Exception:
+                pass
+
+            # --- SPY technicals ---
+            spy_rsi = 50.0
+            spy_atr_pct = 1.0
+            try:
+                spy_tech = ma.technicals.snapshot("SPY")
+                spy_rsi = float(spy_tech.rsi.value) if spy_tech.rsi else 50.0
+                spy_atr_pct = float(spy_tech.atr_pct) if spy_tech.atr_pct else 1.0
+            except Exception:
+                pass
+
+            # --- Assess ---
+            report = assess_crash_sentinel(
+                regime_results=regime_results,
+                iv_ranks=iv_ranks,
+                environment=environment,
+                trading_allowed=trading_allowed,
+                position_size_factor=position_size_factor,
+                spy_atr_pct=spy_atr_pct,
+                spy_rsi=spy_rsi,
+            )
+
+            # --- Display ---
+            signal_colors = {
+                "green": "green",
+                "yellow": "yellow",
+                "orange": "yellow",   # tabulate doesn't have orange; yellow is close
+                "red": "red",
+                "blue": "cyan",
+            }
+            sig_color = signal_colors.get(report.signal, "bold")
+
+            _print_header(f"Crash Sentinel — {report.as_of.strftime('%Y-%m-%d %H:%M')}")
+            print(f"\n  Signal:      {_styled(report.signal.upper(), sig_color)}")
+            print(f"  Environment: {environment}  |  Size factor: {position_size_factor:.2f}")
+            print(f"  SPY RSI: {spy_rsi:.1f}  |  ATR: {spy_atr_pct:.1f}%")
+            print()
+
+            # Regime table
+            if report.tickers:
+                rows = []
+                for t in report.tickers:
+                    ivr = f"{t.iv_rank:.0f}%" if t.iv_rank is not None else "N/A"
+                    flag = " <<<" if t.regime_id == 4 else ""
+                    rows.append({
+                        "Ticker": t.ticker,
+                        "Regime": f"R{t.regime_id}",
+                        "Conf": f"{t.regime_confidence:.0%}",
+                        "R4 Prob": f"{t.r4_probability:.0%}",
+                        "IV Rank": ivr,
+                        "": flag,
+                    })
+                print(tabulate(rows, headers="keys", tablefmt="simple"))
+                print()
+
+            print(f"  Counts: R4={report.r4_count}  R2={report.r2_count}  R1={report.r1_count}")
+            print(f"  Avg IV Rank: {report.avg_iv_rank:.0f}%  |  Max R4 prob: {report.max_r4_probability:.0%}")
+            print()
+
+            print(f"  {_styled('Signal: ' + report.signal.upper(), sig_color)}")
+            for reason in report.reasons:
+                print(f"    Reason: {reason}")
+            for action in report.actions:
+                print(f"    >> {action}")
+            print()
+
+            print(f"  Playbook phase: {_styled(report.playbook_phase, 'bold')}")
+            if report.sizing_params:
+                params_str = "  |  ".join(f"{k}={v}" for k, v in report.sizing_params.items())
+                print(f"  Sizing: {params_str}")
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+
     def do_quit(self, arg: str) -> bool:
         """Exit the REPL."""
         print("Goodbye.")

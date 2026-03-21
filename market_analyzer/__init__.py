@@ -597,6 +597,10 @@ from market_analyzer.trade_lifecycle import (
     assess_overnight_risk,
 )
 
+# Crash sentinel (market health monitoring)
+from market_analyzer.models.sentinel import SentinelReport, SentinelSignal, SentinelTicker
+from market_analyzer.features.crash_sentinel import assess_crash_sentinel
+
 # Decision audit framework
 from market_analyzer.models.decision_audit import (
     DecisionReport,
@@ -997,6 +1001,11 @@ __all__ = [
     "fetch_fundamental_profile",
     "analyze_stock",
     "screen_stocks",
+    # Crash sentinel (market health monitoring)
+    "SentinelSignal",
+    "SentinelTicker",
+    "SentinelReport",
+    "assess_crash_sentinel",
     # Transparency
     "DataGap",
     # Performance feedback
