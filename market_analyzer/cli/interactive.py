@@ -69,10 +69,20 @@ class AnalyzerCLI(cmd.Cmd):
     )
     prompt = _styled("market_analyzer> ", "cyan") if sys.stdout.isatty() else "market_analyzer> "
 
-    def __init__(self, market: str = "US", broker: bool = False) -> None:
+    def __init__(
+        self,
+        market: str = "US",
+        broker: bool = False,
+        sim_market_data=None,
+        sim_market_metrics=None,
+        sim_account=None,
+    ) -> None:
         super().__init__()
         self._market = market
         self._broker = broker
+        self._sim_market_data = sim_market_data
+        self._sim_market_metrics = sim_market_metrics
+        self._sim_account = sim_account
         self._ma = None  # Lazy-init
         self._watchlist_provider = None  # Set on broker connect
 
@@ -86,7 +96,12 @@ class AnalyzerCLI(cmd.Cmd):
             market_metrics = None
             account_provider = None
 
-            if self._broker:
+            if self._sim_market_data is not None:
+                # Simulated mode — no broker connection needed
+                market_data = self._sim_market_data
+                market_metrics = self._sim_market_metrics
+                account_provider = self._sim_account
+            elif self._broker:
                 market_data, market_metrics, account_provider, self._watchlist_provider = connect_broker()
 
             self._ma = MarketAnalyzer(
@@ -6841,6 +6856,15 @@ def main() -> None:
         action="store_true",
         help="Start with $100K demo portfolio",
     )
+    parser.add_argument(
+        "--sim",
+        choices=["calm", "volatile", "crash", "india"],
+        help=(
+            "Start with simulated market data — no broker or internet required. "
+            "Scenarios: calm (R1-like), volatile (R2-like), crash (R4-like), india (NSE). "
+            "Trust: UNRELIABLE — for testing/development only."
+        ),
+    )
     args = parser.parse_args()
 
     if args.setup:
@@ -6860,8 +6884,40 @@ def main() -> None:
         else:
             print(f"Demo portfolio loaded: ${port.current_nlv:,.0f} NLV, {len(port.positions)} open positions")
 
+    sim_market_data = None
+    sim_market_metrics = None
+    sim_account = None
+
+    if args.sim:
+        from market_analyzer.adapters.simulated import (
+            SimulatedAccount,
+            SimulatedMetrics,
+            create_calm_market,
+            create_crash_scenario,
+            create_india_market,
+            create_volatile_market,
+        )
+
+        _sim_scenarios = {
+            "calm": create_calm_market,
+            "volatile": create_volatile_market,
+            "crash": create_crash_scenario,
+            "india": create_india_market,
+        }
+        sim_market_data = _sim_scenarios[args.sim]()
+        sim_market_metrics = SimulatedMetrics(sim_market_data)
+        sim_account = SimulatedAccount()
+        print(_styled(f"[SIM] Scenario: {args.sim}", "yellow"))
+        print(_styled("Trust: UNRELIABLE — simulated data, for testing/development only.", "yellow"))
+
     try:
-        cli = AnalyzerCLI(market=args.market, broker=args.broker)
+        cli = AnalyzerCLI(
+            market=args.market,
+            broker=args.broker,
+            sim_market_data=sim_market_data,
+            sim_market_metrics=sim_market_metrics,
+            sim_account=sim_account,
+        )
         cli.cmdloop()
     except KeyboardInterrupt:
         print("\nGoodbye.")

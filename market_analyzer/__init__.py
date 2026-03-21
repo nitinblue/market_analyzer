@@ -259,6 +259,15 @@ from market_analyzer.arbitrage import (
 # BYOD adapters — ready-made provider implementations users can plug in
 from market_analyzer.adapters.csv_provider import CSVProvider
 from market_analyzer.adapters.dict_quotes import DictQuoteProvider, DictMetricsProvider
+from market_analyzer.adapters.simulated import (
+    SimulatedMarketData,
+    SimulatedMetrics,
+    SimulatedAccount,
+    create_calm_market,
+    create_volatile_market,
+    create_crash_scenario,
+    create_india_market,
+)
 
 # Pre-market scanner
 from market_analyzer.premarket_scanner import (
