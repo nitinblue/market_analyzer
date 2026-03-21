@@ -6,8 +6,12 @@ Pure functions — no data fetching, no broker required.
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING
 
-from market_analyzer.models.exit import RegimeStop, ThetaDecayResult, TimeAdjustedTarget
+from market_analyzer.models.exit import MonitoringAction, RegimeStop, ThetaDecayResult, TimeAdjustedTarget
+
+if TYPE_CHECKING:
+    from market_analyzer.models.opportunity import TradeSpec
 
 # Regime → stop-loss multiplier
 # R1: calm MR — standard 2x, breaches are unusual
@@ -169,4 +173,151 @@ def compute_remaining_theta_value(
         profit_to_theta_ratio=round(profit_to_theta_ratio, 4),
         recommendation=recommendation,
         rationale=rationale,
+    )
+
+
+def compute_monitoring_action(
+    trade_spec: "TradeSpec",
+    entry_price: float,
+    current_mid: float,
+    current_price: float,
+    dte_remaining: int,
+    regime_id: int,
+    atr_pct: float,
+    entry_regime_id: int | None = None,
+    days_held: int = 0,
+    dte_at_entry: int = 30,
+    contracts: int = 1,
+) -> MonitoringAction:
+    """Master monitoring function: exit check + stress check -> concrete action.
+
+    Chains ``monitor_exit_conditions`` and ``run_position_stress`` then
+    returns a ``MonitoringAction``.  When the action is "close", the returned
+    object contains a ``closing_trade_spec`` with the exact inverse legs to
+    submit to the broker.
+
+    Args:
+        trade_spec: The open TradeSpec.
+        entry_price: Original fill price (credit received or debit paid).
+        current_mid: Current mid price to close the position.
+        current_price: Current underlying spot price.
+        dte_remaining: Days to expiration remaining.
+        regime_id: Current regime (1-4).
+        atr_pct: Current ATR as percentage of underlying price.
+        entry_regime_id: Regime at time of entry (for regime-change detection).
+        days_held: Calendar days since entry.
+        dte_at_entry: DTE at time of entry.
+        contracts: Number of contracts.
+
+    Returns:
+        MonitoringAction with action/urgency/reason and optional closing_trade_spec.
+    """
+    from market_analyzer.validation.stress_scenarios import run_position_stress
+    from market_analyzer.trade_lifecycle import monitor_exit_conditions
+    from market_analyzer.opportunity.option_plays._trade_spec_helpers import build_closing_trade_spec
+
+    # --- Compute current P&L fraction -----------------------------------------
+    order_side = trade_spec.order_side or "credit"
+    if order_side == "credit":
+        # Credit trades: profit = (entry - current) / entry
+        pnl_pct = (entry_price - current_mid) / entry_price if entry_price > 0 else 0.0
+    else:
+        # Debit trades: profit = (current - entry) / entry
+        pnl_pct = (current_mid - entry_price) / entry_price if entry_price > 0 else 0.0
+
+    # --- Regime-contingent stop and time-adjusted target ----------------------
+    stop = compute_regime_stop(regime_id, trade_spec.structure_type or "iron_condor")
+    adjusted_target = compute_time_adjusted_target(
+        days_held=days_held,
+        dte_at_entry=dte_at_entry,
+        current_profit_pct=max(0.0, pnl_pct),
+        original_target_pct=trade_spec.profit_target_pct or 0.50,
+    )
+
+    # --- Exit conditions check ------------------------------------------------
+    exit_result = monitor_exit_conditions(
+        trade_id="monitoring",
+        ticker=trade_spec.ticker,
+        structure_type=order_side,          # monitor uses this for credit/debit calc
+        order_side=order_side,
+        entry_price=entry_price,
+        current_mid_price=current_mid,
+        contracts=contracts,
+        dte_remaining=dte_remaining,
+        regime_id=regime_id,
+        entry_regime_id=entry_regime_id,
+        profit_target_pct=adjusted_target.adjusted_target_pct,
+        stop_loss_pct=stop.base_multiplier,
+        exit_dte=trade_spec.exit_dte,
+        regime_stop_multiplier=stop.base_multiplier,
+        days_held=days_held,
+        dte_at_entry=dte_at_entry,
+    )
+
+    # --- Position stress check ------------------------------------------------
+    stress = run_position_stress(
+        trade_spec=trade_spec,
+        current_credit_value=current_mid,
+        current_atr_pct=atr_pct,
+        entry_credit=entry_price,
+        days_held=days_held,
+        dte_remaining=dte_remaining,
+    )
+    stress_failures = [c for c in stress.checks if c.severity.value == "fail"]
+    stress_dict = stress.model_dump()
+
+    # --- Determine action: priority order is exit > stress > theta > hold -----
+
+    if exit_result.should_close:
+        reason_text = (
+            exit_result.most_urgent.rule
+            if exit_result.most_urgent is not None
+            else "exit_triggered"
+        )
+        closing_spec = build_closing_trade_spec(trade_spec, reason_text, current_price)
+        return MonitoringAction(
+            action="close",
+            urgency="immediate",
+            reason=f"Exit triggered: {reason_text}",
+            closing_trade_spec=closing_spec,
+            stress_report=stress_dict,
+        )
+
+    if stress_failures:
+        fail_names = ", ".join(c.name for c in stress_failures)
+        closing_spec = build_closing_trade_spec(
+            trade_spec, f"stress_fail: {fail_names}", current_price
+        )
+        return MonitoringAction(
+            action="close",
+            urgency="soon",
+            reason=f"Stress failure: {fail_names}",
+            closing_trade_spec=closing_spec,
+            stress_report=stress_dict,
+        )
+
+    # Check theta decay curve
+    theta = compute_remaining_theta_value(
+        dte_remaining=dte_remaining,
+        dte_at_entry=dte_at_entry,
+        current_profit_pct=max(0.0, pnl_pct),
+    )
+    if theta.recommendation == "close_and_redeploy":
+        closing_spec = build_closing_trade_spec(trade_spec, "theta_exhausted", current_price)
+        return MonitoringAction(
+            action="close",
+            urgency="soon",
+            reason=f"Theta exhausted: {theta.rationale}",
+            closing_trade_spec=closing_spec,
+            stress_report=stress_dict,
+        )
+
+    # All good — hold
+    urgency = "monitor" if theta.recommendation == "approaching_decay_cliff" else "none"
+    return MonitoringAction(
+        action="hold",
+        urgency=urgency,
+        reason=f"Position healthy. {theta.rationale}",
+        closing_trade_spec=None,
+        stress_report=stress_dict,
     )

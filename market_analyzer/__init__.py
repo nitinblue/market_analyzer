@@ -456,16 +456,21 @@ from market_analyzer.hedging import (
     assess_hedge,
 )
 
-# Exit intelligence (regime stops, time-adjusted targets, theta decay)
+# Exit intelligence (regime stops, time-adjusted targets, theta decay, monitoring)
 from market_analyzer.models.exit import (
+    MonitoringAction,
     RegimeStop,
     TimeAdjustedTarget,
     ThetaDecayResult,
 )
 from market_analyzer.features.exit_intelligence import (
+    compute_monitoring_action,
     compute_regime_stop,
     compute_time_adjusted_target,
     compute_remaining_theta_value,
+)
+from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
+    build_closing_trade_spec,
 )
 
 # DTE optimizer
@@ -1082,12 +1087,15 @@ __all__ = [
     "analyze_wheel_strategy",
     "analyze_core_holding_entry",
     # Exit intelligence (reform)
+    "MonitoringAction",
     "RegimeStop",
     "TimeAdjustedTarget",
     "ThetaDecayResult",
+    "compute_monitoring_action",
     "compute_regime_stop",
     "compute_time_adjusted_target",
     "compute_remaining_theta_value",
+    "build_closing_trade_spec",
     # DTE optimizer (reform)
     "DTERecommendation",
     "select_optimal_dte",

@@ -1094,3 +1094,71 @@ def build_equity_trade_spec(
         currency=currency,
         **inst_fields,
     )
+
+
+# --- Closing trade helpers ---
+
+
+def build_closing_trade_spec(
+    open_trade_spec: TradeSpec,
+    close_reason: str,
+    current_price: float | None = None,
+) -> TradeSpec:
+    """Build the inverse TradeSpec to close an open position.
+
+    Flips every leg's action: STO -> BTC, BTO -> STC.
+    Inherits ticker, strikes, expirations from the open trade.
+
+    Args:
+        open_trade_spec: The trade that is currently open.
+        close_reason: Why we are closing ("stress_fail", "profit_target", "stop_loss", etc.)
+        current_price: Current underlying price (for rationale). Falls back to open spec price.
+
+    Returns:
+        TradeSpec with inverted legs, order_side flipped, and close rationale.
+    """
+    closing_legs = []
+    for leg in open_trade_spec.legs:
+        # Flip action: STO -> BTC, BTO -> STC
+        if leg.action == LegAction.SELL_TO_OPEN:
+            close_action = LegAction.BUY_TO_CLOSE
+        else:
+            close_action = LegAction.SELL_TO_CLOSE
+
+        closing_legs.append(LegSpec(
+            role=leg.role,
+            action=close_action,
+            quantity=leg.quantity,
+            option_type=leg.option_type,
+            strike=leg.strike,
+            strike_label=leg.strike_label,
+            expiration=leg.expiration,
+            days_to_expiry=leg.days_to_expiry,
+            atm_iv_at_expiry=leg.atm_iv_at_expiry,
+        ))
+
+    # Flip order side: opening credit closes as debit (buy back) and vice versa
+    if open_trade_spec.order_side == "credit":
+        close_side: str | None = "debit"
+    elif open_trade_spec.order_side == "debit":
+        close_side = "credit"
+    else:
+        close_side = open_trade_spec.order_side
+
+    price = current_price if current_price is not None else open_trade_spec.underlying_price
+
+    return TradeSpec(
+        ticker=open_trade_spec.ticker,
+        legs=closing_legs,
+        underlying_price=price,
+        target_dte=open_trade_spec.target_dte,
+        target_expiration=open_trade_spec.target_expiration,
+        spec_rationale=f"CLOSE: {close_reason}",
+        structure_type=open_trade_spec.structure_type,
+        order_side=close_side,
+        wing_width_points=open_trade_spec.wing_width_points,
+        currency=open_trade_spec.currency,
+        lot_size=open_trade_spec.lot_size,
+        settlement=open_trade_spec.settlement,
+        exercise_style=open_trade_spec.exercise_style,
+    )

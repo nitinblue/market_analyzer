@@ -16,6 +16,8 @@ class LegAction(StrEnum):
 
     BUY_TO_OPEN = "BTO"
     SELL_TO_OPEN = "STO"
+    BUY_TO_CLOSE = "BTC"   # Closing a short leg
+    SELL_TO_CLOSE = "STC"  # Closing a long leg
 
 
 class StructureType(StrEnum):
