@@ -1,7 +1,23 @@
-"""Dhan broker integration for India NSE/BSE markets.
+"""Dhan broker integration for India NSE/NFO markets.
 
-Stub implementation — actual API integration pending Dhan SDK access.
+Provides live option quotes with Greeks, account balance, and metrics
+for all NSE F&O instruments via DhanHQ REST API.
+
+Credentials: client_id + access_token (from https://dhanhq.co/).
+- Standalone: args, env vars (DHAN_CLIENT_ID / DHAN_ACCESS_TOKEN),
+  or ~/.market_analyzer/broker.yaml
+- SaaS: pass pre-authenticated dhanhq client instance
+
+Usage::
+
+    from market_analyzer.broker.dhan import connect_dhan
+    md, mm, acct, wl = connect_dhan()  # reads env / yaml
+    ma = MarketAnalyzer(data_service=DataService(), market="India",
+                        market_data=md, market_metrics=mm,
+                        account_provider=acct)
 """
+
+from __future__ import annotations
 
 from market_analyzer.broker.dhan.account import DhanAccount
 from market_analyzer.broker.dhan.market_data import DhanMarketData
@@ -9,26 +25,99 @@ from market_analyzer.broker.dhan.metrics import DhanMetrics
 from market_analyzer.broker.dhan.watchlist import DhanWatchlist
 
 
-def connect_dhan(api_key: str, access_token: str) -> tuple[
-    DhanMarketData, DhanMetrics, DhanAccount, DhanWatchlist
-]:
-    """Create Dhan providers from credentials."""
-    md = DhanMarketData(api_key=api_key, access_token=access_token)
-    mm = DhanMetrics(api_key=api_key, access_token=access_token)
-    acct = DhanAccount(api_key=api_key, access_token=access_token)
-    wl = DhanWatchlist(api_key=api_key, access_token=access_token)
-    return md, mm, acct, wl
+def connect_dhan(
+    client_id: str | None = None,
+    access_token: str | None = None,
+    *,
+    api_key: str | None = None,  # Backward-compat alias for client_id
+) -> tuple[DhanMarketData, DhanMetrics, DhanAccount, None]:
+    """Connect to Dhan broker and return provider 4-tuple.
+
+    Credential resolution order:
+    1. ``client_id`` / ``access_token`` arguments
+    2. Env vars: ``DHAN_CLIENT_ID`` / ``DHAN_ACCESS_TOKEN``
+    3. ``~/.market_analyzer/broker.yaml`` → ``dhan.client_id`` / ``dhan.access_token``
+
+    Args:
+        client_id: Dhan client ID (from https://dhanhq.co/).
+        access_token: Dhan access token.
+
+    Returns:
+        4-tuple: (MarketDataProvider, MarketMetricsProvider, AccountProvider, None)
+        Watchlist is None — Dhan does not expose a watchlist API.
+
+    Raises:
+        ImportError: If dhanhq SDK is not installed.
+        ValueError: If credentials are missing from all sources.
+    """
+    try:
+        from dhanhq import DhanContext, dhanhq  # type: ignore[import]
+    except ImportError:
+        raise ImportError(
+            "Dhan SDK not installed. Run: pip install dhanhq\n"
+            "Get credentials at: https://dhanhq.co/"
+        )
+
+    import os
+
+    # api_key is a backward-compat alias for client_id
+    cid = client_id or api_key or os.environ.get("DHAN_CLIENT_ID", "")
+    token = access_token or os.environ.get("DHAN_ACCESS_TOKEN", "")
+
+    if not cid or not token:
+        # Try broker.yaml
+        from pathlib import Path
+
+        yaml_path = Path.home() / ".market_analyzer" / "broker.yaml"
+        if yaml_path.exists():
+            try:
+                import yaml
+
+                with open(yaml_path) as f:
+                    cfg = yaml.safe_load(f) or {}
+                dhan_cfg = cfg.get("dhan", {})
+                cid = cid or str(dhan_cfg.get("client_id", ""))
+                token = token or str(dhan_cfg.get("access_token", ""))
+            except Exception:
+                pass
+
+    if not cid or not token:
+        raise ValueError(
+            "Dhan credentials required. Set DHAN_CLIENT_ID + DHAN_ACCESS_TOKEN "
+            "or add to ~/.market_analyzer/broker.yaml under 'dhan:' key."
+        )
+
+    ctx = DhanContext(cid, token)
+    client = dhanhq(ctx)
+
+    return (
+        DhanMarketData(client),
+        DhanMetrics(client),
+        DhanAccount(client),
+        None,  # Dhan has no watchlist API
+    )
 
 
 def connect_dhan_from_session(session: object) -> tuple[
-    DhanMarketData, DhanMetrics, DhanAccount, DhanWatchlist
+    DhanMarketData, DhanMetrics, DhanAccount, None
 ]:
-    """Create Dhan providers from pre-authenticated session (SaaS pattern)."""
-    md = DhanMarketData(session=session)
-    mm = DhanMetrics(session=session)
-    acct = DhanAccount(session=session)
-    wl = DhanWatchlist(session=session)
-    return md, mm, acct, wl
+    """Create Dhan providers from a pre-authenticated dhanhq client.
+
+    For SaaS/eTrading: the platform handles authentication and passes
+    the authenticated dhanhq instance. MA never sees credentials.
+
+    Args:
+        session: Pre-authenticated ``dhanhq`` client instance.
+
+    Returns:
+        4-tuple: (MarketData, Metrics, Account, None)
+    """
+    return (
+        DhanMarketData(session),
+        DhanMetrics(session),
+        DhanAccount(session),
+        None,
+    )
 
 
 __all__ = [

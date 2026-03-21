@@ -3348,8 +3348,12 @@ class TestCR6MultiBroker:
         assert close_t == time(15, 30)
 
     def test_dhan_connect_returns_4_tuple(self):
-        from market_analyzer.broker.dhan import connect_dhan
-        result = connect_dhan(api_key="test", access_token="test")
+        from market_analyzer.broker.dhan import connect_dhan_from_session
+        # connect_dhan() requires the dhanhq SDK; use connect_dhan_from_session
+        # which accepts any client object (no SDK needed for the session path)
+        class FakeClient:
+            pass
+        result = connect_dhan_from_session(FakeClient())
         assert len(result) == 4
 
     def test_zerodha_connect_returns_4_tuple(self):
@@ -3357,11 +3361,13 @@ class TestCR6MultiBroker:
         result = connect_zerodha(api_key="test", access_token="test")
         assert len(result) == 4
 
-    def test_dhan_stubs_raise_not_implemented(self):
+    def test_dhan_is_real_implementation(self):
+        """Dhan is now a real implementation — returns empty without credentials/SDK."""
         from market_analyzer.broker.dhan.market_data import DhanMarketData
-        md = DhanMarketData()
-        with pytest.raises(NotImplementedError):
-            md.get_option_chain("NIFTY")
+        md = DhanMarketData()  # No client — data-fetching methods return [] gracefully
+        # Without a real dhanhq client, get_option_chain returns [] (not NotImplementedError)
+        result = md.get_option_chain("NIFTY")
+        assert isinstance(result, list)
 
     def test_zerodha_is_real_implementation(self):
         """Zerodha is a real implementation — returns empty without credentials."""

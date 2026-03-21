@@ -24,6 +24,7 @@ dependencies = [
     "tastytrade>=12.0",
     "alpaca-py>=0.30",
     "fredapi>=0.5",
+    "dhanhq>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -31,13 +32,14 @@ dependencies = [
 ibkr = ["ib_insync>=0.9"]
 schwab = ["schwab-py>=1.0"]
 zerodha = ["kiteconnect>=5.0"]
+dhan = ["dhanhq>=2.0"]
 plot = ["matplotlib>=3.5"]
 dev = [
     "pytest>=7.0",
     "pytest-mock>=3.0",
 ]
 all = [
-    "market-analyzer[ibkr,schwab,zerodha,plot]",
+    "market-analyzer[ibkr,schwab,zerodha,dhan,plot]",
 ]
 
 [project.scripts]

@@ -110,6 +110,13 @@ def connect_broker(
         if resolved_type == "ibkr":
             return result
 
+    if resolved_type == "dhan" or (not resolved_type and _has_dhan_creds(cfg)):
+        result = _connect_dhan(cfg)
+        if result[0] is not None:
+            return result
+        if resolved_type == "dhan":
+            return result
+
     # Final fallback — try TastyTrade anyway (original behavior)
     if not resolved_type:
         result = _connect_tastytrade(is_paper)
@@ -214,6 +221,36 @@ def _connect_schwab(cfg: dict):
         return None, None, None, None
 
 
+def _connect_dhan(cfg: dict):
+    """Attempt Dhan connection."""
+    import os
+    try:
+        from market_analyzer.broker.dhan import connect_dhan
+
+        dhan_cfg = cfg.get("dhan", {})
+        client_id = dhan_cfg.get("client_id") or os.environ.get("DHAN_CLIENT_ID", "")
+        access_token = dhan_cfg.get("access_token") or os.environ.get("DHAN_ACCESS_TOKEN", "")
+
+        if not client_id or not access_token:
+            return None, None, None, None
+
+        md, mm, acct, wl = connect_dhan(client_id, access_token)
+        if acct is not None:
+            try:
+                bal = acct.get_balance()
+                print(_styled(
+                    f"Broker connected: Dhan {bal.account_number} ₹{bal.cash_balance:,.0f}", "green",
+                ))
+            except Exception:
+                print(_styled("Broker connected: Dhan", "green"))
+        return md, mm, acct, wl
+    except ImportError:
+        return None, None, None, None
+    except Exception as e:
+        print(_styled(f"Dhan unavailable: {e}", "yellow"))
+        return None, None, None, None
+
+
 def _connect_ibkr(cfg: dict):
     """Attempt IBKR connection."""
     try:
@@ -272,6 +309,14 @@ def _has_ibkr_config(cfg: dict) -> bool:
     return bool(cfg.get("ibkr"))
 
 
+def _has_dhan_creds(cfg: dict) -> bool:
+    import os
+    return bool(
+        (os.environ.get("DHAN_CLIENT_ID") and os.environ.get("DHAN_ACCESS_TOKEN"))
+        or (cfg.get("dhan", {}).get("client_id") and cfg.get("dhan", {}).get("access_token"))
+    )
+
+
 def add_broker_args(parser) -> None:
     """Add standard --broker flag to an argparse parser."""
     parser.add_argument(
@@ -288,6 +333,6 @@ def add_broker_args(parser) -> None:
         "--broker-type",
         dest="broker_type",
         default=None,
-        choices=["tastytrade", "alpaca", "schwab", "ibkr", "zerodha"],
+        choices=["tastytrade", "alpaca", "schwab", "ibkr", "zerodha", "dhan"],
         help="Force a specific broker (overrides broker.yaml broker_type)",
     )

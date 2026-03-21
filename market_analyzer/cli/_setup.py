@@ -19,26 +19,29 @@ def run_setup_wizard() -> None:
     # Step 1: Broker selection
     print("Which broker do you use?")
     print("  1. TastyTrade (US options — recommended)")
-    print("  2. Zerodha (India NSE/NFO)")
-    print("  3. Alpaca (US stocks + options — free tier, no funding required)")
-    print("  4. Interactive Brokers (requires TWS/Gateway running locally)")
-    print("  5. Schwab (requires OAuth2 setup)")
-    print("  6. None — use free data only (yfinance)")
+    print("  2. Zerodha (India NSE/NFO via Kite Connect)")
+    print("  3. Dhan (India NSE/NFO — free tier, Greeks included)")
+    print("  4. Alpaca (US stocks + options — free tier, no funding required)")
+    print("  5. Interactive Brokers (requires TWS/Gateway running locally)")
+    print("  6. Schwab (requires OAuth2 setup)")
+    print("  7. None — use free data only (yfinance)")
     print()
 
-    choice = input("Enter choice [1-6]: ").strip()
+    choice = input("Enter choice [1-7]: ").strip()
 
     if choice == "1":
         _setup_tastytrade(config_dir)
     elif choice == "2":
         _setup_zerodha(config_dir)
     elif choice == "3":
-        _setup_alpaca(config_dir)
+        _setup_dhan(config_dir)
     elif choice == "4":
-        _setup_ibkr(config_dir)
+        _setup_alpaca(config_dir)
     elif choice == "5":
-        _setup_schwab(config_dir)
+        _setup_ibkr(config_dir)
     elif choice == "6":
+        _setup_schwab(config_dir)
+    elif choice == "7":
         _setup_free(config_dir)
     else:
         print(f"Invalid choice: {choice!r}")
@@ -238,6 +241,79 @@ def _setup_zerodha(config_dir: Path) -> None:
 
     print(f"\nSaved to {env_path}")
     print("Note: Zerodha requires daily login. Run 'analyzer-cli --broker' to connect.")
+
+
+def _setup_dhan(config_dir: Path) -> None:
+    """Dhan broker setup — India NSE/NFO with native Greeks."""
+    print()
+    print("Dhan Setup")
+    print("-" * 30)
+    print()
+    print("Dhan provides option chains with full Greeks (delta/gamma/theta/vega).")
+    print("Free API — no monthly charges. 20K requests/day.")
+    print("Get credentials at: https://dhanhq.co/")
+    print()
+
+    client_id = input("Client ID: ").strip()
+    access_token = input("Access Token: ").strip()
+
+    if not client_id or not access_token:
+        print("Error: Both Client ID and Access Token are required.")
+        return
+
+    # Save to broker.yaml
+    yaml_path = config_dir / "broker.yaml"
+    try:
+        import yaml
+    except ImportError:
+        print("Warning: PyYAML not installed — saving as env vars fallback")
+        _save_env_vars(config_dir, {
+            "DHAN_CLIENT_ID": client_id,
+            "DHAN_ACCESS_TOKEN": access_token,
+        })
+        return
+
+    # Load existing config if present
+    cfg: dict = {}
+    if yaml_path.exists():
+        try:
+            with open(yaml_path) as f:
+                cfg = yaml.safe_load(f) or {}
+        except Exception:
+            pass
+
+    cfg["dhan"] = {
+        "client_id": client_id,
+        "access_token": access_token,
+    }
+    cfg["broker_type"] = "dhan"
+
+    with open(yaml_path, "w") as f:
+        yaml.dump(cfg, f, default_flow_style=False)
+
+    try:
+        yaml_path.chmod(0o600)
+    except Exception:
+        pass
+
+    print(f"\nSaved to {yaml_path}")
+
+    # Test connection
+    print("\nTesting connection...", end=" ", flush=True)
+    try:
+        from market_analyzer.broker.dhan import connect_dhan
+        md, mm, acct, _ = connect_dhan(client_id, access_token)
+        if acct is not None:
+            bal = acct.get_balance()
+            print(f"Connected! Available: ₹{bal.cash_balance:,.0f}")
+        else:
+            print("Connected (account info unavailable)")
+    except ImportError:
+        print("dhanhq not installed.")
+        print("Run: pip install dhanhq  or: pip install 'market-analyzer[dhan]'")
+    except Exception as e:
+        print(f"Failed: {e}")
+        print("Credentials saved — check them in ~/.market_analyzer/broker.yaml")
 
 
 def _setup_alpaca(config_dir: Path) -> None:
