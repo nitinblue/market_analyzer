@@ -5,6 +5,10 @@ sell the shares, hold and wheel, or cover a short position.
 
 Also provides BEFORE-assignment risk warnings via assess_assignment_risk().
 
+Also provides BEFORE-assignment CSP workflow:
+- analyze_cash_secured_put() — intentional assignment / wheel entry
+- analyze_covered_call()      — sell covered call after assignment (wheel step 2)
+
 All functions are stateless — no I/O, no side effects.
 """
 from __future__ import annotations
@@ -17,6 +21,9 @@ from market_analyzer.models.assignment import (
     AssignmentRisk,
     AssignmentRiskResult,
     AssignmentType,
+    CSPAnalysis,
+    CSPIntent,
+    CoveredCallAnalysis,
 )
 from market_analyzer.models.opportunity import LegAction, LegSpec, OrderSide, StructureType, TradeSpec
 from market_analyzer.opportunity.option_plays._trade_spec_helpers import snap_strike
@@ -826,4 +833,317 @@ def assess_assignment_risk(
         recommended_action=recommended_action,
         response_trade_spec=response_spec,
         european_note=european_note,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Cash-Secured Put / Intentional Assignment APIs
+# ---------------------------------------------------------------------------
+
+
+def analyze_cash_secured_put(
+    ticker: str,
+    strike: float,
+    premium: float,
+    current_price: float,
+    dte: int,
+    regime_id: int,
+    atr: float,
+    account_nlv: float,
+    intent: str = "wheel_entry",
+    iv_rank: float | None = None,
+    lot_size: int = 100,
+) -> CSPAnalysis:
+    """Analyze a cash-secured put for intentional assignment.
+
+    For wheel strategy entry: sell put → get assigned → sell covered call → repeat.
+    Income-only: sell put for premium, manage to avoid assignment.
+
+    Args:
+        ticker:        Underlying symbol.
+        strike:        Put strike price to sell.
+        premium:       Expected premium per share (credit received).
+        current_price: Current market price of the underlying.
+        dte:           Days to expiration.
+        regime_id:     Current regime (1-4).
+        atr:           Average True Range in dollars (used for covered call strike).
+        account_nlv:   Account Net Liquidating Value (for margin analysis).
+        intent:        CSPIntent value — "wheel_entry", "acquire_stock", or "income_only".
+        iv_rank:       IV rank 0–100 (optional, used for atm_iv estimate on legs).
+        lot_size:      Shares per contract (default 100).
+
+    Returns:
+        CSPAnalysis with full economics, risk metrics, and pre-built TradeSpec.
+    """
+    csp_intent = CSPIntent(intent)
+
+    # Economics
+    cash_to_secure = strike * lot_size
+    margin_to_secure = round(cash_to_secure * 0.20, 2)  # Typical 20% portfolio margin
+    effective_buy = round(strike - premium, 2)
+    discount = (current_price - effective_buy) / current_price if current_price > 0 else 0.0
+    annual_yield = (premium / strike) * (365 / max(dte, 1)) if strike > 0 else 0.0
+    max_loss = round(cash_to_secure - premium * lot_size, 2)
+    breakeven = effective_buy
+
+    # Assignment probability (simple moneyness check)
+    itm_pct = (strike - current_price) / current_price if current_price > 0 else 0.0
+    if itm_pct > 0:
+        assign_prob = "high"
+    elif itm_pct > -0.02:
+        assign_prob = "moderate"
+    else:
+        assign_prob = "low"
+
+    # Post-assignment plan based on intent
+    if csp_intent == CSPIntent.ACQUIRE_STOCK:
+        post_plan = "hold_long_term"
+    elif csp_intent == CSPIntent.WHEEL_ENTRY:
+        post_plan = "sell_covered_call"
+    else:
+        post_plan = "sell_immediately"
+
+    # Build CSP TradeSpec
+    exp = date.today() + timedelta(days=dte)
+    atm_iv = (iv_rank / 100.0) if iv_rank is not None else 0.25
+
+    csp_spec = TradeSpec(
+        ticker=ticker,
+        legs=[LegSpec(
+            role="short_put",
+            action=LegAction.SELL_TO_OPEN,
+            quantity=1,
+            option_type="put",
+            strike=strike,
+            strike_label=f"CSP at {strike:.0f}",
+            expiration=exp,
+            days_to_expiry=dte,
+            atm_iv_at_expiry=atm_iv,
+        )],
+        underlying_price=current_price,
+        target_dte=dte,
+        target_expiration=exp,
+        spec_rationale=(
+            f"Cash-secured put: {'wheel entry' if csp_intent == CSPIntent.WHEEL_ENTRY else intent} "
+            f"at effective ${effective_buy:.2f} ({discount:.1%} discount)"
+        ),
+        structure_type=StructureType.CASH_SECURED_PUT,
+        order_side=OrderSide.CREDIT,
+        profit_target_pct=0.50 if csp_intent == CSPIntent.INCOME_ONLY else None,
+        stop_loss_pct=None,
+        exit_dte=None if csp_intent in (CSPIntent.WHEEL_ENTRY, CSPIntent.ACQUIRE_STOCK) else 7,
+        exit_notes=[
+            "Income only: close at 50% profit to avoid assignment"
+            if csp_intent == CSPIntent.INCOME_ONLY
+            else "Wheel entry: allow assignment — do not set stop-loss",
+        ],
+    )
+
+    # Pre-build covered call for after assignment (wheel step 2)
+    cc_spec: TradeSpec | None = None
+    if csp_intent in (CSPIntent.WHEEL_ENTRY, CSPIntent.ACQUIRE_STOCK):
+        cc_strike = snap_strike(current_price + atr, current_price)
+        # Ensure the CC strike is strictly above current price
+        if cc_strike <= current_price:
+            cc_strike = snap_strike(current_price + atr * 1.1, current_price)
+        cc_dte = 30
+        cc_exp = exp + timedelta(days=cc_dte)
+        cc_spec = TradeSpec(
+            ticker=ticker,
+            legs=[LegSpec(
+                role="covered_call",
+                action=LegAction.SELL_TO_OPEN,
+                quantity=1,
+                option_type="call",
+                strike=cc_strike,
+                strike_label=f"CC at {cc_strike:.0f} (1 ATR above)",
+                expiration=cc_exp,
+                days_to_expiry=cc_dte,
+                atm_iv_at_expiry=atm_iv,
+            )],
+            underlying_price=current_price,
+            target_dte=cc_dte,
+            target_expiration=cc_exp,
+            spec_rationale=f"Covered call on {lot_size} assigned shares at {cc_strike:.0f}",
+            structure_type=StructureType.COVERED_CALL,
+            order_side=OrderSide.CREDIT,
+            profit_target_pct=0.50,
+            stop_loss_pct=None,
+            exit_dte=7,
+            exit_notes=[
+                "Close at 50% profit to free capital for next cycle",
+                "Do not set stop-loss — shares are collateral",
+                "Roll out if challenged before expiry",
+            ],
+        )
+
+    # Margin analysis (lazy import to avoid circular dependency)
+    margin_dict: dict | None = None
+    try:
+        from market_analyzer.features.position_sizing import compute_margin_analysis
+        ma_result = compute_margin_analysis(
+            csp_spec,
+            account_nlv=account_nlv,
+            available_bp=account_nlv * 0.80,
+            regime_id=regime_id,
+        )
+        margin_dict = {
+            "cash_required": ma_result.cash_required,
+            "margin_required": ma_result.margin_required,
+            "buying_power_reduction": ma_result.buying_power_reduction,
+            "bp_after_trade": ma_result.bp_after_trade,
+            "regime_margin_multiplier": ma_result.regime_margin_multiplier,
+            "summary": ma_result.summary,
+        }
+    except Exception:
+        pass
+
+    summary = (
+        f"{ticker} CSP {strike:.0f}P | Premium ${premium:.2f}/share | "
+        f"Effective buy ${effective_buy:.2f} ({discount:.1%} discount) | "
+        f"Cash to secure ${cash_to_secure:,.0f} | "
+        f"Assignment prob: {assign_prob} | Intent: {csp_intent}"
+    )
+
+    return CSPAnalysis(
+        ticker=ticker,
+        strike=strike,
+        expiration=exp,
+        dte=dte,
+        intent=csp_intent,
+        premium_collected=round(premium, 2),
+        effective_buy_price=effective_buy,
+        discount_from_current_pct=round(discount, 4),
+        annualized_yield_if_not_assigned=round(annual_yield, 4),
+        cash_to_secure=round(cash_to_secure, 2),
+        margin_to_secure=margin_to_secure,
+        assignment_probability=assign_prob,
+        post_assignment_plan=post_plan,
+        covered_call_spec=cc_spec,
+        max_loss=max_loss,
+        breakeven=round(breakeven, 2),
+        trade_spec=csp_spec,
+        margin_analysis=margin_dict,
+        summary=summary,
+    )
+
+
+def analyze_covered_call(
+    ticker: str,
+    shares_owned: int,
+    cost_basis: float,
+    current_price: float,
+    regime_id: int,
+    atr: float,
+    dte: int = 30,
+    iv_rank: float | None = None,
+    lot_size: int = 100,
+) -> CoveredCallAnalysis:
+    """Analyze selling a covered call against owned shares.
+
+    Typically used after put assignment (wheel step 2) or on existing stock positions.
+    Regime-aware strike selection: R1/R2 closer (more premium), R3/R4 further OTM (keep upside).
+
+    Args:
+        ticker:        Underlying symbol.
+        shares_owned:  Number of shares owned.
+        cost_basis:    Your cost per share.
+        current_price: Current market price of the underlying.
+        regime_id:     Current regime (1-4).
+        atr:           Average True Range in dollars.
+        dte:           Target days to expiration (default 30).
+        iv_rank:       IV rank 0–100 (optional, for premium estimate).
+        lot_size:      Shares per contract (default 100).
+
+    Returns:
+        CoveredCallAnalysis with strike, scenarios, and TradeSpec.
+    """
+    contracts = max(1, shares_owned // lot_size)
+
+    # Strike selection: regime-aware
+    if regime_id in (1, 2):
+        # Mean-reverting: sell closer (more premium, higher chance of being called away)
+        raw_strike = current_price + atr * 0.7
+    else:
+        # Trending: sell further OTM (preserve upside if trending up)
+        raw_strike = current_price + atr * 1.5
+
+    call_strike = snap_strike(raw_strike, current_price)
+    # Ensure call strike is strictly above current price after snapping
+    if call_strike <= current_price:
+        call_strike = snap_strike(current_price + atr * 0.5, current_price)
+    if call_strike <= current_price:
+        # Fallback: round up to nearest integer above current price
+        call_strike = float(int(current_price) + 1)
+
+    exp = date.today() + timedelta(days=dte)
+    iv = (iv_rank / 100.0) if iv_rank is not None else 0.25
+
+    # Estimate premium (rough OTM approximation — no Black-Scholes)
+    # Use IV-scaled fraction of the distance to strike
+    otm_distance = max(0, call_strike - current_price)
+    est_premium = max(0.10, round((iv * current_price * 0.08) - (otm_distance * 0.15), 2))
+
+    # Scenario math
+    if_called_profit = (call_strike - cost_basis + est_premium) * shares_owned
+    if_called_pct = if_called_profit / (cost_basis * shares_owned) if cost_basis > 0 else 0.0
+    income = round(est_premium * shares_owned, 2)
+    annual_yield = (est_premium / current_price) * (365 / max(dte, 1)) if current_price > 0 else 0.0
+
+    cc_spec = TradeSpec(
+        ticker=ticker,
+        legs=[LegSpec(
+            role="covered_call",
+            action=LegAction.SELL_TO_OPEN,
+            quantity=contracts,
+            option_type="call",
+            strike=call_strike,
+            strike_label=f"CC at {call_strike:.0f}",
+            expiration=exp,
+            days_to_expiry=dte,
+            atm_iv_at_expiry=iv,
+        )],
+        underlying_price=current_price,
+        target_dte=dte,
+        target_expiration=exp,
+        spec_rationale=(
+            f"Covered call on {shares_owned} shares (cost basis ${cost_basis:.2f}) | "
+            f"R{regime_id} strike: {call_strike:.0f}"
+        ),
+        structure_type=StructureType.COVERED_CALL,
+        order_side=OrderSide.CREDIT,
+        profit_target_pct=0.50,
+        stop_loss_pct=None,
+        exit_dte=7,
+        exit_notes=[
+            "Close at 50% profit to free capital for next cycle",
+            "Do not set stop-loss — shares are collateral",
+            "Roll out/up if challenged before expiry",
+        ],
+    )
+
+    summary = (
+        f"{ticker} CC {call_strike:.0f}C | {shares_owned} shares @ cost ${cost_basis:.2f} | "
+        f"Est premium ${est_premium:.2f}/share | "
+        f"If called: ${if_called_profit:,.0f} ({if_called_pct:.1%}) | "
+        f"Income only: ${income:,.0f} | R{regime_id} strike selection"
+    )
+
+    return CoveredCallAnalysis(
+        ticker=ticker,
+        shares_owned=shares_owned,
+        cost_basis=cost_basis,
+        current_price=current_price,
+        call_strike=call_strike,
+        call_expiration=exp,
+        call_dte=dte,
+        estimated_premium=est_premium,
+        if_called_away_profit=round(if_called_profit, 2),
+        if_called_away_pct=round(if_called_pct, 4),
+        if_not_called_income=income,
+        annualized_yield=round(annual_yield, 4),
+        upside_cap=call_strike,
+        downside_from_current=round(current_price - cost_basis, 2),
+        trade_spec=cc_spec,
+        summary=summary,
     )

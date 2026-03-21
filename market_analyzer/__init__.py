@@ -84,8 +84,16 @@ from market_analyzer.models.assignment import (
     AssignmentRisk,
     AssignmentRiskResult,
     AssignmentType,
+    CSPIntent,
+    CSPAnalysis,
+    CoveredCallAnalysis,
 )
-from market_analyzer.features.assignment_handler import handle_assignment, assess_assignment_risk
+from market_analyzer.features.assignment_handler import (
+    handle_assignment,
+    assess_assignment_risk,
+    analyze_cash_secured_put,
+    analyze_covered_call,
+)
 from market_analyzer.models.exit_plan import (
     AdjustmentTrigger,
     AdjustmentTriggerType,
@@ -504,10 +512,12 @@ from market_analyzer.models.adjustment import (
 from market_analyzer.features.position_sizing import (
     CorrelationAdjustment,
     MarginAnalysis,
+    MarginBuffer,
     RegimeMarginEstimate,
     compute_pairwise_correlation,
     adjust_kelly_for_correlation,
     compute_margin_analysis,
+    compute_margin_buffer,
     compute_regime_adjusted_bp,
     compute_position_size,
     analyze_adjustment_effectiveness,
@@ -1130,10 +1140,12 @@ __all__ = [
     # Extended position sizing (reform)
     "CorrelationAdjustment",
     "MarginAnalysis",
+    "MarginBuffer",
     "RegimeMarginEstimate",
     "compute_pairwise_correlation",
     "adjust_kelly_for_correlation",
     "compute_margin_analysis",
+    "compute_margin_buffer",
     "compute_regime_adjusted_bp",
     "compute_position_size",
     "analyze_adjustment_effectiveness",
@@ -1141,6 +1153,12 @@ __all__ = [
     "AssignmentRisk",
     "AssignmentRiskResult",
     "assess_assignment_risk",
+    # CSP / Covered Call workflow (intentional assignment / wheel)
+    "CSPIntent",
+    "CSPAnalysis",
+    "CoveredCallAnalysis",
+    "analyze_cash_secured_put",
+    "analyze_covered_call",
     # Interest rate risk
     "RateRiskLevel",
     "RateRiskAssessment",

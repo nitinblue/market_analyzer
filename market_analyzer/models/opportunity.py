@@ -48,6 +48,9 @@ class StructureType(StrEnum):
     EQUITY_BUY = "equity_buy"         # Buy to cover short shares (assignment response)
     COVERED_CALL = "covered_call"     # Sell call against owned shares (wheel strategy)
 
+    # Wheel / income-on-equity structures
+    CASH_SECURED_PUT = "cash_secured_put"  # Sell put secured by full cash (wheel entry)
+
 
 class OrderSide(StrEnum):
     """Net order side — credit (receive premium) or debit (pay premium)."""
@@ -105,9 +108,12 @@ _PROFILES: dict[str, tuple[str, str, RiskProfile, str]] = {
     "futures_long":    ("__/",   "bullish",  RiskProfile.UNDEFINED, "futures long"),
     "futures_short":   ("\\__",  "bearish",  RiskProfile.UNDEFINED, "futures short"),
     # Assignment-response structures
-    "equity_sell":     ("\\__",  "bearish",  RiskProfile.DEFINED,   "sell assigned shares"),
-    "equity_buy":      ("__/",   "bullish",  RiskProfile.DEFINED,   "buy to cover short"),
-    "covered_call":    ("/‾‾\\",  "neutral",  RiskProfile.DEFINED,   "covered call (wheel)"),
+    "equity_sell":        ("\\__",  "bearish",  RiskProfile.DEFINED,    "sell assigned shares"),
+    "equity_buy":         ("__/",   "bullish",  RiskProfile.DEFINED,    "buy to cover short"),
+    "covered_call":       ("/‾‾\\",  "neutral",  RiskProfile.DEFINED,   "covered call (wheel)"),
+
+    # Wheel / income-on-equity structures
+    "cash_secured_put":   ("__/‾",  "bullish",  RiskProfile.DEFINED,   "cash-secured put (wheel entry)"),
 }
 
 # Direction-dependent structures

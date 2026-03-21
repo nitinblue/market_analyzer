@@ -526,10 +526,17 @@ def compute_margin_analysis(
         "ratio_spread",
     }
     equity_structures = {"covered_call", "equity_long", "equity_sell", "equity_buy"}
+    csp_structures = {"cash_secured_put"}
 
     if structure in defined_risk_structures:
         cash_required = wing * lot_size
         margin_required = cash_required  # Defined risk: no margin benefit; max loss is fully held
+    elif structure in csp_structures:
+        # CSP: full cash collateral = strike * lot_size; portfolio margin ~20%
+        # Use underlying_price as a proxy for strike if not specified via wing
+        strike_est = underlying_price if underlying_price > 0 else wing
+        cash_required = strike_est * lot_size
+        margin_required = cash_required * 0.20  # Typical portfolio margin for CSP
     elif structure in equity_structures:
         # Full equity cost; margin = 25% of position value
         if underlying_price > 0:
@@ -623,6 +630,102 @@ def compute_margin_analysis(
         regime_margin_multiplier=regime_multiplier,
         regime_adjusted_bp=round(regime_adjusted_bp, 2),
         summary=summary,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Structure-based margin buffer
+# ---------------------------------------------------------------------------
+
+
+class MarginBuffer(BaseModel):
+    """Additional margin reserve recommendation by structure type."""
+
+    structure_type: str
+    base_margin: float                    # Standard margin requirement passed in
+    recommended_buffer_pct: float         # % buffer above base margin (after regime adjustment)
+    recommended_buffer_dollars: float     # base_margin * recommended_buffer_pct
+    total_recommended: float              # base_margin + recommended_buffer_dollars
+    buffer_rationale: str
+    risk_category: str                    # "defined", "semi_defined", or "undefined"
+
+
+# (risk_category, base_buffer_pct) by structure type
+_MARGIN_BUFFERS: dict[str, tuple[str, float]] = {
+    # Defined risk: buffer = regime adjustment only
+    "iron_condor":       ("defined",      0.10),
+    "iron_butterfly":    ("defined",      0.10),
+    "iron_man":          ("defined",      0.10),
+    "credit_spread":     ("defined",      0.10),
+    "debit_spread":      ("defined",      0.05),
+    "long_option":       ("defined",      0.05),
+
+    # Semi-defined: stock exposure, need more buffer
+    "cash_secured_put":  ("semi_defined", 0.25),
+    "covered_call":      ("semi_defined", 0.20),
+    "calendar":          ("defined",      0.15),
+    "double_calendar":   ("defined",      0.15),
+    "diagonal":          ("defined",      0.15),
+    "pmcc":              ("semi_defined", 0.20),
+    "equity_long":       ("semi_defined", 0.25),
+
+    # Undefined risk: maximum buffer
+    "ratio_spread":      ("undefined",    0.40),
+    "straddle":          ("undefined",    0.35),
+    "strangle":          ("undefined",    0.35),
+    "equity_sell":       ("undefined",    0.50),   # Short stock — unlimited risk
+    "equity_short":      ("undefined",    0.50),
+}
+
+# Regime multiplier on the buffer (higher vol = more reserve)
+_REGIME_BUFFER_MULT: dict[int, float] = {1: 1.0, 2: 1.3, 3: 1.1, 4: 1.5}
+
+
+def compute_margin_buffer(
+    trade_spec: "TradeSpec",
+    base_margin: float,
+    regime_id: int = 1,
+) -> MarginBuffer:
+    """Compute recommended margin buffer above base requirement.
+
+    Different structures carry different tail risks:
+    - Defined risk (IC, spreads): small buffer, max loss is fixed.
+    - Semi-defined (CSP, covered call): stock gap risk, larger buffer.
+    - Undefined (ratio spread, naked): unlimited risk, maximum buffer.
+
+    Regime multiplier: higher-vol regimes (R2, R4) require additional reserves.
+
+    Args:
+        trade_spec:  The proposed trade (used to read structure_type).
+        base_margin: Base margin requirement in dollars.
+        regime_id:   Current regime (1-4).
+
+    Returns:
+        MarginBuffer with recommended_buffer_pct, dollars, and rationale.
+    """
+    st = (
+        trade_spec.structure_type.value
+        if hasattr(trade_spec.structure_type, "value")
+        else str(trade_spec.structure_type or "iron_condor")
+    )
+
+    risk_cat, base_buffer_pct = _MARGIN_BUFFERS.get(st, ("defined", 0.10))
+    mult = _REGIME_BUFFER_MULT.get(regime_id, 1.0)
+    buffer_pct = base_buffer_pct * mult
+    buffer_dollars = base_margin * buffer_pct
+
+    rationale_parts = [f"{risk_cat} risk structure ({base_buffer_pct:.0%} base buffer)"]
+    if mult > 1.0:
+        rationale_parts.append(f"R{regime_id} regime adjustment ({mult:.1f}x)")
+
+    return MarginBuffer(
+        structure_type=st,
+        base_margin=round(base_margin, 2),
+        recommended_buffer_pct=round(buffer_pct, 4),
+        recommended_buffer_dollars=round(buffer_dollars, 2),
+        total_recommended=round(base_margin + buffer_dollars, 2),
+        buffer_rationale=" + ".join(rationale_parts),
+        risk_category=risk_cat,
     )
 
 

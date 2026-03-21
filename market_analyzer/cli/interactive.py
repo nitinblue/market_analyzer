@@ -6025,6 +6025,336 @@ Requires --broker connection."""
         except Exception as exc:
             print(f"{_styled('ERROR:', 'red')} {exc}")
 
+    def do_csp(self, arg: str) -> None:
+        """Analyze a Cash-Secured Put trade — intentional assignment / wheel entry.
+
+Usage: csp TICKER STRIKE [PREMIUM] [DTE] [--intent wheel_entry|income_only|acquire_stock]
+       csp IWM 240 2.50 30
+       csp SPY 640 3.00 21 --intent income_only
+       csp AAPL 200 2.00 30 --intent acquire_stock
+
+Shows effective buy price, discount from current, annualized yield, assignment
+probability, margin/cash requirement, and a pre-built covered call for wheel step 2."""
+        parts = arg.strip().split()
+        if not parts:
+            print("Usage: csp TICKER STRIKE [PREMIUM] [DTE] [--intent wheel_entry|income_only|acquire_stock]")
+            return
+
+        ticker = parts[0].upper()
+        strike: float | None = None
+        premium: float = 2.00
+        dte: int = 30
+        intent: str = "wheel_entry"
+
+        i = 1
+        while i < len(parts):
+            if parts[i] == "--intent" and i + 1 < len(parts):
+                intent = parts[i + 1].lower()
+                i += 2
+            elif strike is None:
+                try:
+                    strike = float(parts[i])
+                except ValueError:
+                    pass
+                i += 1
+            elif i == 2:
+                try:
+                    premium = float(parts[i])
+                except ValueError:
+                    pass
+                i += 1
+            elif i == 3:
+                try:
+                    dte = int(parts[i])
+                except ValueError:
+                    pass
+                i += 1
+            else:
+                i += 1
+
+        if strike is None:
+            print("Usage: csp TICKER STRIKE [PREMIUM] [DTE] [--intent ...]")
+            return
+
+        try:
+            from market_analyzer.features.assignment_handler import analyze_cash_secured_put
+
+            ma = self._get_ma()
+            tech = ma.technicals.snapshot(ticker)
+            current_price = tech.current_price
+            atr = tech.atr
+
+            # Attempt to get regime for context
+            regime_id = 1
+            try:
+                r = ma.regime.detect(ticker)
+                regime_id = r.regime_id
+            except Exception:
+                pass
+
+            account_nlv = 100000.0
+            try:
+                if ma.account is not None:
+                    bal = ma.account.get_balance()
+                    account_nlv = bal.net_liquidating_value
+            except Exception:
+                pass
+
+            result = analyze_cash_secured_put(
+                ticker=ticker,
+                strike=strike,
+                premium=premium,
+                current_price=current_price,
+                dte=dte,
+                regime_id=regime_id,
+                atr=atr,
+                account_nlv=account_nlv,
+                intent=intent,
+            )
+
+            _print_header(f"Cash-Secured Put — {ticker} {strike:.0f}P | {result.intent.value.replace('_', ' ').title()}")
+
+            print(f"\n  {_styled('Economics:', 'bold')}")
+            print(f"    Current price:        ${current_price:,.2f}")
+            print(f"    Strike:               ${result.strike:,.2f}")
+            print(f"    Premium collected:    ${result.premium_collected:.2f}/share")
+            print(f"    Effective buy price:  ${result.effective_buy_price:.2f}  "
+                  f"({result.discount_from_current_pct:.1%} discount from current)")
+            print(f"    Annualized yield:     {result.annualized_yield_if_not_assigned:.1%}  (if not assigned)")
+            print(f"    Breakeven:            ${result.breakeven:.2f}")
+
+            print(f"\n  {_styled('Capital Requirements:', 'bold')}")
+            print(f"    Cash to secure:       ${result.cash_to_secure:,.0f}")
+            print(f"    Margin to secure:     ${result.margin_to_secure:,.0f}  (~20% portfolio margin)")
+
+            print(f"\n  {_styled('Risk:', 'bold')}")
+            print(f"    Max loss:             ${result.max_loss:,.0f}  (stock → $0)")
+            ap_color = "green" if result.assignment_probability == "low" else \
+                       "yellow" if result.assignment_probability == "moderate" else "red"
+            print(f"    Assignment prob:      {_styled(result.assignment_probability.upper(), ap_color)}")
+
+            print(f"\n  {_styled('Post-Assignment Plan:', 'bold')}")
+            print(f"    Plan:                 {result.post_assignment_plan.replace('_', ' ').title()}")
+
+            if result.covered_call_spec is not None:
+                cc_leg = result.covered_call_spec.legs[0]
+                print(f"\n  {_styled('Pre-Built Covered Call (Wheel Step 2):', 'bold')}")
+                print(f"    Strike:               ${cc_leg.strike:.0f}  (1 ATR above current)")
+                print(f"    Expiration:           {result.covered_call_spec.target_expiration}")
+                print(f"    DTE:                  {cc_leg.days_to_expiry} days")
+                print(f"    {_profile_tag('covered_call', 'credit')}")
+
+            if result.margin_analysis:
+                ma_data = result.margin_analysis
+                print(f"\n  {_styled('Margin Analysis:', 'bold')}")
+                print(f"    Cash required:        ${ma_data.get('cash_required', 0):,.0f}")
+                print(f"    Margin required:      ${ma_data.get('margin_required', 0):,.0f}")
+                print(f"    BP after trade:       ${ma_data.get('bp_after_trade', 0):,.0f}")
+                print(f"    Regime mult:          {ma_data.get('regime_margin_multiplier', 1.0):.1f}x  (R{regime_id})")
+
+            print(f"\n  {_styled(result.summary, 'dim')}")
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+            import traceback as _tb
+            _tb.print_exc()
+
+    def do_covered_call(self, arg: str) -> None:
+        """Analyze selling a Covered Call against owned shares — wheel step 2.
+
+Usage: covered_call TICKER COST_BASIS [SHARES] [--dte DAYS] [--iv IV_RANK]
+       covered_call IWM 240 100
+       covered_call SPY 550 200 --dte 45
+       covered_call AAPL 180 100 --iv 35
+
+Shows regime-aware strike selection, scenarios (called away vs income only),
+annualized yield, and a ready TradeSpec for execution."""
+        parts = arg.strip().split()
+        if not parts:
+            print("Usage: covered_call TICKER COST_BASIS [SHARES] [--dte DAYS] [--iv IV_RANK]")
+            return
+
+        ticker = parts[0].upper()
+        cost_basis: float | None = None
+        shares_owned: int = 100
+        dte: int = 30
+        iv_rank: float | None = None
+
+        i = 1
+        while i < len(parts):
+            if parts[i] == "--dte" and i + 1 < len(parts):
+                try:
+                    dte = int(parts[i + 1])
+                except ValueError:
+                    pass
+                i += 2
+            elif parts[i] == "--iv" and i + 1 < len(parts):
+                try:
+                    iv_rank = float(parts[i + 1])
+                except ValueError:
+                    pass
+                i += 2
+            elif cost_basis is None:
+                try:
+                    cost_basis = float(parts[i])
+                except ValueError:
+                    pass
+                i += 1
+            else:
+                try:
+                    shares_owned = int(parts[i])
+                except ValueError:
+                    pass
+                i += 1
+
+        if cost_basis is None:
+            print("Usage: covered_call TICKER COST_BASIS [SHARES] [--dte DAYS] [--iv IV_RANK]")
+            return
+
+        try:
+            from market_analyzer.features.assignment_handler import analyze_covered_call
+
+            ma = self._get_ma()
+            tech = ma.technicals.snapshot(ticker)
+            current_price = tech.current_price
+            atr = tech.atr
+
+            regime_id = 1
+            try:
+                r = ma.regime.detect(ticker)
+                regime_id = r.regime_id
+            except Exception:
+                pass
+
+            result = analyze_covered_call(
+                ticker=ticker,
+                shares_owned=shares_owned,
+                cost_basis=cost_basis,
+                current_price=current_price,
+                regime_id=regime_id,
+                atr=atr,
+                dte=dte,
+                iv_rank=iv_rank,
+            )
+
+            _print_header(f"Covered Call — {ticker} | {shares_owned} shares @ ${cost_basis:.2f} cost")
+
+            print(f"\n  {_styled('Position:', 'bold')}")
+            print(f"    Shares owned:         {result.shares_owned}")
+            print(f"    Cost basis:           ${result.cost_basis:.2f}/share")
+            print(f"    Current price:        ${result.current_price:.2f}/share")
+            unrealized = (current_price - cost_basis) * shares_owned
+            unr_color = "green" if unrealized >= 0 else "red"
+            print(f"    Unrealized P&L:       {_styled(f'${unrealized:,.0f}', unr_color)}")
+
+            print(f"\n  {_styled('Recommended Covered Call (R' + str(regime_id) + '):', 'bold')}")
+            print(f"    Strike:               ${result.call_strike:.0f}")
+            print(f"    Expiration:           {result.call_expiration}  ({result.call_dte} DTE)")
+            print(f"    Est. premium:         ${result.estimated_premium:.2f}/share  "
+                  f"(${result.if_not_called_income:,.0f} total)")
+            print(f"    {_profile_tag('covered_call', 'credit')}")
+
+            print(f"\n  {_styled('Scenarios:', 'bold')}")
+            called_color = "green" if result.if_called_away_profit >= 0 else "red"
+            print(f"    If called away:       "
+                  f"{_styled(f'${result.if_called_away_profit:,.0f} ({result.if_called_away_pct:.1%})', called_color)}")
+            print(f"    If NOT called:        ${result.if_not_called_income:,.0f}  (premium only)")
+            print(f"    Annualized yield:     {result.annualized_yield:.1%}")
+            print(f"    Upside cap:           ${result.upside_cap:.0f}  (called away above this)")
+
+            print(f"\n  {_styled(result.summary, 'dim')}")
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+
+    def do_margin_buffer(self, arg: str) -> None:
+        """Show structure-based margin buffer recommendations for a ticker.
+
+Usage: margin_buffer TICKER [NLV] [REGIME]
+       margin_buffer SPY
+       margin_buffer IWM 80000 2
+
+Shows recommended margin buffer above base requirement for each structure type,
+stratified by risk category (defined / semi_defined / undefined)."""
+        parts = arg.strip().split()
+        if not parts:
+            print("Usage: margin_buffer TICKER [NLV] [REGIME]")
+            return
+
+        ticker = parts[0].upper()
+        account_nlv = float(parts[1]) if len(parts) > 1 else 100000.0
+        regime_id = int(parts[2]) if len(parts) > 2 else 1
+
+        try:
+            from market_analyzer.features.position_sizing import compute_margin_buffer
+            from market_analyzer.models.opportunity import LegAction, LegSpec, OrderSide, StructureType, TradeSpec
+            from datetime import timedelta
+
+            ma = self._get_ma()
+            tech = ma.technicals.snapshot(ticker)
+            price = tech.current_price
+
+            # Auto-detect regime if not provided
+            if len(parts) <= 2:
+                try:
+                    r = ma.regime.detect(ticker)
+                    regime_id = r.regime_id
+                except Exception:
+                    pass
+
+            _print_header(f"Margin Buffer Analysis — {ticker} @ ${price:,.2f} | R{regime_id}")
+
+            structures = [
+                ("iron_condor",     500.0,             "IC: 5-wide wing"),
+                ("credit_spread",   500.0,             "Credit spread: 5-wide"),
+                ("debit_spread",    500.0,             "Debit spread: 5-wide"),
+                ("cash_secured_put", price * 100,      f"CSP: ${price:.0f} * 100"),
+                ("covered_call",    price * 100 * 0.20, "Covered call: 20% margin"),
+                ("straddle",        price * 100 * 0.20, "Short straddle (naked)"),
+                ("ratio_spread",    price * 100 * 0.15, "Ratio spread (naked leg)"),
+            ]
+
+            exp = date.today() + timedelta(days=30)
+            rows = []
+            for structure, base_margin, desc in structures:
+                try:
+                    ts = TradeSpec(
+                        ticker=ticker,
+                        legs=[LegSpec(
+                            role="short_put", action=LegAction.SELL_TO_OPEN, quantity=1,
+                            option_type="put", strike=price * 0.95,
+                            strike_label=f"{price * 0.95:.0f}P",
+                            expiration=exp, days_to_expiry=30, atm_iv_at_expiry=0.25,
+                        )],
+                        underlying_price=price,
+                        target_dte=30, target_expiration=exp,
+                        spec_rationale="margin buffer analysis",
+                        structure_type=StructureType(structure),
+                        order_side=OrderSide.CREDIT,
+                    )
+                    buf = compute_margin_buffer(ts, base_margin=base_margin, regime_id=regime_id)
+                    rows.append([
+                        structure,
+                        buf.risk_category,
+                        f"${base_margin:,.0f}",
+                        f"{buf.recommended_buffer_pct:.0%}",
+                        f"${buf.recommended_buffer_dollars:,.0f}",
+                        f"${buf.total_recommended:,.0f}",
+                    ])
+                except Exception:
+                    pass
+
+            if rows:
+                print(tabulate(
+                    rows,
+                    headers=["Structure", "Risk Cat", "Base Margin", "Buffer %", "Buffer $", "Total Reserve"],
+                    tablefmt="simple",
+                ))
+            print(f"\n  Regime R{regime_id} buffer multiplier applied.")
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+
     def do_quit(self, arg: str) -> bool:
         """Exit the REPL."""
         print("Goodbye.")
