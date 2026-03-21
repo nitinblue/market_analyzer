@@ -34,12 +34,20 @@ Thumbs.db
 *.joblib
 *.parquet
 
-# Environment / secrets
+# Environment / secrets — NEVER commit credentials
 .env
 .env.*
 !.env.example
 credentials.json
 tastytrade_broker.yaml
+zerodha_credentials.yaml
+broker.yaml
+*.yaml.secret
+schwab_token.json
+
+# Demo portfolio state (user-specific)
+demo_portfolio.json
+demo_outcomes.csv
 
 # Workspace files
 *.code-workspace
@@ -51,3 +59,16 @@ tastytrade_broker.yaml
 *.whl
 *.tar.gz
 MANIFEST
+
+# PDFs and binary docs (keep in Google Drive / external, not git)
+*.pdf
+
+# Jupyter
+.ipynb_checkpoints/
+
+# mypy / type checking
+.mypy_cache/
+
+# Temp files from scripts
+scripts/*.output
+scripts/*.tmp
