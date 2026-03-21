@@ -6,6 +6,12 @@ from enum import StrEnum
 from pydantic import BaseModel
 
 
+class CalculationMode(StrEnum):
+    """Controls what level of context MA expects and how missing inputs affect trust."""
+    FULL = "full"              # Default: portfolio + position + risk aware
+    STANDALONE = "standalone"  # Single trade analysis, no portfolio context expected
+
+
 class DataGap(BaseModel):
     """A known gap in the analysis — where data is missing or assumptions are used."""
 

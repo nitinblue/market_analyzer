@@ -126,6 +126,7 @@ def compute_context_quality(
     has_ticker_type: bool = False,
     has_correlation_data: bool = False,
     has_portfolio_exposure: bool = False,
+    mode: str = "full",               # "full" (default) or "standalone"
 ) -> tuple[float, TrustLevel, list[ContextGap]]:
     """Score how complete the caller's input context is.
 
@@ -140,7 +141,22 @@ def compute_context_quality(
         +0.03 for ticker_type (IV rank thresholds)
         +0.02 for correlation_data (position sizing)
         +0.02 for portfolio_exposure (Kelly adjustment)
+
+    In "standalone" mode, portfolio-level inputs (correlation_data,
+    portfolio_exposure, ticker_type) are not expected by the caller and
+    missing them does NOT create gaps or reduce the score.  This is the
+    correct mode for CLI exploration, backtesting, and "what-if" analysis.
+
+    In "full" mode (the default), all inputs are expected.  Missing
+    critical inputs make is_actionable=False.  eTrading MUST use full mode.
     """
+    # In standalone mode, portfolio-level params are not expected.
+    # Treat them as present so they contribute their score without gaps.
+    is_standalone = mode == "standalone"
+    effective_correlation = has_correlation_data or is_standalone
+    effective_portfolio = has_portfolio_exposure or is_standalone
+    effective_ticker_type = has_ticker_type or is_standalone
+
     score = 0.0
     gaps: list[ContextGap] = []
 
@@ -210,13 +226,14 @@ def compute_context_quality(
             importance="helpful",
         ))
 
-    if has_ticker_type:
+    # Portfolio-level inputs: only score/gap in full mode
+    if effective_ticker_type:
         score += 0.03
 
-    if has_correlation_data:
+    if effective_correlation:
         score += 0.02
 
-    if has_portfolio_exposure:
+    if effective_portfolio:
         score += 0.02
 
     score = max(0.0, min(1.0, score))
@@ -234,6 +251,8 @@ def compute_context_quality(
 
 
 def compute_trust_report(
+    # Calculation mode
+    mode: str = "full",  # "full" (default, portfolio-aware) or "standalone" (CLI/backtest)
     # Data quality inputs (existing)
     has_broker: bool = False,
     has_iv_rank: bool = False,
@@ -252,7 +271,14 @@ def compute_trust_report(
     has_correlation_data: bool = False,
     has_portfolio_exposure: bool = False,
 ) -> TrustReport:
-    """Compute full 2-dimensional trust report."""
+    """Compute full 2-dimensional trust report.
+
+    Args:
+        mode: "full" (default) — portfolio-aware, eTrading production mode.
+              "standalone" — single-trade analysis; missing portfolio context
+              (correlation_data, portfolio_exposure, ticker_type) is expected
+              and does not degrade trust.  Use for CLI exploration, backtesting.
+    """
     # Dimension 1: Data Quality
     data = compute_data_trust(
         has_broker=has_broker,
@@ -278,6 +304,7 @@ def compute_trust_report(
         has_ticker_type=has_ticker_type,
         has_correlation_data=has_correlation_data,
         has_portfolio_exposure=has_portfolio_exposure,
+        mode=mode,
     )
 
     # Combined: the weaker dimension limits overall trust

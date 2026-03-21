@@ -363,3 +363,110 @@ class TestTrustReport:
         assert "context_score" in d
         assert "overall_trust" in d
         assert "context_gaps" in d
+
+
+from market_analyzer.models.transparency import CalculationMode
+
+
+class TestCalculationModes:
+    def test_full_mode_penalizes_missing_portfolio(self):
+        """Full mode: missing correlation/exposure are absent from score."""
+        report = compute_trust_report(
+            mode="full",
+            has_broker=True, has_iv_rank=True, has_vol_surface=True,
+            has_levels=True, has_entry_credit=True,
+            entry_credit_source="broker", regime_confidence=0.90,
+            has_correlation_data=False, has_portfolio_exposure=False,
+        )
+        # Portfolio context missing in full mode — these points are not awarded
+        # so the report is not perfect even with most inputs present
+        assert report.context_score < 1.0
+
+    def test_standalone_mode_ignores_portfolio(self):
+        """Standalone mode: missing correlation/exposure is expected."""
+        full = compute_trust_report(
+            mode="full",
+            has_broker=True, has_iv_rank=True, regime_confidence=0.90,
+            has_correlation_data=False, has_portfolio_exposure=False,
+        )
+        standalone = compute_trust_report(
+            mode="standalone",
+            has_broker=True, has_iv_rank=True, regime_confidence=0.90,
+            has_correlation_data=False, has_portfolio_exposure=False,
+        )
+        # Standalone should have equal or higher context score
+        assert standalone.context_score >= full.context_score
+
+    def test_standalone_still_requires_regime(self):
+        """Even standalone needs regime — it's fundamental."""
+        report = compute_trust_report(
+            mode="standalone", has_regime=False,
+        )
+        critical = [g for g in report.context_gaps if g.importance == "critical"]
+        assert any(g.parameter == "regime" for g in critical)
+
+    def test_standalone_still_requires_entry_credit(self):
+        """Standalone still needs entry credit for POP/EV."""
+        report = compute_trust_report(
+            mode="standalone", has_entry_credit=False,
+        )
+        critical = [g for g in report.context_gaps if g.importance == "critical"]
+        assert any(g.parameter == "entry_credit" for g in critical)
+
+    def test_full_mode_is_default(self):
+        """Default mode is full — portfolio gaps are counted."""
+        report_default = compute_trust_report(
+            has_broker=True, regime_confidence=0.90,
+            has_correlation_data=False, has_portfolio_exposure=False,
+        )
+        report_full = compute_trust_report(
+            mode="full",
+            has_broker=True, regime_confidence=0.90,
+            has_correlation_data=False, has_portfolio_exposure=False,
+        )
+        # Default and explicit full should be identical
+        assert report_default.context_score == report_full.context_score
+
+    def test_full_mode_with_everything_high_trust(self):
+        """Full mode with all inputs = highest possible trust."""
+        report = compute_trust_report(
+            mode="full",
+            has_broker=True, has_iv_rank=True, has_vol_surface=True,
+            has_levels=True, has_fundamentals=True,
+            entry_credit_source="broker", regime_confidence=0.95,
+            has_days_to_earnings=True, has_entry_credit=True,
+            has_ticker_type=True, has_correlation_data=True,
+            has_portfolio_exposure=True,
+        )
+        assert report.overall_level == TrustLevel.HIGH
+        assert report.is_actionable is True
+
+    def test_calculation_mode_enum_values(self):
+        """CalculationMode enum has correct string values."""
+        assert CalculationMode.FULL == "full"
+        assert CalculationMode.STANDALONE == "standalone"
+
+    def test_standalone_no_portfolio_gaps(self):
+        """Standalone mode produces no gaps for portfolio-level inputs."""
+        report = compute_trust_report(
+            mode="standalone",
+            has_broker=True, has_iv_rank=True, regime_confidence=0.90,
+            has_correlation_data=False, has_portfolio_exposure=False,
+            has_ticker_type=False,
+        )
+        portfolio_params = {"correlation_data", "portfolio_exposure", "ticker_type"}
+        gap_params = {g.parameter for g in report.context_gaps}
+        # None of the portfolio-level params should appear as gaps in standalone
+        assert portfolio_params.isdisjoint(gap_params)
+
+    def test_full_mode_context_score_lower_than_standalone_without_portfolio(self):
+        """Full mode scores lower than standalone when portfolio context is absent."""
+        common_kwargs = dict(
+            has_broker=True, has_iv_rank=True, regime_confidence=0.90,
+            has_correlation_data=False, has_portfolio_exposure=False,
+            has_ticker_type=False,
+        )
+        full = compute_trust_report(mode="full", **common_kwargs)
+        standalone = compute_trust_report(mode="standalone", **common_kwargs)
+        # Standalone treats portfolio params as present (+0.07 total)
+        assert standalone.context_score > full.context_score

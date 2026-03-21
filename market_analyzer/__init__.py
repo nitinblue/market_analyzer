@@ -291,6 +291,7 @@ from market_analyzer.models.intraday import (
     IntradayUrgency,
 )
 from market_analyzer.models.transparency import (
+    CalculationMode,
     ContextGap,
     DataGap,
     DataSource,

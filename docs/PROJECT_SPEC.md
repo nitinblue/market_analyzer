@@ -754,7 +754,74 @@ A trade should only reach the broker after all 5 gates pass:
 
 ---
 
-## 19. Key Model Files
+## 19. Data Trust Framework
+
+Every MA output carries a 2-dimensional trust assessment: **data quality** (how accurate and fresh is the underlying data?) and **context quality** (did the caller provide all inputs for a complete analysis?).
+
+### Dimension 1: Data Quality
+
+| Source | Trust | Score contribution |
+|--------|-------|--------------------|
+| Broker live (DXLink) | HIGH | +0.30 |
+| yfinance OHLCV | BASE | 0.30 base |
+| Estimated/heuristic | LOW | +0.03 |
+| None | UNRELIABLE | 0 |
+
+### Dimension 2: Context Quality — Calculation Modes
+
+| Mode | What's expected | Missing context handling |
+|------|-----------------|--------------------------|
+| **`full` (default)** | All inputs: regime, technicals, vol_surface, levels, IV rank, entry credit, portfolio exposure, correlation, earnings, ticker type | Missing critical inputs → `is_actionable=False`. eTrading MUST use this mode. |
+| **`standalone`** | Minimum: regime, technicals, entry credit | Missing portfolio context (correlation_data, portfolio_exposure, ticker_type) is expected and does NOT degrade trust. For CLI exploration and backtesting. |
+
+### Calculation Mode Contract
+
+**Default = `full` mode.** This means:
+- Every calculation is portfolio-aware, position-aware, and risk-aware BY DEFAULT.
+- eTrading does NOT need to change any function signatures — the default is already the right behavior.
+- If eTrading calls without passing `levels`, `iv_rank`, or `days_to_earnings`, the trust report will flag it.
+- Missing critical context makes `is_actionable=False` — eTrading should NOT proceed with the trade.
+
+**`standalone` mode** is explicitly opted into:
+- CLI commands use standalone when the user is exploring.
+- Backtesting uses standalone (no live portfolio).
+- "What if" analysis uses standalone.
+
+### Trust Report Output
+
+```
+TRUST: 85% HIGH
+  Data:    90% HIGH (broker_live)
+  Context: 85% HIGH (full mode, all inputs provided)
+  >> Actionable: YES
+```
+
+vs
+
+```
+TRUST: 35% LOW
+  Data:    60% MEDIUM (yfinance, no broker)
+  Context: 35% LOW — MISSING: entry_credit, iv_rank, levels
+  >> Actionable: NO — connect broker and pass full context
+```
+
+### Models
+
+- `CalculationMode`: `"full"` (default) or `"standalone"`
+- `DataTrust`: `trust_score`, `trust_level`, `primary_source`, `degraded_fields`
+- `TrustReport`: `data_quality` + `context_score/level/gaps` + `overall_trust` + `is_actionable`
+- `ContextGap`: `parameter`, `impact`, `importance` (`"critical"` / `"important"` / `"helpful"`)
+- `DegradedField`: `field`, `source`, `reason`
+
+### Functions
+
+- `compute_data_trust(...)` — scores data quality from broker/yfinance/regime confidence
+- `compute_context_quality(..., mode="full")` — scores caller-provided context completeness
+- `compute_trust_report(..., mode="full")` — combined 2-dimensional report
+
+---
+
+## 20. Key Model Files
 
 | File | Key Classes |
 |------|-------------|
@@ -771,3 +838,4 @@ A trade should only reach the broker after all 5 gates pass:
 | `models/decision_audit.py` | `DecisionAudit`, `LegAudit`, `TradeAudit`, `PortfolioAudit`, `RiskAudit` |
 | `models/sentinel.py` | `SentinelReport`, `SentinelSignal` (GREEN/YELLOW/ORANGE/RED/BLUE) |
 | `validation/models.py` | `ValidationReport`, `CheckResult`, `Severity`, `Suite` |
+| `models/transparency.py` | `CalculationMode`, `DataTrust`, `TrustReport`, `ContextGap`, `DegradedField`, `TrustLevel`, `DataSource` |
