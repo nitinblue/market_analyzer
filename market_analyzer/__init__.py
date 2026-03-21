@@ -256,6 +256,10 @@ from market_analyzer.arbitrage import (
     scan_arbitrage,
 )
 
+# BYOD adapters — ready-made provider implementations users can plug in
+from market_analyzer.adapters.csv_provider import CSVProvider
+from market_analyzer.adapters.dict_quotes import DictQuoteProvider, DictMetricsProvider
+
 # Pre-market scanner
 from market_analyzer.premarket_scanner import (
     PremarketAlert,

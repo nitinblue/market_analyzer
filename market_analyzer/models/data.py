@@ -18,6 +18,9 @@ class ProviderType(StrEnum):
     YFINANCE = "yfinance"
     CBOE = "cboe"
     TASTYTRADE = "tastytrade"
+    CSV = "csv"
+    DICT = "dict"
+    DATAFRAME = "dataframe"
 
 
 class DataRequest(BaseModel):
