@@ -291,13 +291,19 @@ from market_analyzer.models.intraday import (
     IntradayUrgency,
 )
 from market_analyzer.models.transparency import (
+    ContextGap,
     DataGap,
     DataSource,
     DataTrust,
     DegradedField,
     TrustLevel,
+    TrustReport,
 )
-from market_analyzer.features.data_trust import compute_data_trust
+from market_analyzer.features.data_trust import (
+    compute_context_quality,
+    compute_data_trust,
+    compute_trust_report,
+)
 from market_analyzer.models.opportunity import (
     BreakoutOpportunity,
     LEAPOpportunity,

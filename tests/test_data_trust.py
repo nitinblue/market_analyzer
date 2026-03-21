@@ -246,3 +246,120 @@ class TestComputeDataTrust:
         for regime_conf in [0.0, 0.3, 0.6, 0.9, 1.0]:
             t = compute_data_trust(regime_confidence=regime_conf)
             assert 0.0 <= t.trust_score <= 1.0
+
+
+from market_analyzer.models.transparency import ContextGap, TrustReport
+from market_analyzer.features.data_trust import compute_context_quality, compute_trust_report
+
+
+class TestContextQuality:
+    def test_full_context_high(self):
+        score, level, gaps = compute_context_quality(
+            has_levels=True, has_iv_rank=True, has_vol_surface=True,
+            has_fundamentals=True, has_days_to_earnings=True,
+            has_entry_credit=True, has_regime=True, has_technicals=True,
+            has_ticker_type=True, has_correlation_data=True,
+            has_portfolio_exposure=True,
+        )
+        assert level == TrustLevel.HIGH
+        assert score >= 0.90
+        assert len(gaps) == 0
+
+    def test_minimal_context_low(self):
+        score, level, gaps = compute_context_quality(
+            has_regime=True, has_technicals=True,
+        )
+        assert level == TrustLevel.LOW
+        assert score < 0.50
+        assert len(gaps) >= 3
+
+    def test_no_regime_critical_gap(self):
+        score, level, gaps = compute_context_quality(has_regime=False, has_technicals=True)
+        critical = [g for g in gaps if g.importance == "critical"]
+        assert any(g.parameter == "regime" for g in critical)
+
+    def test_missing_levels_important_gap(self):
+        score, level, gaps = compute_context_quality(
+            has_regime=True, has_technicals=True, has_levels=False,
+        )
+        important = [g for g in gaps if g.importance == "important"]
+        assert any(g.parameter == "levels" for g in important)
+
+    def test_no_entry_credit_critical(self):
+        score, level, gaps = compute_context_quality(
+            has_regime=True, has_technicals=True, has_entry_credit=False,
+        )
+        critical = [g for g in gaps if g.importance == "critical"]
+        assert any(g.parameter == "entry_credit" for g in critical)
+
+
+class TestTrustReport:
+    def test_full_trust_report_high(self):
+        report = compute_trust_report(
+            has_broker=True, has_iv_rank=True, has_vol_surface=True,
+            has_levels=True, has_fundamentals=True,
+            entry_credit_source="broker", regime_confidence=0.95,
+            has_days_to_earnings=True, has_entry_credit=True,
+            has_ticker_type=True, has_correlation_data=True,
+            has_portfolio_exposure=True,
+        )
+        assert report.overall_level == TrustLevel.HIGH
+        assert report.is_actionable is True
+        assert report.overall_trust >= 0.80
+
+    def test_good_data_bad_context(self):
+        """Broker connected but caller didn't pass levels/IV rank/credit."""
+        report = compute_trust_report(
+            has_broker=True, regime_confidence=0.90,
+            has_iv_rank=False, has_vol_surface=False, has_levels=False,
+            has_entry_credit=False,
+        )
+        # Data is good (broker), context is poor (missing inputs)
+        assert report.data_quality.trust_level in (TrustLevel.HIGH, TrustLevel.MEDIUM)
+        assert report.context_level in (TrustLevel.LOW, TrustLevel.MEDIUM)
+        # Overall limited by weaker dimension
+        assert report.overall_trust <= report.data_quality.trust_score
+
+    def test_bad_data_good_context(self):
+        """No broker but caller passed everything they could."""
+        report = compute_trust_report(
+            has_broker=False, regime_confidence=0.90,
+            has_iv_rank=False, has_vol_surface=True, has_levels=True,
+            has_fundamentals=True, has_days_to_earnings=True,
+            has_entry_credit=True, entry_credit_source="estimated",
+            has_ticker_type=True,
+        )
+        # Context is decent, data is limited
+        assert report.overall_trust <= report.data_quality.trust_score
+
+    def test_is_actionable_threshold(self):
+        """Trust >= 0.50 is actionable."""
+        good = compute_trust_report(
+            has_broker=True, has_iv_rank=True, has_vol_surface=True,
+            has_entry_credit=True, entry_credit_source="broker",
+            regime_confidence=0.90,
+        )
+        assert good.is_actionable is True
+
+        bad = compute_trust_report(has_broker=False, regime_confidence=0.40)
+        assert bad.is_actionable is False
+
+    def test_summary_shows_both_dimensions(self):
+        report = compute_trust_report(has_broker=True, regime_confidence=0.90)
+        assert "Data:" in report.summary
+        assert "Context:" in report.summary
+
+    def test_summary_shows_critical_missing(self):
+        report = compute_trust_report(
+            has_broker=False, regime_confidence=0.90,
+            has_entry_credit=False,
+        )
+        assert "MISSING" in report.summary
+
+    def test_serialization(self):
+        report = compute_trust_report(has_broker=True, regime_confidence=0.90)
+        d = report.model_dump()
+        assert "data_quality" in d
+        assert "context_score" in d
+        assert "overall_trust" in d
+        assert "context_gaps" in d

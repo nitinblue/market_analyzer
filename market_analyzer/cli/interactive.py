@@ -1815,25 +1815,35 @@ Requires --broker connection."""
                   f"Credit: ${entry_credit:.2f} [{credit_source}]")
 
             # ── Trust score ────────────────────────────────────────────────────
-            from market_analyzer.features.data_trust import compute_data_trust
+            from market_analyzer.features.data_trust import compute_trust_report
             has_broker_conn = bool(ma.quotes and ma.quotes.has_broker)
-            trust = compute_data_trust(
+            _credit_src = (
+                "broker" if has_broker_conn and credit_source.startswith("DXLink")
+                else ("estimated" if entry_credit is not None else "none")
+            )
+            trust = compute_trust_report(
                 has_broker=has_broker_conn,
                 has_iv_rank=iv_rank is not None,
                 has_vol_surface=vol is not None,
                 has_levels=False,  # levels computed lazily in playbook below
-                entry_credit_source="broker" if has_broker_conn and credit_source.startswith("DXLink") else (
-                    "estimated" if entry_credit is not None else "none"
-                ),
+                entry_credit_source=_credit_src,
                 regime_confidence=regime.confidence,
+                has_entry_credit=entry_credit is not None,
             )
-            trust_color = "green" if trust.trust_score >= 0.80 else (
-                "yellow" if trust.trust_score >= 0.50 else "red"
+            trust_color = "green" if trust.overall_trust >= 0.80 else (
+                "yellow" if trust.overall_trust >= 0.50 else "red"
             )
-            print(f"  {_styled(f'TRUST: {trust.trust_score:.0%} {trust.trust_level.upper()}', trust_color)}"
-                  f" — {trust.summary}")
-            if trust.degraded_fields and not has_broker_conn:
-                print(f"    Connect broker (--broker --paper) for HIGH trust analysis.")
+            print(f"  {_styled(f'TRUST: {trust.overall_trust:.0%} {trust.overall_level.upper()}', trust_color)}")
+            print(f"    Data:    {trust.data_quality.trust_score:.0%} {trust.data_quality.trust_level.upper()}"
+                  f" ({trust.data_quality.primary_source.value})")
+            print(f"    Context: {trust.context_score:.0%} {trust.context_level.upper()}", end="")
+            if trust.context_gaps:
+                _critical_gaps = [g for g in trust.context_gaps if g.importance == "critical"]
+                if _critical_gaps:
+                    print(f" — MISSING: {', '.join(g.parameter for g in _critical_gaps)}", end="")
+            print()
+            if not has_broker_conn:
+                print(f"    >> Connect broker (--broker --paper) for HIGH trust analysis.")
 
             # ── No-trade playbook ─────────────────────────────────────────────
             if not is_ready:
@@ -2607,25 +2617,33 @@ Requires --broker connection."""
             print("=" * 55)
 
             # ── Trust score ────────────────────────────────────────────────────
-            from market_analyzer.features.data_trust import compute_data_trust
+            from market_analyzer.features.data_trust import compute_trust_report
             metrics_audit = ma.quotes.get_metrics(ticker) if ma.quotes else None
             iv_rank_audit = metrics_audit.iv_rank if metrics_audit else None
             has_broker_audit = bool(ma.quotes and ma.quotes.has_broker)
-            trust = compute_data_trust(
+            trust = compute_trust_report(
                 has_broker=has_broker_audit,
                 has_iv_rank=iv_rank_audit is not None,
                 has_vol_surface=vol is not None,
                 has_levels=levels is not None,
                 entry_credit_source="estimated",  # audit always uses estimated credit (ec = heuristic)
                 regime_confidence=regime.confidence,
+                has_entry_credit=False,  # audit doesn't pass real entry credit
             )
-            trust_color = "green" if trust.trust_score >= 0.80 else (
-                "yellow" if trust.trust_score >= 0.50 else "red"
+            trust_color = "green" if trust.overall_trust >= 0.80 else (
+                "yellow" if trust.overall_trust >= 0.50 else "red"
             )
-            print(f"\n{_styled(f'TRUST: {trust.trust_score:.0%} {trust.trust_level.upper()}', trust_color)}"
-                  f" — {trust.summary}")
-            if trust.degraded_fields and not has_broker_audit:
-                print("  Connect broker (--broker --paper) for HIGH trust analysis.")
+            print(f"\n{_styled(f'TRUST: {trust.overall_trust:.0%} {trust.overall_level.upper()}', trust_color)}")
+            print(f"  Data:    {trust.data_quality.trust_score:.0%} {trust.data_quality.trust_level.upper()}"
+                  f" ({trust.data_quality.primary_source.value})")
+            print(f"  Context: {trust.context_score:.0%} {trust.context_level.upper()}", end="")
+            if trust.context_gaps:
+                _critical_gaps = [g for g in trust.context_gaps if g.importance == "critical"]
+                if _critical_gaps:
+                    print(f" — MISSING: {', '.join(g.parameter for g in _critical_gaps)}", end="")
+            print()
+            if not has_broker_audit:
+                print("  >> Connect broker (--broker --paper) for HIGH trust analysis.")
 
         except Exception as e:
             print(f"Error: {e}")

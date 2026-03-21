@@ -83,3 +83,31 @@ class DataTrust(BaseModel):
             degraded_fields=degraded,
             summary=summary,
         )
+
+
+class ContextGap(BaseModel):
+    """An optional input that was NOT provided by the caller."""
+    parameter: str    # Parameter name (e.g., "levels", "iv_rank")
+    impact: str       # What's degraded without it (e.g., "strike proximity check skipped")
+    importance: str   # "critical", "important", "helpful"
+
+
+class TrustReport(BaseModel):
+    """Complete 2-dimensional trust assessment."""
+    # Dimension 1: Data Quality
+    data_quality: DataTrust
+
+    # Dimension 2: Context Quality
+    context_score: float            # 0-1
+    context_level: TrustLevel       # HIGH/MEDIUM/LOW/UNRELIABLE
+    context_gaps: list[ContextGap]  # What wasn't provided
+
+    # Combined
+    overall_trust: float    # min(data_quality.trust_score, context_score)
+    overall_level: TrustLevel
+    summary: str
+
+    @property
+    def is_actionable(self) -> bool:
+        """Can the caller trust this enough to act on it?"""
+        return self.overall_trust >= 0.50
