@@ -78,6 +78,12 @@ from market_analyzer.models.adjustment import (
     PositionStatus,
     TestedSide,
 )
+from market_analyzer.models.assignment import (
+    AssignmentAction,
+    AssignmentAnalysis,
+    AssignmentType,
+)
+from market_analyzer.features.assignment_handler import handle_assignment
 from market_analyzer.models.exit_plan import (
     AdjustmentTrigger,
     AdjustmentTriggerType,

@@ -43,6 +43,11 @@ class StructureType(StrEnum):
     FUTURES_LONG = "futures_long"     # Buy futures contract
     FUTURES_SHORT = "futures_short"   # Short futures contract
 
+    # Assignment-response structures
+    EQUITY_SELL = "equity_sell"       # Sell assigned shares (assignment response)
+    EQUITY_BUY = "equity_buy"         # Buy to cover short shares (assignment response)
+    COVERED_CALL = "covered_call"     # Sell call against owned shares (wheel strategy)
+
 
 class OrderSide(StrEnum):
     """Net order side — credit (receive premium) or debit (pay premium)."""
@@ -99,6 +104,10 @@ _PROFILES: dict[str, tuple[str, str, RiskProfile, str]] = {
     "equity_short":    ("\\__",  "bearish",  RiskProfile.UNDEFINED, "cash equity short"),
     "futures_long":    ("__/",   "bullish",  RiskProfile.UNDEFINED, "futures long"),
     "futures_short":   ("\\__",  "bearish",  RiskProfile.UNDEFINED, "futures short"),
+    # Assignment-response structures
+    "equity_sell":     ("\\__",  "bearish",  RiskProfile.DEFINED,   "sell assigned shares"),
+    "equity_buy":      ("__/",   "bullish",  RiskProfile.DEFINED,   "buy to cover short"),
+    "covered_call":    ("/‾‾\\",  "neutral",  RiskProfile.DEFINED,   "covered call (wheel)"),
 }
 
 # Direction-dependent structures
@@ -531,15 +540,26 @@ class TradeSpec(BaseModel):
                      osi_symbol, instrument_type}
         For equity/futures: {action, quantity, symbol, instrument_type, price}
         """
-        _equity_structures = {"equity_long", "equity_short", "futures_long", "futures_short"}
+        _equity_structures = {
+            "equity_long", "equity_short", "futures_long", "futures_short",
+            "equity_sell", "equity_buy",
+        }
 
         if self.structure_type in _equity_structures:
             # Cash equity or futures — single instrument, no legs
-            action = "BUY" if self.structure_type in ("equity_long", "futures_long") else "SELL"
-            inst_type = "EQUITY" if "equity" in self.structure_type else "FUTURE"
+            if self.structure_type in ("equity_long", "futures_long", "equity_buy"):
+                action = "BUY"
+            else:
+                action = "SELL"
+            if "futures" in (self.structure_type or ""):
+                inst_type = "FUTURE"
+            else:
+                inst_type = "EQUITY"
+            # For equity_sell/equity_buy use actual shares count from first leg if available
+            qty = self.legs[0].quantity if self.legs else 1
             return [{
                 "action": action,
-                "quantity": 1,  # Shares/lots — caller scales
+                "quantity": qty,
                 "symbol": self.ticker,
                 "instrument_type": inst_type,
                 "price": self.underlying_price,
@@ -652,6 +672,9 @@ class TradeSpec(BaseModel):
             "equity_short": "EQ\u2193",
             "futures_long": "FUT\u2191",
             "futures_short": "FUT\u2193",
+            "equity_sell": "EQ-SELL",
+            "equity_buy": "EQ-BUY",
+            "covered_call": "CC",
         }
         return _map.get(self.structure_type or "", self.structure_type or "?")
 
@@ -669,6 +692,8 @@ class TradeSpec(BaseModel):
             "long_option": "directional", "pmcc": "bullish",
             "equity_long": "bullish", "equity_short": "bearish",
             "futures_long": "bullish", "futures_short": "bearish",
+            "equity_sell": "bearish", "equity_buy": "bullish",
+            "covered_call": "neutral",
         }
         direction = _dir_map.get(self.structure_type or "", "neutral")
         # Risk
@@ -682,6 +707,8 @@ class TradeSpec(BaseModel):
             "ratio_spread": "undefined",
             "equity_long": "defined", "equity_short": "undefined",
             "futures_long": "undefined", "futures_short": "undefined",
+            "equity_sell": "defined", "equity_buy": "defined",
+            "covered_call": "defined",
         }
         risk = _risk_map.get(self.structure_type or "", "defined")
         return f"{sym} {direction} · {risk}"

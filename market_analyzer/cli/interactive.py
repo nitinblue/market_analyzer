@@ -5291,6 +5291,165 @@ Requires --broker connection."""
         except Exception as exc:
             print(f"{_styled('ERROR:', 'red')} {exc}")
 
+    def do_assignment(self, arg: str) -> None:
+        """Handle an assignment/exercise event and recommend: sell, wheel, or cover.\n\nUsage: assignment TICKER STRIKE [put|call] [CONTRACTS] [--nlv NLV] [--bp BP] [--iv IV_RANK]\n\nExamples:\n    assignment SPY 650 put\n    assignment IWM 240 put 2\n    assignment SPY 660 call\n    assignment IWM 240 put 1 --nlv 80000 --bp 50000 --iv 45"""
+        parts = arg.strip().split()
+        if len(parts) < 2:
+            print("Usage: assignment TICKER STRIKE [put|call] [CONTRACTS] [--nlv NLV] [--bp BP] [--iv IV_RANK]")
+            return
+
+        ticker = parts[0].upper()
+        try:
+            strike_price = float(parts[1])
+        except ValueError:
+            print(f"Invalid strike price: {parts[1]}")
+            return
+
+        # Optional positional: assignment type and contracts
+        assignment_type_str = "put"
+        contracts = 1
+        if len(parts) > 2 and not parts[2].startswith("--"):
+            assignment_type_str = parts[2].lower()
+        if len(parts) > 3 and not parts[3].startswith("--"):
+            try:
+                contracts = int(parts[3])
+            except ValueError:
+                pass
+
+        # Parse optional flags
+        account_nlv: float | None = None
+        available_bp: float | None = None
+        iv_rank: float | None = None
+        i = 4
+        while i < len(parts):
+            if parts[i] == "--nlv" and i + 1 < len(parts):
+                account_nlv = float(parts[i + 1])
+                i += 2
+            elif parts[i] == "--bp" and i + 1 < len(parts):
+                available_bp = float(parts[i + 1])
+                i += 2
+            elif parts[i] == "--iv" and i + 1 < len(parts):
+                iv_rank = float(parts[i + 1])
+                i += 2
+            else:
+                i += 1
+
+        from market_analyzer.models.assignment import AssignmentType
+        if "call" in assignment_type_str:
+            assignment_type = AssignmentType.CALL_ASSIGNED
+        else:
+            assignment_type = AssignmentType.PUT_ASSIGNED
+
+        try:
+            ma = self._get_ma()
+            regime = ma.regime.detect(ticker)
+            tech = ma.technicals.snapshot(ticker)
+            current_price = tech.current_price
+            atr = tech.atr
+            atr_pct = (atr / current_price * 100) if current_price > 0 else 1.5
+
+            # Auto-detect ETF via registry
+            is_etf = True
+            try:
+                from market_analyzer.registry import MarketRegistry
+                inst = MarketRegistry().get_instrument(ticker)
+                if inst:
+                    is_etf = inst.asset_class in ("equity_etf", "etf")
+            except Exception:
+                pass
+
+            # Use defaults for NLV/BP if not provided
+            if account_nlv is None:
+                account_nlv = 100000.0
+                print(f"  {_styled('NOTE:', 'yellow')} Using default NLV $100,000 — pass --nlv for accurate sizing")
+            if available_bp is None:
+                available_bp = account_nlv * 0.50
+                print(f"  {_styled('NOTE:', 'yellow')} Using default BP ${available_bp:,.0f} (50% of NLV) — pass --bp for accuracy")
+
+            from market_analyzer.features.assignment_handler import handle_assignment
+            result = handle_assignment(
+                ticker=ticker,
+                assignment_type=assignment_type,
+                strike_price=strike_price,
+                contracts=contracts,
+                current_price=current_price,
+                regime_id=regime.regime,
+                regime_confidence=regime.confidence,
+                atr=atr,
+                atr_pct=atr_pct,
+                account_nlv=account_nlv,
+                available_bp=available_bp,
+                iv_rank=iv_rank,
+                is_etf=is_etf,
+            )
+
+            # --- Display ---
+            _print_header(f"Assignment Handler — {ticker} @ ${current_price:,.2f}")
+
+            type_label = "PUT ASSIGNED" if assignment_type == AssignmentType.PUT_ASSIGNED else "CALL ASSIGNED"
+            print(f"\n  {_styled('Event:', 'bold')}          {type_label} — {contracts} contract(s), strike ${strike_price:,.2f}")
+            print(f"  {_styled('Shares:', 'bold')}         {result.shares}")
+            print(f"  {_styled('Current Price:', 'bold')}  ${current_price:,.2f}")
+
+            # P&L
+            pnl_color = "green" if result.unrealized_pnl >= 0 else "red"
+            pnl_sign = "+" if result.unrealized_pnl >= 0 else ""
+            print(f"  {_styled('Unrealized P&L:', 'bold')} {_styled(f'{pnl_sign}${result.unrealized_pnl:,.0f} ({pnl_sign}{result.unrealized_pnl_pct:.1%})', pnl_color)}")
+
+            # Capital
+            print(f"\n  {_styled('Capital Impact:', 'bold')}")
+            print(f"    Tied Up:   ${result.capital_tied_up:,.0f} ({result.capital_pct_of_nlv:.1%} of NLV)")
+            margin_color = "red" if result.margin_impact == "margin_call" else ("yellow" if result.margin_impact == "margin_warning" else "green")
+            print(f"    Margin:    {_styled(result.margin_impact, margin_color)}")
+
+            # Regime
+            regime_color = "green" if regime.regime in (1, 2) else ("yellow" if regime.regime == 3 else "red")
+            print(f"\n  {_styled('Regime:', 'bold')}         {_styled(f'R{regime.regime} ({regime.confidence:.0%})', regime_color)} — {result.regime_rationale}")
+
+            # Decision
+            action_color = {
+                "sell_immediately": "red",
+                "hold_and_wheel": "green",
+                "hold_core": "cyan",
+                "partial_sell": "yellow",
+                "cover_short": "red",
+            }.get(result.recommended_action, "white")
+            urgency_color = "red" if result.urgency == "immediate" else ("yellow" if result.urgency == "today" else "green")
+
+            print(f"\n  {_styled('Decision:', 'bold')}       {_styled(result.recommended_action.upper(), action_color)}")
+            print(f"  {_styled('Urgency:', 'bold')}         {_styled(result.urgency, urgency_color)}")
+
+            print(f"\n  {_styled('Reasons:', 'bold')}")
+            for r in result.reasons:
+                print(f"    • {r}")
+
+            # Response TradeSpec
+            if result.response_trade_spec:
+                ts = result.response_trade_spec
+                print(f"\n  {_styled('Response Trade:', 'bold')}")
+                print(f"    Structure: {ts.structure_type}")
+                print(f"    Rationale: {ts.spec_rationale}")
+                if ts.legs:
+                    leg = ts.legs[0]
+                    print(f"    Action:    {leg.action.value} {leg.quantity} shares at market")
+
+            # Wheel TradeSpec
+            if result.wheel_trade_spec:
+                wts = result.wheel_trade_spec
+                print(f"\n  {_styled('Wheel Trade (Covered Call):', 'bold')}")
+                if wts.legs:
+                    leg = wts.legs[0]
+                    print(f"    Strike:    ${leg.strike:,.2f} ({leg.strike_label})")
+                    print(f"    Exp:       {leg.expiration} ({leg.days_to_expiry} DTE)")
+                    print(f"    Action:    {leg.action.value} {leg.quantity} contract(s)")
+                print(f"    Exit:      {wts.exit_summary}")
+                print(f"    Rationale: {result.wheel_rationale}")
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+            import traceback as _tb
+            _tb.print_exc()
+
     def do_optimal_dte(self, arg: str) -> None:
         """Find optimal DTE for a ticker: optimal_dte TICKER
 
