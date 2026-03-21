@@ -5,7 +5,7 @@ Pure functions — no data fetching, no side effects.
 
 from __future__ import annotations
 
-from datetime import date, time
+from datetime import date, time, timedelta
 
 from market_analyzer.models.opportunity import LegAction, LegSpec, OrderSide, StructureType, TradeSpec
 from market_analyzer.models.vol_surface import SkewSlice, TermStructurePoint, VolatilitySurface
@@ -18,6 +18,14 @@ def _get_instrument_info(ticker: str):
         return MarketRegistry().get_instrument(ticker)
     except (KeyError, ImportError):
         return None
+
+
+def _get_strike_interval(ticker: str) -> float | None:
+    """Return the registry strike_interval for ticker, or None if unknown."""
+    inst = _get_instrument_info(ticker)
+    if inst is not None and inst.strike_interval > 0:
+        return inst.strike_interval
+    return None
 
 
 def _assignment_exit_note(ticker: str) -> str:
@@ -51,11 +59,22 @@ def action_from_role(role: str) -> LegAction:
     return LegAction.BUY_TO_OPEN
 
 
-def snap_strike(raw_strike: float, underlying_price: float) -> float:
-    """Snap a raw strike to the nearest standard tick size.
+def snap_strike(
+    raw_strike: float,
+    underlying_price: float,
+    strike_interval: float | None = None,
+) -> float:
+    """Snap a raw strike to the nearest valid option strike.
 
-    Rules: <$50 -> $0.50 ticks, <$200 -> $1.00 ticks, >= $200 -> $5.00 ticks.
+    If ``strike_interval`` is provided (e.g., from market registry), snap to
+    that interval — needed for India instruments (NIFTY: 50 pts, BANKNIFTY: 100 pts).
+    Otherwise, use standard US OCC tick sizes:
+      <$50 -> $0.50 ticks, <$200 -> $1.00 ticks, >= $200 -> $5.00 ticks.
     """
+    if strike_interval is not None and strike_interval > 0:
+        return round(round(raw_strike / strike_interval) * strike_interval, 2)
+
+    # US OCC default tick sizes
     if underlying_price < 50:
         tick = 0.50
     elif underlying_price < 200:
@@ -888,6 +907,215 @@ def build_pmcc_legs(
     ]
 
 
+def _build_fallback_setup_trade_spec(
+    ticker: str,
+    price: float,
+    atr: float,
+    direction: str,
+    regime_id: int,
+    target_dte_min: int,
+    target_dte_max: int,
+    inst_fields: dict,
+) -> TradeSpec | None:
+    """Fallback TradeSpec when vol_surface is None but instrument has options.
+
+    Uses ATR-based strike selection and registry strike_interval for snapping.
+    Target expiration is estimated from today + midpoint of DTE range.
+    """
+    today = date.today()
+    target_dte = (target_dte_min + target_dte_max) // 2
+    expiration = today + timedelta(days=target_dte)
+
+    # Use registry strike_interval so India instruments snap correctly
+    si = _get_strike_interval(ticker)
+
+    # For strike snapping in helpers below, temporarily use custom snap
+    def _snap(raw: float) -> float:
+        return snap_strike(raw, price, strike_interval=si)
+
+    short_mult = 1.0 if regime_id == 1 else 1.5
+    wing_mult = 0.5
+
+    # Determine wing_width using registry strike_interval for rounding
+    raw_wing = atr * wing_mult
+    wing_width = si * max(1, round(raw_wing / si)) if si is not None else raw_wing
+
+    if direction == "neutral" and regime_id in (1, 2):
+        short_put = _snap(price - short_mult * atr)
+        long_put = _snap(short_put - wing_width)
+        short_call = _snap(price + short_mult * atr)
+        long_call = _snap(short_call + wing_width)
+        legs = [
+            LegSpec(
+                role="short_put", action=LegAction.SELL_TO_OPEN,
+                option_type="put", strike=short_put,
+                strike_label=f"{short_mult:.1f} ATR OTM put",
+                expiration=expiration, days_to_expiry=target_dte, atm_iv_at_expiry=0.0,
+            ),
+            LegSpec(
+                role="long_put", action=LegAction.BUY_TO_OPEN,
+                option_type="put", strike=long_put,
+                strike_label="wing below short put",
+                expiration=expiration, days_to_expiry=target_dte, atm_iv_at_expiry=0.0,
+            ),
+            LegSpec(
+                role="short_call", action=LegAction.SELL_TO_OPEN,
+                option_type="call", strike=short_call,
+                strike_label=f"{short_mult:.1f} ATR OTM call",
+                expiration=expiration, days_to_expiry=target_dte, atm_iv_at_expiry=0.0,
+            ),
+            LegSpec(
+                role="long_call", action=LegAction.BUY_TO_OPEN,
+                option_type="call", strike=long_call,
+                strike_label="wing above short call",
+                expiration=expiration, days_to_expiry=target_dte, atm_iv_at_expiry=0.0,
+            ),
+        ]
+        return TradeSpec(
+            ticker=ticker, legs=legs, underlying_price=price,
+            target_dte=target_dte, target_expiration=expiration,
+            wing_width_points=wing_width,
+            max_risk_per_spread=f"Wing {wing_width:.0f} pts - credit received",
+            spec_rationale=(
+                f"ATR-based iron condor (no vol surface, R{regime_id}). "
+                f"~{target_dte} DTE. Strike interval: {si or 'US default'}."
+            ),
+            structure_type=StructureType.IRON_CONDOR,
+            order_side=OrderSide.CREDIT,
+            profit_target_pct=0.50,
+            stop_loss_pct=2.0,
+            exit_dte=21,
+            max_profit_desc="Credit received",
+            max_loss_desc=f"Wing width ({wing_width:.0f} pts) minus credit",
+            exit_notes=[
+                "ATR-based strikes — no vol surface available",
+                "Close at 50% of credit received",
+                "Close if short strike tested on either side",
+            ],
+            **inst_fields,
+        )
+
+    if regime_id in (1, 2):
+        cr_dir = direction if direction in ("bullish", "bearish") else "bullish"
+        if cr_dir == "bullish":
+            short_strike = _snap(price - short_mult * atr)
+            long_strike = _snap(short_strike - wing_width)
+            wing_pts = short_strike - long_strike
+            legs = [
+                LegSpec(
+                    role="short_put", action=LegAction.SELL_TO_OPEN,
+                    option_type="put", strike=short_strike,
+                    strike_label=f"{short_mult:.1f} ATR OTM put",
+                    expiration=expiration, days_to_expiry=target_dte, atm_iv_at_expiry=0.0,
+                ),
+                LegSpec(
+                    role="long_put", action=LegAction.BUY_TO_OPEN,
+                    option_type="put", strike=long_strike,
+                    strike_label="wing below short put",
+                    expiration=expiration, days_to_expiry=target_dte, atm_iv_at_expiry=0.0,
+                ),
+            ]
+        else:
+            short_strike = _snap(price + short_mult * atr)
+            long_strike = _snap(short_strike + wing_width)
+            wing_pts = long_strike - short_strike
+            legs = [
+                LegSpec(
+                    role="short_call", action=LegAction.SELL_TO_OPEN,
+                    option_type="call", strike=short_strike,
+                    strike_label=f"{short_mult:.1f} ATR OTM call",
+                    expiration=expiration, days_to_expiry=target_dte, atm_iv_at_expiry=0.0,
+                ),
+                LegSpec(
+                    role="long_call", action=LegAction.BUY_TO_OPEN,
+                    option_type="call", strike=long_strike,
+                    strike_label="wing above short call",
+                    expiration=expiration, days_to_expiry=target_dte, atm_iv_at_expiry=0.0,
+                ),
+            ]
+        return TradeSpec(
+            ticker=ticker, legs=legs, underlying_price=price,
+            target_dte=target_dte, target_expiration=expiration,
+            wing_width_points=wing_pts,
+            max_risk_per_spread=f"Wing {wing_pts:.0f} pts - credit received",
+            spec_rationale=(
+                f"ATR-based {cr_dir} credit spread (no vol surface, R{regime_id}). "
+                f"~{target_dte} DTE. Strike interval: {si or 'US default'}."
+            ),
+            structure_type=StructureType.CREDIT_SPREAD,
+            order_side=OrderSide.CREDIT,
+            profit_target_pct=0.50,
+            stop_loss_pct=2.0,
+            exit_dte=21,
+            max_profit_desc="Credit received",
+            max_loss_desc=f"Wing width ({wing_pts:.0f} pts) minus credit",
+            exit_notes=[
+                "ATR-based strikes — no vol surface available",
+                "Close at 50% of credit received",
+                "Close if short strike tested",
+            ],
+            **inst_fields,
+        )
+
+    # R3: debit spread
+    db_dir = direction if direction in ("bullish", "bearish") else "bullish"
+    if db_dir == "bullish":
+        long_strike = _snap(price)
+        short_strike = _snap(price + wing_mult * atr)
+        legs = [
+            LegSpec(
+                role="long_call", action=LegAction.BUY_TO_OPEN,
+                option_type="call", strike=long_strike,
+                strike_label="ATM call",
+                expiration=expiration, days_to_expiry=target_dte, atm_iv_at_expiry=0.0,
+            ),
+            LegSpec(
+                role="short_call", action=LegAction.SELL_TO_OPEN,
+                option_type="call", strike=short_strike,
+                strike_label=f"{wing_mult:.1f} ATR OTM call",
+                expiration=expiration, days_to_expiry=target_dte, atm_iv_at_expiry=0.0,
+            ),
+        ]
+    else:
+        long_strike = _snap(price)
+        short_strike = _snap(price - wing_mult * atr)
+        legs = [
+            LegSpec(
+                role="long_put", action=LegAction.BUY_TO_OPEN,
+                option_type="put", strike=long_strike,
+                strike_label="ATM put",
+                expiration=expiration, days_to_expiry=target_dte, atm_iv_at_expiry=0.0,
+            ),
+            LegSpec(
+                role="short_put", action=LegAction.SELL_TO_OPEN,
+                option_type="put", strike=short_strike,
+                strike_label=f"{wing_mult:.1f} ATR OTM put",
+                expiration=expiration, days_to_expiry=target_dte, atm_iv_at_expiry=0.0,
+            ),
+        ]
+    return TradeSpec(
+        ticker=ticker, legs=legs, underlying_price=price,
+        target_dte=target_dte, target_expiration=expiration,
+        spec_rationale=(
+            f"ATR-based {db_dir} debit spread (no vol surface, R{regime_id}). "
+            f"~{target_dte} DTE. Strike interval: {si or 'US default'}."
+        ),
+        structure_type=StructureType.DEBIT_SPREAD,
+        order_side=OrderSide.DEBIT,
+        profit_target_pct=0.50,
+        stop_loss_pct=0.50,
+        exit_dte=14,
+        max_profit_desc="Spread width minus debit paid",
+        max_loss_desc="Net debit paid",
+        exit_notes=[
+            "ATR-based strikes — no vol surface available",
+            "Target 50% of max profit",
+            "Close at 50% loss of debit paid",
+        ],
+        **inst_fields,
+    )
+
+
 def build_setup_trade_spec(
     ticker: str,
     price: float,
@@ -901,17 +1129,30 @@ def build_setup_trade_spec(
     """Build a suggested default TradeSpec for a setup (breakout, momentum, MR, ORB).
 
     Income-first bias: credit spreads in R1/R2, debit spreads in R3, None in R4.
+
+    When vol_surface is None but the instrument has options (e.g., India F&O indices),
+    falls back to ATR-based strike selection using the registry's strike_interval.
     """
-    if vol_surface is None or not vol_surface.term_structure:
-        return None
     if regime_id == 4:
+        return None
+
+    inst_fields = _populate_instrument_fields(ticker)
+
+    if vol_surface is None or not vol_surface.term_structure:
+        # Fallback: check if this instrument has options via registry
+        inst = _get_instrument_info(ticker)
+        if inst is not None and inst.has_0dte:
+            # India indices (NIFTY, BANKNIFTY) and 0DTE-capable instruments
+            return _build_fallback_setup_trade_spec(
+                ticker, price, atr, direction, regime_id,
+                target_dte_min, target_dte_max, inst_fields,
+            )
+        # For non-options instruments or unknown tickers, return None
         return None
 
     exp_pt = find_best_expiration(vol_surface.term_structure, target_dte_min, target_dte_max)
     if exp_pt is None:
         return None
-
-    inst_fields = _populate_instrument_fields(ticker)
 
     if direction == "neutral" and regime_id in (1, 2):
         # Iron condor for neutral setups

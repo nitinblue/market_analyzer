@@ -610,3 +610,104 @@ class TestNoGoNoTradeSpec:
         result = assess_iron_condor("SPY", regime, _technicals(), _ic_vol())
         assert result.verdict.value == "no_go"
         assert result.trade_spec is None
+
+
+# --- India TradeSpec tests (Fix P0: snap_strike interval + fallback legs) ---
+
+class TestIndiaTradeSpec:
+    def test_snap_strike_nifty_50pt_interval(self) -> None:
+        """NIFTY strikes snap to 50-point intervals."""
+        # 25873 → nearest 50 = 25850
+        result = snap_strike(25873.0, 26000.0, strike_interval=50.0)
+        assert result % 50 == 0
+        assert result == 25850.0
+
+    def test_snap_strike_banknifty_100pt_interval(self) -> None:
+        """BANKNIFTY strikes snap to 100-point intervals."""
+        # 50234 → nearest 100 = 50200
+        result = snap_strike(50234.0, 50000.0, strike_interval=100.0)
+        assert result % 100 == 0
+        assert result == 50200.0
+
+    def test_snap_strike_banknifty_rounds_up(self) -> None:
+        """BANKNIFTY 50250 should round to 50300 (equidistant rounds up)."""
+        result = snap_strike(50250.0, 50000.0, strike_interval=100.0)
+        assert result % 100 == 0
+
+    def test_snap_strike_us_default_unchanged(self) -> None:
+        """Without strike_interval, US defaults apply unchanged."""
+        # >= $200 means $5 ticks
+        result = snap_strike(574.3, 580.0)
+        assert result == 575.0
+
+    def test_snap_strike_us_default_explicit_none(self) -> None:
+        """Passing strike_interval=None uses US defaults."""
+        result = snap_strike(574.3, 580.0, strike_interval=None)
+        assert result == 575.0
+
+    def test_snap_strike_zero_interval_falls_back_to_us(self) -> None:
+        """strike_interval=0 is ignored; falls back to US defaults."""
+        result = snap_strike(574.3, 580.0, strike_interval=0.0)
+        assert result == 575.0
+
+    def test_setup_trade_spec_nifty_no_vol_surface_bullish_r1(self) -> None:
+        """NIFTY bullish R1 should produce a credit spread even without vol_surface."""
+        from market_analyzer.opportunity.option_plays._trade_spec_helpers import build_setup_trade_spec
+        result = build_setup_trade_spec(
+            ticker="NIFTY", price=26000.0, atr=400.0,
+            direction="bullish", regime_id=1,
+            vol_surface=None,
+        )
+        assert result is not None
+        assert len(result.legs) >= 2
+        # All strikes must be multiples of 50 (NIFTY interval)
+        for leg in result.legs:
+            assert leg.strike % 50 == 0, f"Strike {leg.strike} not a multiple of 50"
+
+    def test_setup_trade_spec_banknifty_no_vol_surface_neutral_r2(self) -> None:
+        """BANKNIFTY neutral R2 should produce an iron condor without vol_surface."""
+        from market_analyzer.opportunity.option_plays._trade_spec_helpers import build_setup_trade_spec
+        result = build_setup_trade_spec(
+            ticker="BANKNIFTY", price=48000.0, atr=800.0,
+            direction="neutral", regime_id=2,
+            vol_surface=None,
+        )
+        assert result is not None
+        # Iron condor = 4 legs
+        assert len(result.legs) == 4
+        # All strikes must be multiples of 100
+        for leg in result.legs:
+            assert leg.strike % 100 == 0, f"Strike {leg.strike} not a multiple of 100"
+
+    def test_setup_trade_spec_nifty_r4_returns_none(self) -> None:
+        """R4 always returns None regardless of vol_surface availability."""
+        from market_analyzer.opportunity.option_plays._trade_spec_helpers import build_setup_trade_spec
+        result = build_setup_trade_spec(
+            ticker="NIFTY", price=26000.0, atr=400.0,
+            direction="bullish", regime_id=4,
+            vol_surface=None,
+        )
+        assert result is None
+
+    def test_setup_trade_spec_unknown_ticker_no_vol_surface_returns_none(self) -> None:
+        """Unknown ticker with no vol_surface returns None (not in registry)."""
+        from market_analyzer.opportunity.option_plays._trade_spec_helpers import build_setup_trade_spec
+        result = build_setup_trade_spec(
+            ticker="UNKNOWNXYZ", price=100.0, atr=5.0,
+            direction="bullish", regime_id=1,
+            vol_surface=None,
+        )
+        assert result is None
+
+    def test_setup_trade_spec_nifty_r3_directional_no_vol_surface(self) -> None:
+        """NIFTY R3 bearish should produce a debit spread without vol_surface."""
+        from market_analyzer.opportunity.option_plays._trade_spec_helpers import build_setup_trade_spec
+        result = build_setup_trade_spec(
+            ticker="NIFTY", price=26000.0, atr=400.0,
+            direction="bearish", regime_id=3,
+            vol_surface=None,
+        )
+        assert result is not None
+        assert len(result.legs) == 2
+        for leg in result.legs:
+            assert leg.strike % 50 == 0, f"Strike {leg.strike} not a multiple of 50"
