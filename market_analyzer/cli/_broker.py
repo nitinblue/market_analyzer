@@ -47,10 +47,10 @@ def connect_broker(
     try:
         from dotenv import load_dotenv
         from pathlib import Path
-        # Load eTrading .env first (has TASTYTRADE_* credentials)
-        etrading_env = Path.home() / "PythonProjects" / "eTrading" / ".env"
-        if etrading_env.exists():
-            load_dotenv(etrading_env)
+        # Load from standard user config location first
+        ma_env = Path.home() / ".market_analyzer" / ".env"
+        if ma_env.exists():
+            load_dotenv(ma_env)
         load_dotenv()  # Also load local .env if present
     except ImportError:
         pass

@@ -37,6 +37,7 @@ Thumbs.db
 # Environment / secrets
 .env
 .env.*
+!.env.example
 credentials.json
 tastytrade_broker.yaml
 

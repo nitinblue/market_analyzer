@@ -1,5 +1,7 @@
 """Market analysis toolkit: regime detection, technicals, phase detection, and opportunity assessment."""
 
+__version__ = "0.3.0"
+
 # Config
 from market_analyzer.config import (
     CalendarSettings,
