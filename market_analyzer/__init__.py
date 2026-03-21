@@ -81,9 +81,11 @@ from market_analyzer.models.adjustment import (
 from market_analyzer.models.assignment import (
     AssignmentAction,
     AssignmentAnalysis,
+    AssignmentRisk,
+    AssignmentRiskResult,
     AssignmentType,
 )
-from market_analyzer.features.assignment_handler import handle_assignment
+from market_analyzer.features.assignment_handler import handle_assignment, assess_assignment_risk
 from market_analyzer.models.exit_plan import (
     AdjustmentTrigger,
     AdjustmentTriggerType,
@@ -498,15 +500,26 @@ from market_analyzer.models.adjustment import (
     AdjustmentEffectiveness,
 )
 
-# Extended position sizing (correlation + regime margin)
+# Extended position sizing (correlation + regime margin + cash/margin analytics)
 from market_analyzer.features.position_sizing import (
     CorrelationAdjustment,
+    MarginAnalysis,
     RegimeMarginEstimate,
     compute_pairwise_correlation,
     adjust_kelly_for_correlation,
+    compute_margin_analysis,
     compute_regime_adjusted_bp,
     compute_position_size,
     analyze_adjustment_effectiveness,
+)
+
+# Interest rate risk
+from market_analyzer.features.rate_risk import (
+    PortfolioRateRisk,
+    RateRiskAssessment,
+    RateRiskLevel,
+    assess_portfolio_rate_risk,
+    assess_rate_risk,
 )
 
 # Cross-market correlation
@@ -1116,10 +1129,22 @@ __all__ = [
     "AdjustmentEffectiveness",
     # Extended position sizing (reform)
     "CorrelationAdjustment",
+    "MarginAnalysis",
     "RegimeMarginEstimate",
     "compute_pairwise_correlation",
     "adjust_kelly_for_correlation",
+    "compute_margin_analysis",
     "compute_regime_adjusted_bp",
     "compute_position_size",
     "analyze_adjustment_effectiveness",
+    # Assignment risk warning (BEFORE assignment)
+    "AssignmentRisk",
+    "AssignmentRiskResult",
+    "assess_assignment_risk",
+    # Interest rate risk
+    "RateRiskLevel",
+    "RateRiskAssessment",
+    "PortfolioRateRisk",
+    "assess_rate_risk",
+    "assess_portfolio_rate_risk",
 ]

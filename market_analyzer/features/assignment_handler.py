@@ -3,6 +3,8 @@
 When a short option is assigned, the trader needs a systematic decision:
 sell the shares, hold and wheel, or cover a short position.
 
+Also provides BEFORE-assignment risk warnings via assess_assignment_risk().
+
 All functions are stateless — no I/O, no side effects.
 """
 from __future__ import annotations
@@ -12,6 +14,8 @@ from datetime import date, timedelta
 from market_analyzer.models.assignment import (
     AssignmentAction,
     AssignmentAnalysis,
+    AssignmentRisk,
+    AssignmentRiskResult,
     AssignmentType,
 )
 from market_analyzer.models.opportunity import LegAction, LegSpec, OrderSide, StructureType, TradeSpec
@@ -578,4 +582,248 @@ def handle_assignment(
         wheel_rationale=None,
         regime_id=regime_id,
         regime_rationale=regime_rationale,
+    )
+
+
+# ---------------------------------------------------------------------------
+# BEFORE-assignment risk warning
+# ---------------------------------------------------------------------------
+
+def _classify_leg_risk(
+    option_type: str,
+    strike: float,
+    current_price: float,
+    dte_remaining: int,
+    exercise_style: str,
+    is_dividend_pending: bool,
+    ex_dividend_days: int | None,
+) -> tuple[AssignmentRisk, float, float, list[str]]:
+    """Classify assignment risk for a single short leg.
+
+    Returns:
+        (risk_level, itm_amount, itm_pct, reasons)
+        itm_amount is positive when ITM, negative when OTM.
+    """
+    if option_type == "put":
+        itm_amount = strike - current_price   # Positive = ITM
+    else:  # call
+        itm_amount = current_price - strike   # Positive = ITM
+
+    reasons: list[str] = []
+
+    if itm_amount <= 0:
+        # OTM — no assignment risk
+        return AssignmentRisk.NONE, itm_amount, 0.0, reasons
+
+    itm_pct = itm_amount / current_price
+
+    if exercise_style == "european":
+        # European options can only be assigned at expiration (0 DTE = expiry day)
+        if dte_remaining >= 1:
+            reasons.append(
+                f"European style — {dte_remaining} DTE remaining, no early assignment possible"
+            )
+            return AssignmentRisk.NONE, itm_amount, itm_pct, reasons
+        elif itm_pct > 0.005:
+            reasons.append(
+                f"European style — expiry day, {itm_pct:.1%} ITM → assignment at expiry likely"
+            )
+            return AssignmentRisk.HIGH, itm_amount, itm_pct, reasons
+        else:
+            reasons.append(
+                f"European style — expiry day but barely ITM ({itm_pct:.2%}), time value may protect"
+            )
+            return AssignmentRisk.LOW, itm_amount, itm_pct, reasons
+
+    # American-style logic
+    # Dividend early-assignment check for ITM calls
+    if option_type == "call" and is_dividend_pending and itm_pct > 0:
+        days_note = f"ex-dividend in {ex_dividend_days}d" if ex_dividend_days is not None else "ex-dividend pending"
+        reasons.append(
+            f"ITM call + {days_note} — early assignment risk: holder may exercise to capture dividend"
+        )
+        return AssignmentRisk.HIGH, itm_amount, itm_pct, reasons
+
+    if dte_remaining <= 2 and itm_pct > 0.005:
+        reasons.append(f"{dte_remaining} DTE, {itm_pct:.1%} ITM — expect assignment tonight or at expiry")
+        return AssignmentRisk.IMMINENT, itm_amount, itm_pct, reasons
+    elif dte_remaining <= 5 and itm_pct > 0.01:
+        reasons.append(f"{dte_remaining} DTE with {itm_pct:.1%} ITM — high probability of early assignment")
+        return AssignmentRisk.HIGH, itm_amount, itm_pct, reasons
+    elif itm_pct > 0.03:
+        reasons.append(f"Deep ITM ({itm_pct:.1%}) — time value eroded, assignment likely")
+        return AssignmentRisk.HIGH, itm_amount, itm_pct, reasons
+    elif itm_pct > 0.01:
+        reasons.append(f"ITM by {itm_pct:.1%} with {dte_remaining} DTE — monitor closely")
+        return AssignmentRisk.MODERATE, itm_amount, itm_pct, reasons
+    else:
+        reasons.append(f"Slightly ITM ({itm_pct:.2%}) — time value still present, low immediate risk")
+        return AssignmentRisk.LOW, itm_amount, itm_pct, reasons
+
+
+def _build_close_leg_spec(
+    ticker: str,
+    option_type: str,
+    strike: float,
+    dte_remaining: int,
+    current_price: float,
+) -> TradeSpec:
+    """Build a BTO spec to close a short option leg."""
+    exp = date.today() + timedelta(days=dte_remaining)
+    return TradeSpec(
+        ticker=ticker,
+        legs=[LegSpec(
+            role=f"close_short_{option_type}",
+            action=LegAction.BUY_TO_CLOSE,
+            quantity=1,
+            option_type=option_type,
+            strike=strike,
+            strike_label=f"BTC {strike:.0f} {option_type.upper()}",
+            expiration=exp,
+            days_to_expiry=dte_remaining,
+            atm_iv_at_expiry=0.0,
+        )],
+        underlying_price=current_price,
+        target_dte=dte_remaining,
+        target_expiration=exp,
+        spec_rationale=(
+            f"ASSIGNMENT RISK: Close short {option_type.upper()} {strike:.0f} "
+            f"— {dte_remaining} DTE, ITM"
+        ),
+        structure_type=StructureType.CREDIT_SPREAD,
+        order_side=OrderSide.DEBIT,
+        entry_mode="limit",
+    )
+
+
+_RISK_RANK: dict[AssignmentRisk, int] = {
+    AssignmentRisk.NONE: 0,
+    AssignmentRisk.LOW: 1,
+    AssignmentRisk.MODERATE: 2,
+    AssignmentRisk.HIGH: 3,
+    AssignmentRisk.IMMINENT: 4,
+}
+
+
+def assess_assignment_risk(
+    trade_spec: TradeSpec,
+    current_price: float,
+    dte_remaining: int,
+    exercise_style: str = "american",
+    is_dividend_pending: bool = False,
+    ex_dividend_days: int | None = None,
+) -> AssignmentRiskResult:
+    """Assess probability and urgency of assignment on short options BEFORE it happens.
+
+    Scans all STO legs in the TradeSpec for assignment risk. Returns the
+    aggregate risk level and a concrete action recommendation.
+
+    American options (US): Can be assigned ANY time the option is ITM.
+    European options (India): Can only be assigned at expiration.
+
+    Key risk factors:
+    - How deep ITM is the short strike?
+    - How close to expiration?
+    - Is there a dividend approaching? (early assignment risk for calls)
+    - Exercise style (American vs European)?
+
+    Args:
+        trade_spec:          The open trade to assess.
+        current_price:       Current market price of the underlying.
+        dte_remaining:       Calendar days to expiration.
+        exercise_style:      "american" (US equity options) or "european" (SPX, India NIFTY).
+        is_dividend_pending: Whether an ex-dividend date is upcoming (call assignment risk).
+        ex_dividend_days:    Days until ex-dividend date (if is_dividend_pending=True).
+
+    Returns:
+        AssignmentRiskResult with risk level, at-risk legs, and recommended action.
+    """
+    ticker = trade_spec.ticker
+    at_risk_legs: list[dict] = []
+    all_reasons: list[str] = []
+    worst_risk = AssignmentRisk.NONE
+
+    for leg in trade_spec.legs:
+        # Only short (STO) option legs can be assigned
+        if leg.action != LegAction.SELL_TO_OPEN:
+            continue
+        if leg.option_type not in ("put", "call"):
+            continue
+
+        leg_risk, itm_amount, itm_pct, leg_reasons = _classify_leg_risk(
+            option_type=leg.option_type,
+            strike=leg.strike,
+            current_price=current_price,
+            dte_remaining=dte_remaining,
+            exercise_style=exercise_style,
+            is_dividend_pending=is_dividend_pending,
+            ex_dividend_days=ex_dividend_days,
+        )
+
+        leg_entry = {
+            "role": leg.role,
+            "option_type": leg.option_type,
+            "strike": leg.strike,
+            "itm_amount": round(itm_amount, 2),
+            "itm_pct": round(itm_pct, 4),
+            "risk_level": leg_risk,
+        }
+        at_risk_legs.append(leg_entry)
+        all_reasons.extend(leg_reasons)
+
+        if _RISK_RANK[leg_risk] > _RISK_RANK[worst_risk]:
+            worst_risk = leg_risk
+
+    # Build response trade spec if action needed (for first high/imminent leg)
+    response_spec: TradeSpec | None = None
+    highest_risk_leg: dict | None = None
+    for entry in at_risk_legs:
+        if _RISK_RANK[entry["risk_level"]] >= _RISK_RANK[AssignmentRisk.HIGH]:
+            if highest_risk_leg is None or _RISK_RANK[entry["risk_level"]] > _RISK_RANK[highest_risk_leg["risk_level"]]:
+                highest_risk_leg = entry
+
+    if highest_risk_leg is not None:
+        response_spec = _build_close_leg_spec(
+            ticker=ticker,
+            option_type=highest_risk_leg["option_type"],
+            strike=highest_risk_leg["strike"],
+            dte_remaining=dte_remaining,
+            current_price=current_price,
+        )
+
+    # Determine urgency and recommended action
+    if worst_risk == AssignmentRisk.IMMINENT:
+        urgency = "act_now"
+        recommended_action = "close_itm_leg"
+    elif worst_risk == AssignmentRisk.HIGH:
+        urgency = "prepare"
+        recommended_action = "close_itm_leg" if dte_remaining <= 5 else "roll_before_expiry"
+    elif worst_risk == AssignmentRisk.MODERATE:
+        urgency = "monitor"
+        recommended_action = "monitor"
+    else:
+        urgency = "none"
+        recommended_action = "hold"
+
+    # European note
+    european_note: str | None = None
+    if exercise_style == "european":
+        european_note = (
+            "European style — assignment only at expiry, not before. "
+            "No early assignment risk regardless of ITM amount."
+        )
+
+    if not all_reasons:
+        all_reasons.append("All short legs are OTM — no assignment risk")
+
+    return AssignmentRiskResult(
+        ticker=ticker,
+        risk_level=worst_risk,
+        at_risk_legs=at_risk_legs,
+        exercise_style=exercise_style,
+        urgency=urgency,
+        reasons=all_reasons,
+        recommended_action=recommended_action,
+        response_trade_spec=response_spec,
+        european_note=european_note,
     )

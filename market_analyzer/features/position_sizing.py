@@ -448,6 +448,182 @@ def compute_position_size(
 
 
 from market_analyzer.models.adjustment import AdjustmentEffectiveness, AdjustmentOutcome  # noqa: E402
+from market_analyzer.models.opportunity import StructureType, TradeSpec  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# Cash vs Margin analytics
+# ---------------------------------------------------------------------------
+
+
+class MarginAnalysis(BaseModel):
+    """Cash vs margin impact of entering a position."""
+
+    ticker: str
+    structure_type: str
+
+    # Cash requirements
+    cash_required: float           # Full cash cost (no margin)
+    margin_required: float         # With margin (typically 50-100% of cash for defined-risk)
+    buying_power_reduction: float  # How much BP this trade consumes
+
+    # Account impact
+    current_bp: float
+    bp_after_trade: float
+    bp_utilization_pct: float      # (NLV - bp_after) / NLV after trade
+    margin_cushion_pct: float      # bp_after / NLV — lower is closer to margin call
+
+    # What-if scenarios
+    margin_call_at_price: float | None  # Price where a margin call would occur (equity positions)
+    max_adverse_before_call: float      # How much the position can move against you before margin call
+
+    # Regime impact
+    regime_margin_multiplier: float  # R1=1.0, R2=1.3, R3=1.1, R4=1.5
+    regime_adjusted_bp: float        # BP needed in current regime (may be higher than margin_required)
+
+    summary: str
+
+
+def compute_margin_analysis(
+    trade_spec: TradeSpec,
+    account_nlv: float,
+    available_bp: float,
+    regime_id: int = 1,
+    maintenance_pct: float = 0.25,
+) -> MarginAnalysis:
+    """Analyze cash vs margin impact of entering a trade.
+
+    Computes how much buying power the trade consumes, whether the account
+    can absorb it in the current regime, and where the danger zones are
+    (e.g., margin call price for equity positions).
+
+    Args:
+        trade_spec:       The proposed trade to analyze.
+        account_nlv:      Total account Net Liquidating Value.
+        available_bp:     Current available buying power.
+        regime_id:        Market regime (1-4). Higher regimes inflate margin needs.
+        maintenance_pct:  Maintenance margin fraction for equity positions (default 25%).
+
+    Returns:
+        MarginAnalysis with full cash/margin breakdown and regime-adjusted BP.
+    """
+    structure = (
+        trade_spec.structure_type.value
+        if hasattr(trade_spec.structure_type, "value")
+        else str(trade_spec.structure_type or "unknown")
+    )
+    wing = trade_spec.wing_width_points or 5.0
+    lot_size = trade_spec.lot_size or 100
+
+    # Underlying price from the trade spec
+    underlying_price = trade_spec.underlying_price or 0.0
+
+    # Defined-risk structures: BP = wing_width * lot_size
+    defined_risk_structures = {
+        "iron_condor", "iron_butterfly", "iron_man",
+        "credit_spread", "debit_spread",
+        "calendar", "double_calendar", "diagonal",
+        "ratio_spread",
+    }
+    equity_structures = {"covered_call", "equity_long", "equity_sell", "equity_buy"}
+
+    if structure in defined_risk_structures:
+        cash_required = wing * lot_size
+        margin_required = cash_required  # Defined risk: no margin benefit; max loss is fully held
+    elif structure in equity_structures:
+        # Full equity cost; margin = 25% of position value
+        if underlying_price > 0:
+            cash_required = underlying_price * lot_size
+            margin_required = cash_required * maintenance_pct
+        else:
+            cash_required = wing * lot_size
+            margin_required = cash_required
+    elif structure in ("straddle", "strangle", "long_option"):
+        # Debit strategies: pay premium (approximate as wing * lot_size / 4)
+        cash_required = wing * lot_size
+        margin_required = cash_required  # Debit paid in full
+    elif structure == "pmcc":
+        # PMCC: long LEAP cost (approximately 20-30 delta); use underlying * 0.30 as estimate
+        if underlying_price > 0:
+            cash_required = underlying_price * lot_size * 0.30
+            margin_required = cash_required
+        else:
+            cash_required = wing * lot_size
+            margin_required = cash_required
+    else:
+        cash_required = wing * lot_size
+        margin_required = cash_required
+
+    # Regime-adjusted BP
+    regime_est = compute_regime_adjusted_bp(wing, regime_id, lot_size)
+    regime_adjusted_bp = regime_est.adjusted_bp_per_contract
+    regime_multiplier = regime_est.regime_multiplier
+
+    # Use the higher of margin_required and regime_adjusted_bp as actual BP reduction
+    buying_power_reduction = max(margin_required, regime_adjusted_bp)
+
+    bp_after = available_bp - buying_power_reduction
+    bp_util = ((account_nlv - bp_after) / account_nlv) if account_nlv > 0 else 1.0
+    bp_util = max(0.0, min(1.0, bp_util))
+    margin_cushion = bp_after / account_nlv if account_nlv > 0 else 0.0
+
+    # Margin call price (for equity positions only)
+    margin_call_at_price: float | None = None
+    max_adverse: float = 0.0
+    if structure in equity_structures and underlying_price > 0 and lot_size > 0:
+        # Margin call when remaining equity < maintenance_pct * position_value
+        # equity = NLV - (underlying_price - current_price) * shares
+        # Margin call when equity = maintenance_pct * current_price * shares
+        # NLV - (underlying_price - P) * lot_size = maintenance_pct * P * lot_size
+        # Solve for P: NLV - underlying_price*lot_size + P*lot_size = maintenance_pct * P * lot_size
+        # NLV - underlying_price*lot_size = (maintenance_pct - 1) * P * lot_size
+        # P = (NLV - underlying_price * lot_size) / ((maintenance_pct - 1) * lot_size)
+        denom = (maintenance_pct - 1.0) * lot_size
+        if denom != 0:
+            margin_call_at_price = round(
+                (account_nlv - underlying_price * lot_size) / denom, 2
+            )
+            if margin_call_at_price is not None and margin_call_at_price > 0:
+                max_adverse = underlying_price - margin_call_at_price
+            else:
+                margin_call_at_price = None
+                max_adverse = 0.0
+
+    # Summary
+    bp_fits = buying_power_reduction <= available_bp
+    regime_label = f"R{regime_id} (×{regime_multiplier:.1f})"
+    if structure in equity_structures:
+        summary = (
+            f"{trade_spec.ticker} {structure}: cash ${cash_required:,.0f}, "
+            f"margin ${margin_required:,.0f} ({maintenance_pct:.0%} of position). "
+            f"{regime_label} BP needed ${buying_power_reduction:,.0f}. "
+            f"{'FITS' if bp_fits else 'EXCEEDS AVAILABLE BP'}."
+        )
+    else:
+        summary = (
+            f"{trade_spec.ticker} {structure}: defined-risk ${cash_required:,.0f}. "
+            f"{regime_label} BP needed ${buying_power_reduction:,.0f} / "
+            f"${available_bp:,.0f} available. "
+            f"Cushion: {margin_cushion:.1%}. "
+            f"{'FITS' if bp_fits else 'INSUFFICIENT BP'}."
+        )
+
+    return MarginAnalysis(
+        ticker=trade_spec.ticker,
+        structure_type=structure,
+        cash_required=round(cash_required, 2),
+        margin_required=round(margin_required, 2),
+        buying_power_reduction=round(buying_power_reduction, 2),
+        current_bp=round(available_bp, 2),
+        bp_after_trade=round(bp_after, 2),
+        bp_utilization_pct=round(bp_util, 4),
+        margin_cushion_pct=round(margin_cushion, 4),
+        margin_call_at_price=margin_call_at_price,
+        max_adverse_before_call=round(max_adverse, 2),
+        regime_margin_multiplier=regime_multiplier,
+        regime_adjusted_bp=round(regime_adjusted_bp, 2),
+        summary=summary,
+    )
 
 
 def analyze_adjustment_effectiveness(

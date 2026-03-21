@@ -15,6 +15,35 @@ class AssignmentType(StrEnum):
     LONG_EXERCISED = "long_exercised"  # You chose to exercise your long option
 
 
+# ---------------------------------------------------------------------------
+# Assignment RISK models (BEFORE assignment — early warning)
+# ---------------------------------------------------------------------------
+
+
+class AssignmentRisk(StrEnum):
+    NONE = "none"           # Short options are OTM
+    LOW = "low"             # Slightly ITM but time value protects
+    MODERATE = "moderate"   # ITM, approaching expiry or dividend
+    HIGH = "high"           # Deep ITM, near expiry, likely assigned
+    IMMINENT = "imminent"   # <2 DTE, ITM, expect assignment tonight
+
+
+class AssignmentRiskResult(BaseModel):
+    """Result of assessing assignment risk on active short options — BEFORE assignment happens."""
+
+    ticker: str
+    risk_level: AssignmentRisk
+    at_risk_legs: list[dict]    # [{role, strike, itm_amount, itm_pct, risk_level}]
+    exercise_style: str         # "american" or "european"
+    urgency: str                # "none", "monitor", "prepare", "act_now"
+    reasons: list[str]
+    recommended_action: str     # "hold", "roll_before_expiry", "close_itm_leg", "prepare_for_assignment"
+    response_trade_spec: TradeSpec | None = None  # Roll or close spec if action needed
+
+    # India-specific
+    european_note: str | None = None  # "European style — assignment only at expiry, not before"
+
+
 class AssignmentAction(StrEnum):
     SELL_IMMEDIATELY = "sell_immediately"       # Sell assigned shares ASAP
     HOLD_AND_WHEEL = "hold_and_wheel"           # Keep shares, sell covered call

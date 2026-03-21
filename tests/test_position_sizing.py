@@ -526,3 +526,177 @@ class TestAdjustmentEffectiveness:
         d = result.model_dump()
         assert "by_type" in d
         assert "recommendations" in d
+
+
+# ---------------------------------------------------------------------------
+# MarginAnalysis tests
+# ---------------------------------------------------------------------------
+
+from datetime import date, timedelta
+
+from market_analyzer.features.position_sizing import MarginAnalysis, compute_margin_analysis
+from market_analyzer.models.opportunity import LegAction, LegSpec, OrderSide, StructureType, TradeSpec
+
+
+def _make_ic_trade_spec(
+    ticker: str = "SPY",
+    short_put: float = 570.0,
+    short_call: float = 590.0,
+    wing: float = 5.0,
+    price: float = 580.0,
+    dte: int = 30,
+) -> TradeSpec:
+    exp = date.today() + timedelta(days=dte)
+    legs = [
+        LegSpec(role="short_put", action=LegAction.SELL_TO_OPEN, option_type="put",
+                strike=short_put, strike_label=f"STO {short_put:.0f}P",
+                expiration=exp, days_to_expiry=dte, atm_iv_at_expiry=0.0),
+        LegSpec(role="long_put", action=LegAction.BUY_TO_OPEN, option_type="put",
+                strike=short_put - wing, strike_label=f"BTO {short_put - wing:.0f}P",
+                expiration=exp, days_to_expiry=dte, atm_iv_at_expiry=0.0),
+        LegSpec(role="short_call", action=LegAction.SELL_TO_OPEN, option_type="call",
+                strike=short_call, strike_label=f"STO {short_call:.0f}C",
+                expiration=exp, days_to_expiry=dte, atm_iv_at_expiry=0.0),
+        LegSpec(role="long_call", action=LegAction.BUY_TO_OPEN, option_type="call",
+                strike=short_call + wing, strike_label=f"BTO {short_call + wing:.0f}C",
+                expiration=exp, days_to_expiry=dte, atm_iv_at_expiry=0.0),
+    ]
+    return TradeSpec(
+        ticker=ticker,
+        legs=legs,
+        underlying_price=price,
+        target_dte=dte,
+        target_expiration=exp,
+        wing_width_points=wing,
+        structure_type=StructureType.IRON_CONDOR,
+        order_side=OrderSide.CREDIT,
+        spec_rationale="Test IC",
+    )
+
+
+def _make_equity_spec(
+    ticker: str = "AAPL",
+    price: float = 200.0,
+    lot_size: int = 100,
+) -> TradeSpec:
+    exp = date.today() + timedelta(days=1)
+    return TradeSpec(
+        ticker=ticker,
+        legs=[LegSpec(role="equity_buy", action=LegAction.BUY_TO_OPEN, option_type="equity",
+                      strike=0, strike_label="Buy shares", expiration=exp, days_to_expiry=1,
+                      atm_iv_at_expiry=0.0)],
+        underlying_price=price,
+        target_dte=1,
+        target_expiration=exp,
+        structure_type=StructureType.EQUITY_LONG,
+        order_side=OrderSide.DEBIT,
+        lot_size=lot_size,
+        spec_rationale="Test equity",
+    )
+
+
+class TestMarginAnalysis:
+    def test_defined_risk_ic_cash_equals_wing_times_lot(self):
+        """5-wide IC: cash_required = 5 * 100 = $500."""
+        ts = _make_ic_trade_spec(wing=5.0)
+        result = compute_margin_analysis(ts, account_nlv=50000, available_bp=30000, regime_id=1)
+        assert result.cash_required == pytest.approx(500.0, abs=0.01)
+
+    def test_defined_risk_ic_margin_equals_cash(self):
+        """5-wide IC: margin_required == cash_required (defined risk, no margin benefit)."""
+        ts = _make_ic_trade_spec(wing=5.0)
+        result = compute_margin_analysis(ts, account_nlv=50000, available_bp=30000, regime_id=1)
+        assert result.margin_required == pytest.approx(result.cash_required, abs=0.01)
+
+    def test_ic_bp_after_trade_reduces_by_bp_reduction(self):
+        """bp_after_trade = available_bp - buying_power_reduction."""
+        ts = _make_ic_trade_spec(wing=5.0)
+        avail = 30000.0
+        result = compute_margin_analysis(ts, account_nlv=50000, available_bp=avail, regime_id=1)
+        assert result.bp_after_trade == pytest.approx(
+            avail - result.buying_power_reduction, abs=0.01,
+        )
+
+    def test_regime_2_multiplier_is_1_3(self):
+        """R2 regime: margin multiplier should be 1.3."""
+        ts = _make_ic_trade_spec(wing=5.0)
+        result = compute_margin_analysis(ts, account_nlv=50000, available_bp=30000, regime_id=2)
+        assert result.regime_margin_multiplier == pytest.approx(1.3, abs=0.01)
+
+    def test_regime_4_multiplier_is_1_5(self):
+        """R4 regime: margin multiplier should be 1.5."""
+        ts = _make_ic_trade_spec(wing=5.0)
+        result = compute_margin_analysis(ts, account_nlv=50000, available_bp=30000, regime_id=4)
+        assert result.regime_margin_multiplier == pytest.approx(1.5, abs=0.01)
+
+    def test_regime_2_higher_bp_than_regime_1(self):
+        """R2 BP needed > R1 BP needed."""
+        ts = _make_ic_trade_spec(wing=5.0)
+        r1 = compute_margin_analysis(ts, account_nlv=50000, available_bp=30000, regime_id=1)
+        r2 = compute_margin_analysis(ts, account_nlv=50000, available_bp=30000, regime_id=2)
+        assert r2.buying_power_reduction >= r1.buying_power_reduction
+
+    def test_r4_higher_bp_than_r1(self):
+        """R4 BP needed > R1 BP needed."""
+        ts = _make_ic_trade_spec(wing=5.0)
+        r1 = compute_margin_analysis(ts, account_nlv=50000, available_bp=30000, regime_id=1)
+        r4 = compute_margin_analysis(ts, account_nlv=50000, available_bp=30000, regime_id=4)
+        assert r4.buying_power_reduction >= r1.buying_power_reduction
+
+    def test_equity_cash_required_is_full_cost(self):
+        """100 shares at $200: cash_required = $20,000."""
+        ts = _make_equity_spec(price=200.0, lot_size=100)
+        result = compute_margin_analysis(ts, account_nlv=50000, available_bp=30000, regime_id=1)
+        assert result.cash_required == pytest.approx(20000.0, abs=1.0)
+
+    def test_equity_margin_benefit(self):
+        """100 shares at $200: margin_required = 25% of $20,000 = $5,000."""
+        ts = _make_equity_spec(price=200.0, lot_size=100)
+        result = compute_margin_analysis(ts, account_nlv=50000, available_bp=30000,
+                                         regime_id=1, maintenance_pct=0.25)
+        assert result.margin_required == pytest.approx(5000.0, abs=1.0)
+
+    def test_equity_margin_less_than_cash(self):
+        """Equity: margin_required < cash_required."""
+        ts = _make_equity_spec(price=200.0, lot_size=100)
+        result = compute_margin_analysis(ts, account_nlv=50000, available_bp=30000, regime_id=1)
+        assert result.margin_required < result.cash_required
+
+    def test_margin_cushion_between_0_and_1(self):
+        """margin_cushion_pct should be in [0, 1]."""
+        ts = _make_ic_trade_spec(wing=5.0)
+        result = compute_margin_analysis(ts, account_nlv=50000, available_bp=30000, regime_id=1)
+        assert 0.0 <= result.margin_cushion_pct <= 1.0
+
+    def test_bp_utilization_between_0_and_1(self):
+        """bp_utilization_pct should be in [0, 1]."""
+        ts = _make_ic_trade_spec(wing=5.0)
+        result = compute_margin_analysis(ts, account_nlv=50000, available_bp=30000, regime_id=1)
+        assert 0.0 <= result.bp_utilization_pct <= 1.0
+
+    def test_ticker_in_result(self):
+        """Result ticker should match trade_spec ticker."""
+        ts = _make_ic_trade_spec(ticker="GLD")
+        result = compute_margin_analysis(ts, account_nlv=50000, available_bp=30000, regime_id=1)
+        assert result.ticker == "GLD"
+
+    def test_summary_is_string(self):
+        """Summary should be a non-empty string."""
+        ts = _make_ic_trade_spec(wing=5.0)
+        result = compute_margin_analysis(ts, account_nlv=50000, available_bp=30000, regime_id=1)
+        assert isinstance(result.summary, str)
+        assert len(result.summary) > 0
+
+    def test_regime_adjusted_bp_field(self):
+        """regime_adjusted_bp should be present and positive."""
+        ts = _make_ic_trade_spec(wing=5.0)
+        result = compute_margin_analysis(ts, account_nlv=50000, available_bp=30000, regime_id=2)
+        assert result.regime_adjusted_bp > 0
+
+    def test_wider_wing_higher_bp(self):
+        """10-wide IC requires more BP than 5-wide."""
+        ts5 = _make_ic_trade_spec(wing=5.0)
+        ts10 = _make_ic_trade_spec(wing=10.0)
+        r5 = compute_margin_analysis(ts5, account_nlv=50000, available_bp=30000, regime_id=1)
+        r10 = compute_margin_analysis(ts10, account_nlv=50000, available_bp=30000, regime_id=1)
+        assert r10.buying_power_reduction > r5.buying_power_reduction

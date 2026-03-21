@@ -5665,6 +5665,366 @@ Requires --broker connection."""
         except Exception as exc:
             print(f"{_styled('ERROR:', 'red')} {exc}")
 
+    def do_assignment_risk(self, arg: str) -> None:
+        """Assess assignment risk on short options BEFORE assignment happens.
+\nUsage: assignment_risk TICKER [DTE] [american|european]
+  Example: assignment_risk SPY 5 american
+  Builds a representative IC and shows which legs are at risk."""
+        parts = arg.strip().split()
+        if not parts:
+            print("Usage: assignment_risk TICKER [DTE] [american|european]")
+            return
+        ticker = parts[0].upper()
+        dte_remaining = int(parts[1]) if len(parts) > 1 else 7
+        exercise_style = parts[2].lower() if len(parts) > 2 else "american"
+
+        try:
+            from market_analyzer.features.assignment_handler import assess_assignment_risk
+            from market_analyzer.models.assignment import AssignmentRisk
+            from market_analyzer.models.opportunity import LegAction, LegSpec, OrderSide, StructureType, TradeSpec
+            from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
+                build_iron_condor_legs, find_best_expiration, compute_otm_strike, snap_strike,
+            )
+            from datetime import timedelta
+
+            ma = self._get_ma()
+            tech = ma.technicals.snapshot(ticker)
+            regime = ma.regime.detect(ticker)
+            price = tech.current_price
+            atr = tech.atr
+
+            # Build a representative IC using ATR-based strikes (as if currently open)
+            vol_surface = None
+            try:
+                vol_surface = ma.vol_surface.get(ticker)
+            except Exception:
+                pass
+
+            exp_pt = None
+            if vol_surface and vol_surface.term_structure:
+                exp_pt = find_best_expiration(vol_surface.term_structure, 20, 45)
+
+            if exp_pt:
+                legs, wing_width = build_iron_condor_legs(
+                    price, atr, regime.regime, exp_pt.expiration,
+                    exp_pt.days_to_expiry, exp_pt.atm_iv,
+                )
+                trade = TradeSpec(
+                    ticker=ticker, legs=legs, underlying_price=price,
+                    target_dte=exp_pt.days_to_expiry, target_expiration=exp_pt.expiration,
+                    wing_width_points=wing_width,
+                    spec_rationale="IC for assignment risk analysis",
+                    structure_type=StructureType.IRON_CONDOR,
+                    order_side=OrderSide.CREDIT,
+                )
+            else:
+                dte = 30
+                exp = date.today() + timedelta(days=dte)
+                short_put = compute_otm_strike(price, atr, 1.0, "put", price)
+                short_call = compute_otm_strike(price, atr, 1.0, "call", price)
+                long_put = snap_strike(short_put - atr * 0.5, price)
+                long_call = snap_strike(short_call + atr * 0.5, price)
+                ww = short_put - long_put
+
+                def _leg(role, action, otype, strike):
+                    return LegSpec(
+                        role=role, action=action, option_type=otype, strike=strike,
+                        strike_label=f"{strike:.0f} {otype}",
+                        expiration=exp, days_to_expiry=dte, atm_iv_at_expiry=0.25,
+                    )
+
+                trade = TradeSpec(
+                    ticker=ticker,
+                    legs=[
+                        _leg("short_put", LegAction.SELL_TO_OPEN, "put", short_put),
+                        _leg("long_put", LegAction.BUY_TO_OPEN, "put", long_put),
+                        _leg("short_call", LegAction.SELL_TO_OPEN, "call", short_call),
+                        _leg("long_call", LegAction.BUY_TO_OPEN, "call", long_call),
+                    ],
+                    underlying_price=price, target_dte=dte, target_expiration=exp,
+                    wing_width_points=ww,
+                    spec_rationale="Synthetic IC for assignment risk analysis",
+                    structure_type=StructureType.IRON_CONDOR,
+                    order_side=OrderSide.CREDIT,
+                )
+
+            result = assess_assignment_risk(
+                trade, current_price=price, dte_remaining=dte_remaining,
+                exercise_style=exercise_style,
+            )
+
+            _print_header(f"{ticker} — Assignment Risk ({dte_remaining} DTE, {exercise_style.capitalize()})")
+
+            # Risk level with color
+            risk_color = {
+                "none": "green", "low": "green", "moderate": "yellow",
+                "high": "red", "imminent": "red",
+            }.get(result.risk_level.value, "")
+            urgency_color = {
+                "none": "dim", "monitor": "yellow", "prepare": "yellow", "act_now": "red",
+            }.get(result.urgency, "")
+
+            print(f"\n  Price: ${price:.2f}  |  ATR: ${atr:.2f}  |  Regime: R{regime.regime}")
+            print(f"\n  Risk Level: {_styled(result.risk_level.value.upper(), risk_color)}"
+                  f"  |  Urgency: {_styled(result.urgency.upper(), urgency_color)}")
+            print(f"  Action: {_styled(result.recommended_action, 'bold')}")
+
+            if result.european_note:
+                print(f"\n  {_styled(result.european_note, 'dim')}")
+
+            # Per-leg breakdown
+            print(f"\n  {'Leg':<20} {'Strike':>8} {'ITM Amt':>10} {'ITM%':>8} {'Risk':<10}")
+            print(f"  {'-'*20} {'-'*8} {'-'*10} {'-'*8} {'-'*10}")
+            for leg in result.at_risk_legs:
+                leg_risk_color = {
+                    "none": "dim", "low": "green", "moderate": "yellow",
+                    "high": "red", "imminent": "red",
+                }.get(str(leg["risk_level"]), "")
+                itm_str = f"${leg['itm_amount']:+.2f}" if leg["itm_amount"] != 0 else "OTM"
+                itm_pct_str = f"{leg['itm_pct']:.2%}" if leg["itm_pct"] > 0 else "OTM"
+                print(
+                    f"  {leg['role']:<20} {leg['strike']:>8.0f} {itm_str:>10}"
+                    f" {itm_pct_str:>8}"
+                    f" {_styled(str(leg['risk_level']).upper(), leg_risk_color):<10}"
+                )
+
+            # Reasons
+            print(f"\n  {_styled('Risk Factors:', 'bold')}")
+            for reason in result.reasons:
+                print(f"    • {reason}")
+
+            # Response trade spec if needed
+            if result.response_trade_spec:
+                spec = result.response_trade_spec
+                print(f"\n  {_styled('Recommended Action Spec:', 'bold')}")
+                for leg in spec.legs:
+                    print(f"    {leg.action.value.upper()} {leg.quantity}x {leg.strike:.0f} {leg.option_type.upper()}")
+                print(f"    Rationale: {spec.spec_rationale}")
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+
+    def do_margin(self, arg: str) -> None:
+        """Show cash vs margin analysis for a hypothetical IC trade.
+\nUsage: margin TICKER [NLV] [AVAILABLE_BP] [REGIME]
+  Example: margin SPY 200000 100000 2"""
+        parts = arg.strip().split()
+        if not parts:
+            print("Usage: margin TICKER [NLV] [AVAILABLE_BP] [REGIME]")
+            return
+        ticker = parts[0].upper()
+        account_nlv = float(parts[1]) if len(parts) > 1 else 200000.0
+        available_bp = float(parts[2]) if len(parts) > 2 else account_nlv * 0.5
+        regime_id = int(parts[3]) if len(parts) > 3 else 1
+
+        try:
+            from market_analyzer.features.position_sizing import compute_margin_analysis
+            from market_analyzer.models.opportunity import LegAction, LegSpec, OrderSide, StructureType, TradeSpec
+            from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
+                build_iron_condor_legs, find_best_expiration, compute_otm_strike, snap_strike,
+            )
+            from datetime import timedelta
+
+            ma = self._get_ma()
+            tech = ma.technicals.snapshot(ticker)
+            price = tech.current_price
+            atr = tech.atr
+
+            # Build a representative IC
+            vol_surface = None
+            try:
+                vol_surface = ma.vol_surface.get(ticker)
+            except Exception:
+                pass
+
+            exp_pt = None
+            if vol_surface and vol_surface.term_structure:
+                exp_pt = find_best_expiration(vol_surface.term_structure, 30, 45)
+
+            if exp_pt:
+                legs, wing_width = build_iron_condor_legs(
+                    price, atr, regime_id, exp_pt.expiration,
+                    exp_pt.days_to_expiry, exp_pt.atm_iv,
+                )
+                trade = TradeSpec(
+                    ticker=ticker, legs=legs, underlying_price=price,
+                    target_dte=exp_pt.days_to_expiry, target_expiration=exp_pt.expiration,
+                    wing_width_points=wing_width,
+                    spec_rationale="IC for margin analysis",
+                    structure_type=StructureType.IRON_CONDOR,
+                    order_side=OrderSide.CREDIT,
+                )
+            else:
+                dte = 30
+                exp = date.today() + timedelta(days=dte)
+                short_put = compute_otm_strike(price, atr, 1.0, "put", price)
+                short_call = compute_otm_strike(price, atr, 1.0, "call", price)
+                long_put = snap_strike(short_put - atr * 0.5, price)
+                long_call = snap_strike(short_call + atr * 0.5, price)
+                ww = short_put - long_put
+
+                def _leg(role, action, otype, strike):
+                    return LegSpec(
+                        role=role, action=action, option_type=otype, strike=strike,
+                        strike_label=f"{strike:.0f} {otype}",
+                        expiration=exp, days_to_expiry=dte, atm_iv_at_expiry=0.25,
+                    )
+
+                trade = TradeSpec(
+                    ticker=ticker,
+                    legs=[
+                        _leg("short_put", LegAction.SELL_TO_OPEN, "put", short_put),
+                        _leg("long_put", LegAction.BUY_TO_OPEN, "put", long_put),
+                        _leg("short_call", LegAction.SELL_TO_OPEN, "call", short_call),
+                        _leg("long_call", LegAction.BUY_TO_OPEN, "call", long_call),
+                    ],
+                    underlying_price=price, target_dte=dte, target_expiration=exp,
+                    wing_width_points=ww,
+                    spec_rationale="Synthetic IC for margin analysis",
+                    structure_type=StructureType.IRON_CONDOR,
+                    order_side=OrderSide.CREDIT,
+                )
+
+            result = compute_margin_analysis(
+                trade, account_nlv=account_nlv, available_bp=available_bp,
+                regime_id=regime_id,
+            )
+
+            _print_header(f"{ticker} — Cash vs Margin Analysis (R{regime_id})")
+
+            print(f"\n  Underlying Price:   ${price:,.2f}")
+            print(f"  Structure:         {result.structure_type}  |  Wing: ${trade.wing_width_points or 0:.0f}")
+            print()
+            print(f"  Account NLV:       ${account_nlv:,.0f}")
+            print(f"  Available BP:      ${available_bp:,.0f}")
+            print()
+            print(f"  Cash Required:     ${result.cash_required:,.0f}  (full defined-risk)")
+            print(f"  Margin Required:   ${result.margin_required:,.0f}  (broker minimum)")
+            print(f"  BP Consumed:       ${result.buying_power_reduction:,.0f}  "
+                  f"(regime R{regime_id} x{result.regime_margin_multiplier:.1f})")
+            print()
+            bp_fits = result.buying_power_reduction <= available_bp
+            bp_style = "green" if bp_fits else "red"
+            print(f"  BP After Trade:    {_styled(f'${result.bp_after_trade:,.0f}', bp_style)}")
+            print(f"  BP Utilization:    {result.bp_utilization_pct:.1%}")
+            margin_style = "green" if result.margin_cushion_pct > 0.2 else "yellow" if result.margin_cushion_pct > 0.1 else "red"
+            print(f"  Margin Cushion:    {_styled(f'{result.margin_cushion_pct:.1%}', margin_style)}  "
+                  f"(lower = closer to margin call)")
+            print()
+            regime_fit = result.regime_adjusted_bp <= available_bp
+            regime_style = "green" if regime_fit else "red"
+            print(f"  Regime-Adj BP:     {_styled(f'${result.regime_adjusted_bp:,.0f}', regime_style)}  "
+                  f"({'FITS' if regime_fit else 'EXCEEDS AVAILABLE BP'})")
+
+            if result.margin_call_at_price is not None:
+                print(f"\n  Margin Call At:    ${result.margin_call_at_price:,.2f}  "
+                      f"(${result.max_adverse_before_call:,.2f} adverse move)")
+
+            print(f"\n  {_styled(result.summary, 'dim')}")
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+
+    def do_rate_risk(self, arg: str) -> None:
+        """Assess interest rate risk for one or more tickers.
+\nUsage: rate_risk TICKER [TICKER2 ...] [--bps 25] [--regime 2]
+  Example: rate_risk TLT SPY XLU --bps 20 --regime 2"""
+        import shlex
+        try:
+            tokens = shlex.split(arg.strip()) if arg.strip() else []
+        except ValueError:
+            tokens = arg.strip().split()
+
+        tickers = []
+        yield_change_bps = 0.0
+        regime_id = 1
+        i = 0
+        while i < len(tokens):
+            if tokens[i] == "--bps" and i + 1 < len(tokens):
+                try:
+                    yield_change_bps = float(tokens[i + 1])
+                    i += 2
+                except ValueError:
+                    i += 1
+            elif tokens[i] == "--regime" and i + 1 < len(tokens):
+                try:
+                    regime_id = int(tokens[i + 1])
+                    i += 2
+                except ValueError:
+                    i += 1
+            else:
+                tickers.append(tokens[i].upper())
+                i += 1
+
+        if not tickers:
+            print("Usage: rate_risk TICKER [TICKER2 ...] [--bps YIELD_CHANGE] [--regime 1-4]")
+            print("  TICKER: ticker symbol(s) to assess (e.g. TLT SPY XLU)")
+            print("  --bps:  recent 10Y yield change in basis points (+ve = rising)")
+            print("  --regime: market regime 1-4 (default 1)")
+            return
+
+        try:
+            from market_analyzer.features.rate_risk import assess_rate_risk, assess_portfolio_rate_risk, RateRiskLevel
+
+            if len(tickers) == 1:
+                # Single ticker — detailed view
+                result = assess_rate_risk(
+                    tickers[0], current_yield_change_bps=yield_change_bps, regime_id=regime_id,
+                )
+                _print_header(f"{tickers[0]} — Interest Rate Risk Assessment")
+
+                risk_color = {
+                    "low": "green", "moderate": "yellow", "elevated": "yellow", "high": "red",
+                }.get(result.rate_risk_level.value, "")
+
+                print(f"\n  Sensitivity:     {result.rate_sensitivity.upper()}")
+                print(f"  Duration:        {result.estimated_duration:.1f} years")
+                print(f"  Yield Corr:      {result.yield_correlation:+.2f} (vs 10Y TNX)")
+                print(f"  Yield Trend:     {result.current_yield_trend}  "
+                      f"({yield_change_bps:+.0f}bp recent change)")
+                print(f"\n  Risk Level:      {_styled(result.rate_risk_level.value.upper(), risk_color)}")
+                print(f"  Impact / 25bp:   {result.impact_per_25bp:+.2%}")
+                print(f"  Impact / 100bp:  {result.impact_per_100bp:+.2%}")
+                print(f"\n  {_styled('Reasons:', 'bold')}")
+                for r in result.reasons:
+                    print(f"    • {r}")
+                rec_style = "red" if result.recommendation == "avoid_long_duration" else "yellow" if result.recommendation == "reduce_exposure" else "green"
+                print(f"\n  Recommendation:  {_styled(result.recommendation.replace('_', ' ').upper(), rec_style)}")
+
+            else:
+                # Portfolio view
+                port = assess_portfolio_rate_risk(
+                    tickers, current_yield_change_bps=yield_change_bps, regime_id=regime_id,
+                )
+                _print_header(f"Portfolio Rate Risk — {', '.join(tickers)}")
+
+                print(f"\n  Yield Change:          {yield_change_bps:+.0f}bp  |  Regime: R{regime_id}")
+                print(f"  Portfolio Sensitivity: {port.portfolio_rate_sensitivity.upper()}")
+                print(f"  Portfolio Duration:    {port.portfolio_duration:.1f} years")
+                print(f"  Impact / 100bp:        {port.estimated_portfolio_impact_100bp:+.2%}")
+
+                if port.high_risk_tickers:
+                    print(f"\n  {_styled('HIGH RISK tickers:', 'red')} {', '.join(port.high_risk_tickers)}")
+
+                print(f"\n  {'Ticker':<8} {'Sensitivity':<12} {'Duration':>10} {'Corr':>8} {'Impact/100bp':>14} {'Risk':<12}")
+                print(f"  {'-'*8} {'-'*12} {'-'*10} {'-'*8} {'-'*14} {'-'*12}")
+                for r in port.ticker_risks:
+                    risk_color = {
+                        "low": "green", "moderate": "yellow", "elevated": "yellow", "high": "red",
+                    }.get(r.rate_risk_level.value, "")
+                    print(
+                        f"  {r.ticker:<8} {r.rate_sensitivity:<12} {r.estimated_duration:>10.1f}"
+                        f" {r.yield_correlation:>+8.2f} {r.impact_per_100bp:>+14.2%}"
+                        f" {_styled(r.rate_risk_level.value, risk_color):<12}"
+                    )
+
+                rec_style = "red" if "reduce" in port.recommendation or "avoid" in port.recommendation else "green"
+                print(f"\n  Recommendation:  {_styled(port.recommendation.replace('_', ' ').upper(), rec_style)}")
+                print(f"\n  {_styled(port.summary, 'dim')}")
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+
     def do_quit(self, arg: str) -> bool:
         """Exit the REPL."""
         print("Goodbye.")
