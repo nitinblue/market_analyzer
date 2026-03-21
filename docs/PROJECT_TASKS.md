@@ -2,11 +2,28 @@
 
 > Single source of truth for what's being worked on and what comes next.
 > Update this file as tasks are completed or added.
-> Last updated: 2026-03-20
+> Last updated: 2026-03-21
 
 ---
 
 ## Recently Completed
+
+### March 2026 — OSS Infrastructure + Desk Management + Demo Portfolio + 6 Brokers (2026-03-21)
+
+- **Open source infrastructure** — README, CONTRIBUTING, CI (GitHub Actions), issue templates, SECURITY, CODE_OF_CONDUCT
+- **Desk management / capital allocation** — 6 APIs: `recommend_desk_structure`, `suggest_desk_for_trade`, `compute_desk_risk_limits`, `compute_instrument_risk`, `evaluate_desk_health`, `rebalance_desks`; asset class → risk type → desks hierarchy
+- **Demo portfolio system** — `--demo` CLI flag, `portfolio/trade/close_trade` commands; full stack simulation without broker
+- **CSP/wheel workflow** — covered call analysis, full wheel state machine, `assess_covered_call()`
+- **Assignment risk warning** — US American vs India European; `check_assignment_risk()`, `TradeSpec.assignment_style`
+- **Cash vs margin analytics** — `compute_margin_efficiency()`, structure-based margin buffers, interest rate risk APIs
+- **Alpaca, IBKR, Schwab broker integrations** — 6 total supported brokers (tastytrade, zerodha, dhan, alpaca, ibkr, schwab)
+- **Dhan full implementation** — was stub, now complete
+- **Setup wizard** — `--setup` flag for first-time onboarding
+- **BYOD adapters** — CSV, dict, IBKR/Schwab skeletons in `broker/adapters/`
+- **Data trust 2-dimensional** — calculation modes + fitness-for-purpose (wired into transparency models)
+- **Monitoring action with closing TradeSpec** — `monitor_exit_conditions()` returns closing legs
+- **Position stress monitoring** — `service/stress_monitoring.py`, 13 scenarios, urgency escalation
+- **USER_MANUAL full rewrite** — all 80+ CLI commands documented
 
 ### March 2026 — Trading Intelligence Reform + Decision Audit + Crash Sentinel (2026-03-20)
 
@@ -96,24 +113,15 @@
 
 ## In Progress
 
-None. All known gaps are DONE per SYSTEMATIC_GAPS.md (1715 tests passing as of 2026-03-20).
+None. All known gaps are DONE per SYSTEMATIC_GAPS.md (2266 tests passing as of 2026-03-21).
 
 ---
 
 ## Next Up (Prioritized Backlog)
 
-### P1 — Independent Trader Review: MA Library Gaps
-
-From the March 20 review — items not yet implemented:
-
-| # | Task | Why |
-|---|------|-----|
-| P1-IT-1 | Portfolio-level daily report command — one command shows all open positions with health, exit conditions, and overnight risk | Currently requires multiple commands; traders need a single "morning check" command |
-| P1-IT-2 | Intraday re-evaluation — re-check blocked trades at 2 PM (trades gated at open due to IV/regime may unlock intraday) | Income opportunities are missed when early-morning blocks are never revisited |
-| P1-IT-3 | Alternative structure suggestion — if IC assessment returns `score < 0.5`, automatically suggest next-best structure (calendar, credit spread) | Currently returns low score with no actionable alternative |
-| P1-IT-4 | Credit estimation confidence interval — current `entry_credit` is a point estimate; need `(low, mid, high)` from bid-ask spread range | Gives trader realistic range for limit order pricing |
-
 ### P2 — Nice to Have (Library Quality)
+
+Most P1 items from the March 20 review were completed on March 21. Remaining backlog:
 
 | # | Task | Why |
 |---|------|-----|
@@ -121,7 +129,10 @@ From the March 20 review — items not yet implemented:
 | P2-2 | Richer LEAP/earnings assessors — earnings growth rate for LEAP scoring, vol crush magnitude history | leap/earnings assessors are thin; need deeper fundamental integration |
 | P2-3 | ML regime validation — track regime predictions vs actual price behavior; auto-retrain HMM | Track whether R2 actually mean-reverted, R3 actually trended |
 | P2-4 | POP calibration from actual outcomes — `calibrate_pop_factors(outcomes)` exists; requires eTrading to send closed trade outcomes | The live feedback loop is not running |
-| P2-5 | Stock screener OHLCV period mismatch — eTrading calls `get_ohlcv(ticker, period='1y')` but MA expects `days=` param. Dividend yield double-division (yfinance ratio × 100 again). | eTrading must fix: use `days=365` and remove dividend yield multiplication |
+| P2-5 | Documentation site — ReadTheDocs or GitHub Pages from existing doc files | OSS infrastructure is in place; auto-generated API docs would reduce onboarding friction |
+| P2-6 | More broker integrations — Webull, E*Trade, Robinhood (low priority; existing 6 cover most user cases) | Community request; patterns established with BYOD adapters |
+| P2-7 | Full IBKR TWS wiring — skeleton exists; full TWS API integration | IBKR is the preferred broker for institutional users |
+| P2-8 | Stock screener OHLCV period mismatch — eTrading calls `get_ohlcv(ticker, period='1y')` but MA expects `days=` param. Dividend yield double-division (yfinance ratio × 100 again). | eTrading must fix: use `days=365` and remove dividend yield multiplication |
 
 ### P0 — Critical / Blocking eTrading
 
@@ -159,12 +170,13 @@ From the March 20 review — items not yet implemented:
 
 ## Documentation TODOs
 
-- [ ] Update USER_MANUAL.md with all 7 new CLI commands from 2026-03-20: `entry_analysis`, `kelly`, `optimal_dte`, `exit_intelligence`, `audit`, `sentinel`, and expanded `validate` (checks #9 and #10)
+- [x] ~~Update USER_MANUAL.md with all 7 new CLI commands from 2026-03-20~~ — USER_MANUAL fully rewritten 2026-03-21; all 80+ commands documented
+- [x] ~~Document data trust framework in USER_MANUAL.md~~ — done in rewrite
+- [x] ~~Document position stress monitoring API~~ — done in rewrite
+- [ ] Update SYSTEMATIC_GAPS.md test count to 2266
 - [ ] Document `compute_benchmark_returns()` and `compute_alpha()` in USER_MANUAL.md if/when P2-E1 is implemented
 - [ ] Document `scan_vidura_opportunities()` in USER_MANUAL.md if/when P2-E2 is implemented
-- [ ] Update SYSTEMATIC_GAPS.md test count to 1820
-- [ ] Document data trust framework (2-dim trust assessment, modes, trust report) in USER_MANUAL.md
-- [ ] Document position stress monitoring API and `run_position_stress()` CLI
+- [ ] Set up ReadTheDocs / GitHub Pages from existing doc files (P2-5)
 
 ---
 

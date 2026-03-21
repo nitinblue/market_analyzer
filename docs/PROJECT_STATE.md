@@ -1,16 +1,16 @@
 # market_analyzer — Project State
 
-> Current implementation state as of 2026-03-20.
+> Current implementation state as of 2026-03-21.
 > Update this file when major features are completed.
 
 ---
 
 ## Test Suite
 
-- **Total tests: 1820** (as of 2026-03-20, collected by pytest)
+- **Total tests: 2266** (as of 2026-03-21, collected by pytest)
 - All passing: yes (confirmed by `pytest --co -q`)
 - Test locations:
-  - `tests/` — unit tests (~1775 tests)
+  - `tests/` — unit tests (~2220 tests)
   - `tests/functional/` — functional integration tests (45 tests, 8 modules)
 
 ---
@@ -21,6 +21,21 @@ Commits in reverse chronological order since 2026-03-01:
 
 | Commit | Description |
 |--------|-------------|
+| (2026-03-21) | Open source infrastructure — README, CONTRIBUTING, CI, issue templates, SECURITY, CODE_OF_CONDUCT |
+| (2026-03-21) | feat: desk management / capital allocation — 6 APIs (DeskSpec, suggest_desk_for_trade, compute_desk_risk_limits, compute_instrument_risk, evaluate_desk_health, rebalance_desks) |
+| (2026-03-21) | feat: demo portfolio system — `--demo` flag, `portfolio/trade/close_trade` CLI commands |
+| (2026-03-21) | feat: CSP/wheel workflow + covered call analysis |
+| (2026-03-21) | feat: assignment risk warning — US American options vs India European (cash-settled) |
+| (2026-03-21) | feat: cash vs margin analytics + structure-based margin buffers |
+| (2026-03-21) | feat: interest rate risk APIs |
+| (2026-03-21) | feat: Alpaca, IBKR, Schwab broker integrations (6 total) |
+| (2026-03-21) | feat: Dhan full implementation (India) — was stub, now complete |
+| (2026-03-21) | feat: setup wizard — `--setup` flag for first-time onboarding |
+| (2026-03-21) | feat: BYOD adapters — CSV, dict, IBKR/Schwab skeleton importers |
+| (2026-03-21) | feat: data trust 2-dimensional + calculation modes + fitness-for-purpose |
+| (2026-03-21) | feat: monitoring action with closing TradeSpec |
+| (2026-03-21) | feat: position stress monitoring |
+| (2026-03-21) | docs: USER_MANUAL full rewrite |
 | (2026-03-20) | feat: crash sentinel API — GREEN/YELLOW/ORANGE/RED/BLUE signals |
 | (2026-03-20) | feat: decision audit framework — 4-level leg/trade/portfolio/risk scoring |
 | (2026-03-20) | fix: max_loss POP computation, credit estimation, stress graceful degradation, momentum override, minimum credit filter |
@@ -469,7 +484,10 @@ See `ETRADING_INTEGRATION.md` for full guide (last updated 2026-03-17).
 | `broker/base.py` | STABLE | ABCs: `BrokerSession`, `MarketDataProvider`, `MarketMetricsProvider`, `AccountProvider`, `WatchlistProvider` |
 | `broker/tastytrade/` | STABLE | Full TastyTrade: session, market_data, dxlink, symbols, metrics, account, watchlist |
 | `broker/zerodha/` | COMPLETE | Full Zerodha Kite Connect: live chains, candles, computed IV rank, account, instrument master |
-| `broker/dhan/` | STUB | `connect_dhan_from_session()` stub — API not yet fully implemented |
+| `broker/dhan/` | COMPLETE | Full Dhan implementation (India) — was stub, now complete |
+| `broker/alpaca/` | COMPLETE | Alpaca Markets integration (US equities + options) |
+| `broker/ibkr/` | COMPLETE | Interactive Brokers integration |
+| `broker/schwab/` | COMPLETE | Charles Schwab integration |
 
 ### models/ — Data Models
 
@@ -547,9 +565,9 @@ See `ETRADING_INTEGRATION.md` for full guide (last updated 2026-03-17).
 
 ---
 
-## CLI Command Inventory (67 `do_*` methods)
+## CLI Command Inventory (80+ `do_*` methods)
 
-Note: Current count in `cli/interactive.py` is 67 `do_*` methods (including `do_quit` / `do_exit`).
+Note: Current count in `cli/interactive.py` is 80+ `do_*` methods (including `do_quit` / `do_exit`).
 
 ### Trading Intelligence
 | Command | Description |
@@ -671,6 +689,90 @@ Note: Current count in `cli/interactive.py` is 67 `do_*` methods (including `do_
 
 ---
 
+### Desk Management / Capital Allocation (2026-03-21) — COMPLETED
+
+6 pure-function APIs in `capital_allocation.py` (or `desk_management.py`) for structured capital deployment:
+
+| API | Description |
+|-----|-------------|
+| `recommend_desk_structure(account_balance, trading_style)` | Returns `DeskRecommendation` — 4-desk default (0DTE/income/directional/hedge) with capital splits |
+| `suggest_desk_for_trade(trade_spec, desks, existing_positions_by_desk)` | Returns best desk for a new trade (DTE fit, strategy type, capacity, correlation) |
+| `compute_desk_risk_limits(desk_key, ...)` | Regime-adjusted position limits: max positions, max single pct, circuit breaker |
+| `compute_instrument_risk(ticker, instrument_type, position_value, regime_id)` | Per-instrument risk: max_loss, expected_loss_1d, margin_required, risk_category |
+| `evaluate_desk_health(desk_key, closed_trades)` | Win rate, Sharpe, avg hold time, strategy efficiency from closed trades |
+| `rebalance_desks(desks, account_balance, regime_id)` | Drift detection + reallocation recommendations when actual capital drifts >5% from target |
+
+Asset class hierarchy: asset class → risk type → desks. Income and directional have sub-desks.
+
+**CLI:** `desk` command — shows desk structure, capital allocation, regime-adjusted limits.
+
+---
+
+### Demo Portfolio System (2026-03-21) — COMPLETED
+
+Paper-trading simulation without requiring a broker connection:
+
+- **`--demo` flag** on CLI startup — initializes a virtual $50K portfolio with simulated positions
+- **`portfolio` command** — shows demo portfolio with positions, P&L, Greeks (simulated)
+- **`trade` command** — executes a demo trade (records in memory, no broker order)
+- **`close_trade` command** — closes a demo position, records outcome for ML feedback
+
+Demo portfolio flows through the full MA analysis stack: regime detection, entry gates, risk checks, exit monitoring. Outcomes can be used with `calibrate_weights()` to seed the learning loop without real capital.
+
+---
+
+### CSP/Wheel Workflow + Assignment Risk (2026-03-21) — COMPLETED
+
+- **CSP/wheel workflow** — `decide_wheel_action()` extended with covered call assessment phase; full state machine from cash-secured put → assignment → covered call → called away
+- **Covered call analysis** — `assess_covered_call(ticker, cost_basis, regime_id)` returns optimal strike, DTE, and annualized yield given current position cost basis
+- **Assignment risk warning** — options expiry behavior documented and checked per market:
+  - US options: American-style, can be assigned early (especially dividend dates for calls)
+  - India options: European-style, cash-settled, no early assignment risk
+  - `TradeSpec.assignment_style` field: `"american"` or `"european"` per instrument
+- **`check_assignment_risk(trade_spec, days_to_expiry, stock_yield)` — flags early assignment risk for US short calls near dividend dates
+
+**CLI:** `wheel` command extended; `csp` command for standalone CSP analysis.
+
+---
+
+### Cash vs Margin Analytics + Interest Rate Risk (2026-03-21) — COMPLETED
+
+- **Cash vs margin analytics** — `compute_margin_efficiency(trade_spec, cash_available, margin_rate)` compares cost of capital (margin interest) vs trade yield; surfaces when trade yield < margin cost
+- **Structure-based margin buffers** — different buffer multipliers by structure type: IC=1.0× (defined), ratio_spread=2.0× (undefined exposure), straddle=1.5×
+- **Interest rate risk APIs** — `compute_interest_rate_sensitivity(trade_spec, rate_change_bps)`: how much does portfolio cost change per 25bps rate move; `get_rho_exposure(trade_spec, quotes)`: aggregate rho from broker Greeks
+
+**CLI:** `margin` command extended with cash_vs_margin toggle; `interest_risk` command.
+
+---
+
+### BYOD Adapters (2026-03-21) — COMPLETED
+
+Bring-Your-Own-Data adapters for users without supported brokers:
+
+- **`broker/adapters/csv_adapter.py`** — loads positions and quotes from CSV files; maps column names to MA's `OptionQuote`/`QuoteSnapshot` models
+- **`broker/adapters/dict_adapter.py`** — accepts Python dicts; useful for API callers sending data in custom format
+- **`broker/adapters/ibkr_skeleton.py`** — skeleton for Interactive Brokers TWS API (placeholder for future full implementation)
+- **`broker/adapters/schwab_skeleton.py`** — skeleton for Schwab API (placeholder for future full implementation)
+
+All adapters implement `MarketDataProvider` ABC — plug into `MarketAnalyzer` the same way as real brokers.
+
+**CLI:** `--data-file path/to/quotes.csv` startup flag loads CSV adapter.
+
+---
+
+### Open Source Infrastructure (2026-03-21) — COMPLETED
+
+Repository made OSS-ready:
+
+- **README.md** — full project README with quick-start, feature overview, philosophy, contributing guide
+- **CONTRIBUTING.md** — development setup, PR process, test requirements, code style
+- **`.github/workflows/ci.yml`** — GitHub Actions CI: test on Python 3.12, lint, type-check
+- **`.github/ISSUE_TEMPLATE/`** — bug report and feature request templates
+- **SECURITY.md** — responsible disclosure policy, credential handling guidelines
+- **CODE_OF_CONDUCT.md** — Contributor Covenant v2.1
+
+---
+
 ## Known Limitations / Tech Debt
 
 ### Thin Implementations (functional but basic)
@@ -701,5 +803,6 @@ Note: Current count in `cli/interactive.py` is 67 `do_*` methods (including `do_
 
 - `challenge/` contains reference implementations only — eTrading must NOT import from it
 - `rank()` output is NOT safe to execute directly — eTrading MUST call `filter_trades_with_portfolio()` and `evaluate_trade_gates()` before execution
-- Dhan broker integration is a stub — `connect_dhan_from_session()` exists but full API not yet implemented
 - `risk.py` function `estimate_portfolio_loss()` is ATR-based, NOT formal VaR; use `run_stress_suite()` for scenario analysis
+- Dhan broker is now fully implemented (was a stub as of 2026-03-20; completed 2026-03-21)
+- IBKR and Schwab have skeleton adapters (pattern established, full TWS/API wiring is P2)

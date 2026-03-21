@@ -26,6 +26,7 @@
 19. [Supported Brokers — What eTrading Needs to Know](#19-supported-brokers--what-etrading-needs-to-know)
 20. [India Market: eTrading Delayed Data Service (Planned)](#20-india-market-etrading-delayed-data-service-planned)
 21. [Desk Management APIs (March 21, 2026)](#21-desk-management-apis-march-21-2026)
+22. [Demo Portfolio — eTrading Notes (March 21, 2026)](#22-demo-portfolio--etrading-notes-march-21-2026)
 
 ---
 
@@ -2767,3 +2768,21 @@ scan → rank → [suggest_desk_for_trade] → filter_trades_with_portfolio
 ```
 
 **Critical invariant:** `rank()` output is NOT safe to execute directly. Always call `suggest_desk_for_trade()` → `filter_trades_with_portfolio()` → `evaluate_trade_gates()` before execution.
+
+---
+
+## 22. Demo Portfolio — eTrading Notes (March 21, 2026)
+
+MA's demo portfolio system (`--demo` CLI flag) is **library-only** — it runs inside the CLI for developer exploration and user onboarding. eTrading does NOT need to integrate it.
+
+**What demo mode does:**
+- Initializes a virtual $50K portfolio with simulated positions (in memory only)
+- Flows trades through the full analysis stack: regime, entry gates, risk checks, Kelly sizing
+- Records `TradeOutcome` objects that can be passed to `calibrate_weights()` for seeding the ML loop
+
+**eTrading consideration:** If eTrading wants to offer a "paper trading" mode, it should:
+1. Maintain simulated positions in its own DB (MA is stateless — it cannot store positions)
+2. Call `monitor_exit_conditions()`, `check_trade_health()` with simulated position data
+3. Call `calibrate_weights(outcomes)` with simulated trade outcomes to pre-train the ML layer before live trading
+
+**No MA API changes required.** The demo portfolio does not expose any new eTrading APIs. All existing lifecycle APIs work identically in demo mode — eTrading just passes simulated data instead of real broker data.

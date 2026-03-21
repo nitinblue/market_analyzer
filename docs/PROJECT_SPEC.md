@@ -645,6 +645,19 @@ Five ABCs in `broker/base.py`:
 - `AccountProvider` — balance, buying power
 - `WatchlistProvider` — private and public watchlists from broker
 
+**6 supported broker implementations** (as of 2026-03-21):
+
+| Broker | Module | Market | Status |
+|--------|--------|--------|--------|
+| TastyTrade | `broker/tastytrade/` | US | STABLE |
+| Zerodha | `broker/zerodha/` | India | COMPLETE |
+| Dhan | `broker/dhan/` | India | COMPLETE |
+| Alpaca | `broker/alpaca/` | US | COMPLETE |
+| IBKR | `broker/ibkr/` | US/Global | COMPLETE |
+| Schwab | `broker/schwab/` | US | COMPLETE |
+
+**BYOD adapters** in `broker/adapters/` — for users without supported brokers: CSV, dict, IBKR skeleton, Schwab skeleton. All implement `MarketDataProvider` ABC.
+
 ### Ticker Aliases
 
 `_YFINANCE_ALIASES` in `data/providers/yfinance.py` translates user-facing tickers to yfinance symbols:
@@ -654,6 +667,96 @@ Cache stores under user-facing name; provider fetches via yfinance name.
 ### Cache
 
 Parquet cache with staleness checks. "Cache before fetch, but never serve stale data silently." Options chain snapshots: 4-hour staleness limit.
+
+---
+
+## 23. Desk Management / Capital Allocation
+
+Structured capital deployment via 6 pure functions. Hierarchy: account → asset class → risk type → desks.
+
+**Default 4-desk structure:**
+
+| Desk | DTE Range | Strategies | Default Allocation |
+|------|-----------|------------|-------------------|
+| `desk_0dte` | 0 DTE | 0DTE IC, Iron Man, credit spread | 20% |
+| `desk_income` | 21–45 DTE | IC, calendar, iron butterfly | 50% |
+| `desk_directional` | 14–45 DTE | Diagonal, credit/debit spread | 20% |
+| `desk_hedge` | Any | Protective put, collar | 10% |
+
+**APIs in `capital_allocation.py`:**
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `recommend_desk_structure(balance, style)` | `DeskRecommendation` | Initial desk setup; style = "income_first" / "balanced" / "aggressive" |
+| `suggest_desk_for_trade(trade_spec, desks, existing)` | `dict` | Best desk match: DTE fit (50pts), strategy (30pts), capacity (15pts), correlation (5pts) |
+| `compute_desk_risk_limits(desk_key, regime_id, drawdown_pct)` | `DeskRiskLimits` | Regime-adjusted position/size limits; R4 = 50% of normal |
+| `compute_instrument_risk(ticker, type, value, regime_id)` | `InstrumentRisk` | max_loss, expected_loss_1d, margin_required, risk_category |
+| `evaluate_desk_health(desk_key, closed_trades)` | `DeskHealth` | Win rate, Sharpe, avg hold, strategy efficiency |
+| `rebalance_desks(desks, balance, regime_id)` | `RebalanceReport` | Drift detection + reallocation when >5% off target |
+
+**Pipeline position:** `rank → suggest_desk_for_trade → filter_trades_with_portfolio → compute_desk_risk_limits → entry`
+
+**CLI:** `desk [DESK_KEY]` — shows structure, capital, limits, health.
+
+---
+
+## 24. Demo Portfolio System
+
+Paper-trading simulation without a broker connection. Enables forward testing with the full MA analysis stack.
+
+**CLI flags:**
+- `analyzer-cli --demo` — starts with a virtual $50K portfolio (pre-seeded positions for realistic testing)
+- `analyzer-cli --setup` — first-time onboarding wizard; guides broker connection or demo mode setup
+
+**Demo-mode CLI commands:**
+
+| Command | Description |
+|---------|-------------|
+| `portfolio` | Shows demo positions, P&L, Greeks (simulated from yfinance + regime) |
+| `trade TICKER STRUCTURE` | Executes a demo trade — records in memory, generates TradeSpec |
+| `close_trade TRADE_ID` | Closes a demo position; records `TradeOutcome` for ML feedback |
+
+Demo trades flow through the full validation stack: entry gates, risk checks, Kelly sizing. Closed outcomes can seed `calibrate_weights()` before committing real capital.
+
+---
+
+## 25. Assignment Workflow
+
+**American vs European options:**
+
+| Market | Style | Assignment Risk |
+|--------|-------|----------------|
+| US (SPY, QQQ, individual equities) | American | Can be assigned early; short calls at risk near ex-dividend dates |
+| US index cash-settled (SPX, VIX) | European | No early assignment; settled to cash at expiry |
+| India (NIFTY, BANKNIFTY, NSE equity) | European | No early assignment; cash-settled |
+
+`TradeSpec.assignment_style: str` — `"american"` or `"european"` per instrument. Set by `MarketRegistry`.
+
+**`check_assignment_risk(trade_spec, days_to_expiry, stock_yield)` → `AssignmentRisk`:**
+- Flags short calls on dividend-paying US stocks when ex-div date is within DTE and extrinsic value < dividend amount
+- Returns `risk_level: "none" | "low" | "medium" | "high"`, `rationale: str`
+
+**CSP/Wheel workflow:**
+- `decide_wheel_action(ticker, cost_basis, regime_id, current_price)` → `WheelDecision`
+- `assess_covered_call(ticker, cost_basis, regime_id)` → `CoveredCallAssessment` (strike, DTE, yield)
+- Full state machine: CSP → assigned → covered call → called away → restart
+
+**CLI:** `wheel TICKER` — full wheel state; `csp TICKER` — standalone CSP analysis.
+
+---
+
+## 26. BYOD Adapters
+
+For users without supported brokers. All implement `MarketDataProvider` ABC.
+
+| Adapter | Module | Usage |
+|---------|--------|-------|
+| CSV | `broker/adapters/csv_adapter.py` | `--data-file quotes.csv`; maps columns to `OptionQuote` |
+| Dict | `broker/adapters/dict_adapter.py` | Pass Python dicts directly; for API callers |
+| IBKR skeleton | `broker/adapters/ibkr_skeleton.py` | TWS API wiring placeholder |
+| Schwab skeleton | `broker/adapters/schwab_skeleton.py` | Schwab API wiring placeholder |
+
+CSV format: `ticker, expiration, strike, option_type, bid, ask, delta, gamma, theta, vega, iv`
 
 ---
 
@@ -731,7 +834,7 @@ analyzer-plot                   # Regime charts
 | `quit` | Exit the REPL |
 | `exit` | Exit the REPL |
 
-**Total: 67 commands.**
+**Total: 80+ commands** (as of 2026-03-21; includes desk, demo portfolio, CSP/wheel, interest_risk, and other new commands).
 
 ### Universe Scanner Presets
 
