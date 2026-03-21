@@ -16,6 +16,8 @@
 9. [New Trading Intelligence APIs (March 2026)](#9-new-trading-intelligence-apis-march-2026)
 10. [Decision Audit Framework (March 20)](#10-decision-audit-framework-march-20)
 11. [March 20 Addenda — Behavior Changes](#11-march-20-addenda--behavior-changes)
+12. [Crash Sentinel — Market Health Monitoring](#12-crash-sentinel--market-health-monitoring)
+13. [Context-Aware Calculations — Full Mode Checklist](#13-context-aware-calculations--full-mode-checklist)
 
 ---
 
@@ -2087,3 +2089,104 @@ eTrading MUST store the sentinel signal history. This enables:
 1. Tracking signal transitions (GREEN -> YELLOW -> ORANGE timeline)
 2. Post-crash analysis (how early did the sentinel warn?)
 3. Playbook compliance auditing (did we actually close positions on ORANGE?)
+
+---
+
+## 13. Context-Aware Calculations — Full Mode Checklist
+
+MA operates in `full` mode by default. This means every calculation is portfolio-aware, position-aware, and risk-aware. eTrading MUST pass full context for reliable results. If context is missing, the `TrustReport` will flag `is_actionable=False`.
+
+### What "Full Context" Means
+
+Every call should include these inputs where applicable:
+
+| Input | Source (eTrading) | Used By |
+|-------|-------------------|---------|
+| `regime_id` | `ma.regime.detect(ticker).regime.value` | ALL calculations |
+| `technicals` / `atr_pct` / `rsi` | `ma.technicals.snapshot(ticker)` | Entry score, validation, POP |
+| `vol_surface` / `skew` | `ma.vol_surface.surface(ticker)` | Skew strike selection, DTE optimizer |
+| `levels` | `ma.levels.analyze(ticker)` | Strike proximity, pullback alerts |
+| `iv_rank` | `ma.quotes.get_metrics(ticker).iv_rank` | IV rank quality check, ranking |
+| `entry_credit` | Real broker mid from `ma.quotes.get_leg_quotes()` | POP, EV, Kelly, validation |
+| `days_to_earnings` | `fundamentals.upcoming_events.days_to_earnings` | Earnings blackout gate |
+| `ticker_type` | "etf" / "equity" / "index" from registry | IV rank thresholds |
+| `open_positions` / `portfolio_exposure` | eTrading portfolio DB | Kelly correlation adjustment, risk budget |
+| `correlation_data` | Pre-computed weekly from OHLCV | Correlated position sizing |
+| `entry_regime_id` | Stored at trade entry time | Strategy switching, regime change detection |
+| `days_held` / `dte_at_entry` | Position DB | Trailing profit targets, theta decay |
+| `peak_nlv` | Account DB | Drawdown circuit breaker |
+
+### Context-Aware APIs (eTrading must pass full context)
+
+#### Pre-Trade (called before every new trade)
+
+| # | API | Critical Context | What changes with full context |
+|---|-----|-----------------|-------------------------------|
+| 1 | `run_daily_checks()` | entry_credit, iv_rank, levels, days_to_earnings, ticker_type | Without: checks 8-10 all WARN. With: real PASS/FAIL on strike proximity, earnings blackout, IV rank quality |
+| 2 | `run_adversarial_checks()` | entry_credit, atr_pct | Without: gamma/breakeven WARN on invalid params. With: real stress test |
+| 3 | `estimate_pop()` | entry_credit, current_price, iv_rank | Without: POP off by 10-15%. With: regime+IV calibrated probability |
+| 4 | `compute_position_size()` | portfolio_exposure, correlation_data, open_tickers | Without: raw Kelly (ignores existing positions). With: correlation-adjusted, drawdown-aware, margin-regime capped |
+| 5 | `score_entry_level()` | levels (for level_proximity component) | Without: 20% of score weight is zero. With: S/R proximity factors into enter/wait decision |
+| 6 | `compute_limit_entry_price()` | bid_ask_spread from broker | Without: can't compute. With: patient/normal/aggressive limit price |
+| 7 | `select_optimal_dte()` | vol_surface (term structure) | Without: can't optimize. With: picks DTE with best theta/IV ratio |
+| 8 | `audit_decision()` | ALL of above + stress results + Kelly fraction | Without: several checks score F. With: complete 4-level report card |
+| 9 | `assess_crash_sentinel()` | regime_results for 5 tickers, iv_ranks, spy_atr_pct, spy_rsi | Without: can't assess. With: GREEN/YELLOW/ORANGE/RED/BLUE signal |
+
+#### At Entry (called when placing order)
+
+| # | API | Critical Context | What changes with full context |
+|---|-----|-----------------|-------------------------------|
+| 10 | `compute_strike_support_proximity()` | levels | Without: can't check. With: PASS/FAIL on S/R backing |
+| 11 | `select_skew_optimal_strike()` | skew from vol_surface | Without: uses ATR-only baseline. With: shifts to richest IV premium |
+| 12 | `compute_pullback_levels()` | levels | Without: no alerts. With: specific price levels for patient entry |
+| 13 | `compute_iv_rank_quality()` | iv_rank, ticker_type | Without: quality unknown. With: good/wait/avoid signal |
+
+#### Position Monitoring (called every monitoring cycle)
+
+| # | API | Critical Context | What changes with full context |
+|---|-----|-----------------|-------------------------------|
+| 14 | `monitor_exit_conditions()` | regime_stop_multiplier, days_held, dte_at_entry, entry_regime_id | Without: fixed 2x stop, static 50% target. With: regime-contingent stop (R2=3x), trailing profit acceleration, regime change detection |
+| 15 | `compute_regime_stop()` | regime_id | Standalone OK — only needs current regime |
+| 16 | `compute_time_adjusted_target()` | days_held, dte_at_entry, current_profit_pct | Without: static target. With: "close early at 35% — capital velocity" |
+| 17 | `compute_remaining_theta_value()` | dte_remaining, dte_at_entry, current_profit_pct | Without: no recommendation. With: hold/close/approaching_cliff |
+| 18 | `check_trade_health()` | regime, technicals, vol_surface, entry_regime_id | Without: basic status only. With: adjustment recommendations + overnight risk |
+| 19 | `recommend_action()` | entry_regime_id | Without: standard adjustments. With: CONVERT_TO_DIAGONAL on regime change |
+
+#### Risk Management (called on portfolio level)
+
+| # | API | Critical Context | What changes with full context |
+|---|-----|-----------------|-------------------------------|
+| 20 | `compute_risk_dashboard()` | all positions, regime_id, peak_nlv | Full portfolio-level assessment |
+| 21 | `adjust_kelly_for_correlation()` | open_tickers, correlation_fn | Without: no correlation penalty. With: SPY+QQQ treated as ~1 position |
+| 22 | `compute_regime_adjusted_bp()` | regime_id | R2 margin is 1.3x R1 — fewer contracts fit |
+| 23 | `filter_trades_with_portfolio()` | open_positions, risk_limits | Without: no portfolio awareness. With: slot/sector/correlation filtering |
+| 24 | `evaluate_trade_gates()` | full trade context | 17 gates: BLOCK/SCALE/WARN |
+
+#### Post-Trade (called after closing positions)
+
+| # | API | Critical Context | What changes with full context |
+|---|-----|-----------------|-------------------------------|
+| 25 | `analyze_adjustment_effectiveness()` | list[AdjustmentOutcome] | Learns which adjustments work by type/regime |
+| 26 | `calibrate_weights()` | list[TradeOutcome] | Re-weights ranking factors from actual results |
+| 27 | `analyze_gate_effectiveness()` | gate_history, shadow/actual outcomes | Identifies gates that are too tight or too loose |
+
+### Implementation Priority for eTrading
+
+**Phase 1 — Critical (do first):**
+APIs 1-4, 9, 14, 20: validation, POP, sizing, sentinel, monitoring, risk dashboard
+
+**Phase 2 — Important (next sprint):**
+APIs 5-8, 10-13, 15-19: entry intelligence, exit intelligence, audit
+
+**Phase 3 — Learning loop (after Phase 1+2 are stable):**
+APIs 21-27: correlation, calibration, gate effectiveness
+
+### Trust Verification
+
+After implementing each API, eTrading should call `compute_trust_report()` and verify:
+```python
+report = compute_trust_report(mode="full", has_broker=True, has_iv_rank=True, ...)
+assert report.is_actionable  # Must be True before executing any trade
+```
+
+If `is_actionable` is False, DO NOT proceed with the trade. Fix the missing context first.
