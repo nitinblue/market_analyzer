@@ -6607,6 +6607,184 @@ stratified by risk category (defined / semi_defined / undefined)."""
         except Exception as exc:
             print(f"{_styled('ERROR:', 'red')} {exc}")
 
+    # --- Demo portfolio commands ---
+
+    def do_portfolio(self, arg: str) -> None:
+        """Show demo portfolio status: portfolio
+
+        Shows desk allocation, open positions, P&L, and drawdown.
+        Create demo portfolio first: analyzer-cli --demo
+        """
+        from market_analyzer.demo import load_demo_portfolio, get_demo_summary
+
+        port = load_demo_portfolio()
+        if port is None:
+            print("No demo portfolio. Run: analyzer-cli --demo")
+            return
+
+        summary = get_demo_summary(port)
+
+        print(f"\nDEMO PORTFOLIO — ${summary['capital']:,.0f} ({summary['risk_tolerance']})")
+        print("=" * 55)
+        print(f"NLV:          ${summary['current_nlv']:,.0f}")
+        print(f"Cash:         ${summary['cash']:,.0f}")
+        print(f"Open:         {summary['open_positions']} positions")
+        print(f"Closed:       {summary['closed_trades']} trades")
+        print(f"Total P&L:    ${summary['total_pnl']:,.0f}")
+        print(f"Win Rate:     {summary['win_rate']:.0%}")
+        print(f"Drawdown:     {summary['drawdown_pct']:.1%}")
+
+        # Show positions by desk
+        if port.positions:
+            print(f"\nOPEN POSITIONS:")
+            for p in port.positions:
+                days = (date.today() - date.fromisoformat(p.entry_date)).days
+                print(f"  {p.position_id}  {p.ticker:<6} {p.structure_type:<16} {p.desk_key:<20} {p.contracts}x  day {days}  entry ${p.entry_price:.2f}")
+
+        # Show desk utilization
+        print(f"\nDESK ALLOCATION:")
+        for desk_data in port.desks:
+            dk = desk_data.get("desk_key", "?")
+            cap = desk_data.get("capital_allocation", 0)
+            pos_in_desk = len([p for p in port.positions if p.desk_key == dk])
+            max_pos = desk_data.get("max_positions", 5)
+            print(f"  {dk:<24} ${cap:>8,.0f}  {pos_in_desk}/{max_pos} positions")
+
+    def do_trade(self, arg: str) -> None:
+        """Place a simulated trade in demo portfolio: trade TICKER
+
+        Runs full pipeline: assess -> validate -> size -> route to desk -> book.
+
+        Example:
+            trade SPY
+            trade GLD
+        """
+        from market_analyzer.demo import load_demo_portfolio, add_demo_position
+
+        port = load_demo_portfolio()
+        if port is None:
+            print("No demo portfolio. Run: analyzer-cli --demo")
+            return
+
+        ticker = arg.strip().upper() or "SPY"
+        ma = self._get_ma()
+
+        # Full pipeline
+        try:
+            regime = ma.regime.detect(ticker)
+            tech = ma.technicals.snapshot(ticker)
+            vol = ma.vol_surface.surface(ticker)
+
+            from market_analyzer.opportunity.option_plays.iron_condor import assess_iron_condor
+            ic = assess_iron_condor(ticker, regime, tech, vol)
+
+            if ic.trade_spec is None:
+                print(f"No trade available for {ticker} (verdict: {ic.verdict})")
+                return
+
+            ts = ic.trade_spec
+            wing = ts.wing_width_points or 5.0
+            ec = wing * (vol.front_iv if vol else 0.20) * 0.40  # Estimated credit
+
+            # Validate
+            from market_analyzer.validation.daily_readiness import run_daily_checks
+            levels = ma.levels.analyze(ticker)
+            rpt = run_daily_checks(
+                ticker=ticker,
+                trade_spec=ts,
+                entry_credit=ec,
+                regime_id=regime.regime.value,
+                atr_pct=tech.atr_pct,
+                current_price=tech.current_price,
+                avg_bid_ask_spread_pct=vol.avg_bid_ask_spread_pct if vol else 2.0,
+                dte=ts.target_dte,
+                rsi=tech.rsi.value,
+                ticker_type="etf",
+                levels=levels,
+            )
+
+            if not rpt.is_ready:
+                fails = [c for c in rpt.checks if c.severity.value == "fail"]
+                print(f"Trade BLOCKED: {', '.join(c.name for c in fails)}")
+                return
+
+            # Size
+            from market_analyzer.features.position_sizing import compute_position_size, PortfolioExposure
+            from market_analyzer.trade_lifecycle import estimate_pop
+
+            pop = estimate_pop(ts, ec, regime.regime.value, tech.atr_pct, tech.current_price)
+            risk_per = wing * ts.lot_size
+
+            deployed = sum(p.max_loss for p in port.positions)
+            sz = compute_position_size(
+                pop_pct=pop.pop_pct,
+                max_profit=pop.max_profit,
+                max_loss=pop.max_loss,
+                capital=port.current_nlv,
+                risk_per_contract=risk_per,
+                wing_width=wing,
+                regime_id=regime.regime.value,
+                exposure=PortfolioExposure(
+                    open_position_count=len(port.positions),
+                    max_positions=5,
+                    current_risk_pct=deployed / port.current_nlv if port.current_nlv > 0 else 0,
+                ),
+            )
+
+            if sz.recommended_contracts == 0:
+                print(f"Kelly says 0 contracts. POP: {pop.pop_pct:.0%}, EV: ${pop.expected_value:.0f}")
+                return
+
+            # Route to desk
+            from market_analyzer.features.desk_management import suggest_desk_for_trade
+            desk_result = suggest_desk_for_trade(
+                desks=port.desks,
+                trade_dte=ts.target_dte,
+                strategy_type=str(ts.structure_type or "iron_condor"),
+                ticker=ticker,
+            )
+            desk_key = desk_result.get("desk_key", "desk_income_defined")
+
+            # Book it
+            pos = add_demo_position(
+                port, ticker, desk_key, ts, ec, sz.recommended_contracts, regime.regime.value,
+            )
+
+            print(f"\nTRADE BOOKED (demo)")
+            print(f"  {pos.position_id}: {ticker} {ts.structure_type} {sz.recommended_contracts}x")
+            print(f"  Desk: {desk_key}")
+            print(f"  Credit: ${ec:.2f}/contract")
+            print(f"  Max profit: ${pos.max_profit:.0f} | Max loss: ${pos.max_loss:.0f}")
+            print(f"  Cash remaining: ${port.cash_balance:,.0f}")
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+
+    def do_close_trade(self, arg: str) -> None:
+        """Close a demo position: close_trade POSITION_ID [CLOSE_PRICE] [REASON]"""
+        from market_analyzer.demo import load_demo_portfolio, close_demo_position
+
+        parts = arg.strip().split()
+        if not parts:
+            print("Usage: close_trade POSITION_ID [CLOSE_PRICE] [REASON]")
+            return
+
+        port = load_demo_portfolio()
+        if port is None:
+            print("No demo portfolio.")
+            return
+
+        pid = parts[0]
+        close_price = float(parts[1]) if len(parts) > 1 else 0.0  # Default: expired worthless = full profit
+        reason = parts[2] if len(parts) > 2 else "manual"
+
+        pos = close_demo_position(port, pid, close_price, reason)
+        if pos is None:
+            print(f"Position {pid} not found")
+            return
+
+        print(f"CLOSED: {pos.ticker} {pos.structure_type} -> P&L: ${pos.pnl:+,.0f} ({pos.close_reason})")
+
     def do_quit(self, arg: str) -> bool:
         """Exit the REPL."""
         print("Goodbye.")
@@ -6658,12 +6836,29 @@ def main() -> None:
         action="store_true",
         help="Run first-time setup wizard (configure broker credentials)",
     )
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="Start with $100K demo portfolio",
+    )
     args = parser.parse_args()
 
     if args.setup:
         from market_analyzer.cli._setup import run_setup_wizard
         run_setup_wizard()
         return
+
+    if args.demo:
+        from market_analyzer.demo import load_demo_portfolio, create_demo_portfolio
+        port = load_demo_portfolio()
+        if port is None:
+            print("Creating demo portfolio ($100,000, moderate risk)...")
+            port = create_demo_portfolio()
+            print(f"Created! {len(port.desks)} desks allocated.")
+            print("Run 'portfolio' to see your desk allocation.")
+            print("Run 'trade SPY' to place your first simulated trade.")
+        else:
+            print(f"Demo portfolio loaded: ${port.current_nlv:,.0f} NLV, {len(port.positions)} open positions")
 
     try:
         cli = AnalyzerCLI(market=args.market, broker=args.broker)
