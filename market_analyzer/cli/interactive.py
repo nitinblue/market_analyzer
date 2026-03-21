@@ -6355,6 +6355,15 @@ stratified by risk category (defined / semi_defined / undefined)."""
         except Exception as exc:
             print(f"{_styled('ERROR:', 'red')} {exc}")
 
+    def do_wizard(self, arg: str) -> None:
+        """First-time setup wizard: wizard
+
+        Guides you through broker connection, saves credentials, and verifies.
+        Run this once after installing market_analyzer.
+        """
+        from market_analyzer.cli._setup import run_setup_wizard
+        run_setup_wizard()
+
     def do_quit(self, arg: str) -> bool:
         """Exit the REPL."""
         print("Goodbye.")
@@ -6401,7 +6410,17 @@ def main() -> None:
         action="store_true",
         help="Connect to TastyTrade broker for live quotes/Greeks",
     )
+    parser.add_argument(
+        "--setup",
+        action="store_true",
+        help="Run first-time setup wizard (configure broker credentials)",
+    )
     args = parser.parse_args()
+
+    if args.setup:
+        from market_analyzer.cli._setup import run_setup_wizard
+        run_setup_wizard()
+        return
 
     try:
         cli = AnalyzerCLI(market=args.market, broker=args.broker)

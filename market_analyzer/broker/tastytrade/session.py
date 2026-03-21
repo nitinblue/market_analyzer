@@ -312,9 +312,18 @@ class TastyTradeBrokerSession(BrokerSession):
         self._data_refresh_token = _resolve_env(data_section["refresh_token"])
 
     def _find_config_file(self) -> Path | None:
-        """Search common locations for the credential YAML."""
+        """Search common locations for the credential YAML.
+
+        Checked in order:
+        1. Explicit ``config_path`` arg (default: ``tastytrade_broker.yaml``)
+        2. ``~/.market_analyzer/broker.yaml``  — written by the setup wizard
+        3. ``~/.market_analyzer/<config_path>``
+        4. Package-relative paths (dev/project-root usage)
+        """
         candidates = [
             Path(self._config_path),
+            # Setup wizard writes here
+            Path.home() / ".market_analyzer" / "broker.yaml",
             Path.home() / ".market_analyzer" / self._config_path,
             Path(__file__).parent / self._config_path,
             Path(__file__).parent.parent / self._config_path,
