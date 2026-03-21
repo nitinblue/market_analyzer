@@ -1814,6 +1814,27 @@ Requires --broker connection."""
                   f"IV Rank: {f'{iv_rank:.0f}' if iv_rank else 'N/A'} | "
                   f"Credit: ${entry_credit:.2f} [{credit_source}]")
 
+            # ── Trust score ────────────────────────────────────────────────────
+            from market_analyzer.features.data_trust import compute_data_trust
+            has_broker_conn = bool(ma.quotes and ma.quotes.has_broker)
+            trust = compute_data_trust(
+                has_broker=has_broker_conn,
+                has_iv_rank=iv_rank is not None,
+                has_vol_surface=vol is not None,
+                has_levels=False,  # levels computed lazily in playbook below
+                entry_credit_source="broker" if has_broker_conn and credit_source.startswith("DXLink") else (
+                    "estimated" if entry_credit is not None else "none"
+                ),
+                regime_confidence=regime.confidence,
+            )
+            trust_color = "green" if trust.trust_score >= 0.80 else (
+                "yellow" if trust.trust_score >= 0.50 else "red"
+            )
+            print(f"  {_styled(f'TRUST: {trust.trust_score:.0%} {trust.trust_level.upper()}', trust_color)}"
+                  f" — {trust.summary}")
+            if trust.degraded_fields and not has_broker_conn:
+                print(f"    Connect broker (--broker --paper) for HIGH trust analysis.")
+
             # ── No-trade playbook ─────────────────────────────────────────────
             if not is_ready:
                 print(f"\n  {_styled('NO TRADE PLAYBOOK:', 'yellow')}")
@@ -2584,6 +2605,27 @@ Requires --broker connection."""
                 verdict_color,
             ))
             print("=" * 55)
+
+            # ── Trust score ────────────────────────────────────────────────────
+            from market_analyzer.features.data_trust import compute_data_trust
+            metrics_audit = ma.quotes.get_metrics(ticker) if ma.quotes else None
+            iv_rank_audit = metrics_audit.iv_rank if metrics_audit else None
+            has_broker_audit = bool(ma.quotes and ma.quotes.has_broker)
+            trust = compute_data_trust(
+                has_broker=has_broker_audit,
+                has_iv_rank=iv_rank_audit is not None,
+                has_vol_surface=vol is not None,
+                has_levels=levels is not None,
+                entry_credit_source="estimated",  # audit always uses estimated credit (ec = heuristic)
+                regime_confidence=regime.confidence,
+            )
+            trust_color = "green" if trust.trust_score >= 0.80 else (
+                "yellow" if trust.trust_score >= 0.50 else "red"
+            )
+            print(f"\n{_styled(f'TRUST: {trust.trust_score:.0%} {trust.trust_level.upper()}', trust_color)}"
+                  f" — {trust.summary}")
+            if trust.degraded_fields and not has_broker_audit:
+                print("  Connect broker (--broker --paper) for HIGH trust analysis.")
 
         except Exception as e:
             print(f"Error: {e}")
