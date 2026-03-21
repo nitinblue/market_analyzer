@@ -1,17 +1,60 @@
 # market_analyzer — Project Specification
 
 > Single source of truth for what this project is, what it does, and how it works.
-> Last updated: 2026-03-20
+> Last updated: 2026-03-21
 
 ---
 
 ## 1. Mission
 
-`market_analyzer` is a Python library that helps make money trading options. It is a production tool for real capital deployment — not a theoretical exercise. It serves as the canonical data and analysis layer for the trading ecosystem (market_analyzer, cotrader/eTrading, decision agent). It detects per-instrument regime state (R1–R4) using Hidden Markov Models, generates ranked trade recommendations with machine-readable `TradeSpec` outputs, and provides every analytical building block needed to make informed options trading decisions. The library is stateless: eTrading owns authentication, tenant isolation, caching, and execution; MA owns analysis and decisions.
+`market_analyzer` is a Python library that helps make money trading options. It is a production tool for real capital deployment — not a theoretical exercise.
+
+It brings institutional-grade systematic trading to small accounts ($30-50K). The gap it fills: there are tools for institutions (expensive, closed) and tools for retail (basic, manual). The space in between — **systematic income trading for small accounts with real risk management** — is empty. MA fills it.
+
+It detects per-instrument regime state (R1–R4) using Hidden Markov Models, generates ranked trade recommendations with machine-readable `TradeSpec` outputs, and provides every analytical building block needed to make informed options trading decisions. The library is stateless: eTrading owns authentication, tenant isolation, caching, and execution; MA owns analysis and decisions.
 
 ---
 
-## 2. Core Principles
+## 2. Vision: Learn by Trading, Not by Backtesting
+
+**MA does not have a backtesting engine. This is deliberate.**
+
+Backtesting gives false confidence. It overfits to the past, assumes perfect fills, ignores commissions, and teaches traders to trust historical patterns that may never repeat. The graveyard of blown-up accounts is full of traders who said "but it backtested well."
+
+MA's approach is different:
+
+### The Forward Testing Loop
+
+```
+1. START SMALL      → System protects you (validation gates, Kelly quarter-sizing)
+2. TRADE REAL       → 1 contract, real money, real fills, real emotions
+3. RECORD OUTCOME   → TradeOutcome captures everything: entry, exit, regime, P&L
+4. SYSTEM LEARNS    → calibrate_weights() adjusts ranking from YOUR real outcomes
+5. SCALE UP         → Kelly automatically increases sizing as win rate is proven
+6. REPEAT           → Each cycle makes the system more tuned to YOUR trading
+```
+
+### What This Means in Practice
+
+- A new user starts with the system's proven defaults (regime-gated iron condors, 50% profit target, 2× stop)
+- The validation gate (10 checks) and Kelly sizing protect capital during the learning phase
+- After 20-30 trades, `calibrate_weights()` has real data to work with
+- The system gets better over time from REAL outcomes, not from fitting to the past
+- No strategy is adopted because "it backtested well" — strategies are adopted because they WORKED in your account
+
+### Why This Matters for Small Accounts
+
+A $35K account can't afford the learning tax of blown-up backtested strategies. It needs:
+- **Proven structures** (IC, credit spread, calendar — not exotic strategies)
+- **Real risk management** (circuit breakers, regime stops, correlation-aware sizing)
+- **Gradual scaling** (1 contract → 2 → 3 as outcomes prove the edge)
+- **System-enforced discipline** (validation gates can't be overridden by emotions)
+
+The decision audit, crash sentinel, and profitability gates exist to PROTECT capital during the forward testing phase. They are not optional safety features — they are the core product.
+
+---
+
+## 3. Core Principles
 
 ### Reliability Over Cleverness
 
@@ -39,15 +82,26 @@ This library handles real money. Every output must be trustworthy or explicitly 
 
 ---
 
-## 3. Trading Philosophy
+## 4. Trading Philosophy
 
 | Principle | Details |
 |-----------|---------|
 | Income-first | Default to theta harvesting. Directional only when regime permits. |
-| Small accounts | 50K taxable, 200K IRA. Margin efficiency matters. Every trade must fit. |
+| Small accounts | 30-50K taxable, 200K IRA. Margin efficiency matters. Every trade must fit. |
 | Per-instrument regime | Gold can trend while tech chops. No global "market regime." |
 | Regime-gated decisions | No decision without a regime label. This is the core invariant. |
 | Same-ticker hedging only | No beta-weighted index hedging. |
+| Forward testing only | No backtesting. Start with 1 contract, prove it works, scale up. |
+| Capital preservation first | The most valuable thing the system does on a bad day is say "no." |
+| Every recommendation is executable | If the system suggests a trade action, it returns a TradeSpec with legs. |
+| Trust is earned, not assumed | Every output carries a 2-dimensional trust score (data quality + context quality). |
+
+### What MA Is NOT
+
+- **Not a backtesting engine.** Will never be. Use proven structures, validate forward.
+- **Not an order execution system.** MA decides. eTrading (or the trader) executes.
+- **Not a signal service.** MA doesn't tell you "buy SPY." It tells you "R1 regime, IC at these strikes, this credit, this sizing, this stop, this exit plan, this trust score."
+- **Not a black box.** Every decision is explainable — regime label traces to HMM features, every score traces to its components, every gate shows what passed and what failed.
 | Explainability | Every regime label traces to features and model state. Every number has a "why." |
 
 ---

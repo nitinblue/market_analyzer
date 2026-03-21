@@ -4,6 +4,38 @@
 
 ---
 
+## 0. Product Vision
+
+**market_analyzer brings institutional-grade systematic trading to small accounts.**
+
+There are tools for institutions (Bloomberg, expensive). There are tools for retail (TOS, manual). The space in between — systematic income trading for $30-50K accounts with real risk management — is empty. MA fills it.
+
+### The Pitch
+
+"Start with proven income structures. The system tells you WHICH structure, WHAT strikes, HOW MANY contracts, and WHEN to exit. Start with 1 contract. Track what happens. The system learns from your real outcomes and gets better."
+
+### Core Differentiators (What Nobody Else Has)
+
+1. **Per-instrument regime detection** — SPY can be R2 while GLD is R1. Not one global "market is bullish/bearish."
+2. **10-check profitability gate** — answers "will this IC actually make money after fees on a $35K account?"
+3. **Position-aware Kelly sizing** — correlation-adjusted, margin-regime aware, drawdown circuit breaker.
+4. **Crash sentinel** — GREEN/YELLOW/ORANGE/RED/BLUE with automatic sizing overrides per phase.
+5. **Decision audit** — 4-level report card (leg/trade/portfolio/risk) grades every trade 0-100.
+6. **Forward testing, not backtesting** — no historical optimization. Start small, trade real, system learns from YOUR outcomes.
+
+### Philosophy: Learn by Trading
+
+MA does NOT have a backtesting engine. This is deliberate. Backtesting overfits to the past. MA's approach:
+
+```
+Start small (1 contract) → Validation gates protect capital → Record outcomes →
+calibrate_weights() learns from real data → Kelly scales up as edge is proven → Repeat
+```
+
+The system gets better over time from REAL outcomes, not from curve-fitting history.
+
+---
+
 ## 1. Current State Assessment
 
 ### What Exists
