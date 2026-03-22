@@ -760,6 +760,29 @@ CSV format: `ticker, expiration, strike, option_type, bid, ask, delta, gamma, th
 
 ---
 
+## 27. Simulated Market Data Layer
+
+Offline market data simulation for development, testing, and integration testing with eTrading. Four preset scenarios: `calm`, `volatile`, `crash`, `india`.
+
+**CLI flags:**
+- `analyzer-cli --sim [PRESET]` — starts with simulated data (no broker connection required)
+- `analyzer-cli --sim snapshot` — captures current live data and caches for offline replay
+
+**Simulated scenarios:**
+
+| Preset | Market Condition | HMM Regime | IV Rank | Use Case |
+|--------|-----------------|-----------|---------|----------|
+| `calm` | Low volatility, mean-reverting | R1 | 20-30 | Iron condor testing |
+| `volatile` | High vol, directional | R4 | 70-90 | Defined-risk, hedge testing |
+| `crash` | Market stress, rapid decline | R4 | 90+ | Risk gate, stop loss, portfolio stress testing |
+| `india` | NSE index (NIFTY/BANKNIFTY) | R2 | 40-60 | India strategy, lot size, timezone testing |
+
+**Service:** `market_analyzer/simulation/` — `SimulationDataProvider` implements `MarketDataProvider` ABC. Snapshot captures OHLCV, option chains, Greeks, IV metrics on demand.
+
+**eTrading use:** Simulation layer enables offline integration testing. eTrading can test scan → rank → deploy workflow without live broker connection. Refresh service allows periodic snapshots to keep simulation current.
+
+---
+
 ## 20. CLI Commands
 
 Entry points:

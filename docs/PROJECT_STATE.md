@@ -7,11 +7,12 @@
 
 ## Test Suite
 
-- **Total tests: 2266** (as of 2026-03-21, collected by pytest)
-- All passing: yes (confirmed by `pytest --co -q`)
+- **Total tests: 2329** (as of 2026-03-21, collected by pytest)
+- All passing: yes (confirmed by `pytest -v`)
 - Test locations:
-  - `tests/` — unit tests (~2220 tests)
+  - `tests/` — unit tests (~2284 tests)
   - `tests/functional/` — functional integration tests (45 tests, 8 modules)
+  - Simulation refresh layer tests (new)
 
 ---
 
@@ -21,6 +22,9 @@ Commits in reverse chronological order since 2026-03-01:
 
 | Commit | Description |
 |--------|-------------|
+| (2026-03-21) | feat: simulated market data layer (calm/volatile/crash/india presets, --sim flag, 2329 tests) |
+| (2026-03-21) | feat: simulation refresh service (capture live data for offline use, --sim snapshot) |
+| (2026-03-21) | feat: Alpaca broker tested and working (latest trade fallback for after-hours) |
 | (2026-03-21) | Open source infrastructure — README, CONTRIBUTING, CI, issue templates, SECURITY, CODE_OF_CONDUCT |
 | (2026-03-21) | feat: desk management / capital allocation — 6 APIs (DeskSpec, suggest_desk_for_trade, compute_desk_risk_limits, compute_instrument_risk, evaluate_desk_health, rebalance_desks) |
 | (2026-03-21) | feat: demo portfolio system — `--demo` flag, `portfolio/trade/close_trade` CLI commands |
@@ -28,7 +32,7 @@ Commits in reverse chronological order since 2026-03-01:
 | (2026-03-21) | feat: assignment risk warning — US American options vs India European (cash-settled) |
 | (2026-03-21) | feat: cash vs margin analytics + structure-based margin buffers |
 | (2026-03-21) | feat: interest rate risk APIs |
-| (2026-03-21) | feat: Alpaca, IBKR, Schwab broker integrations (6 total) |
+| (2026-03-21) | feat: 6 broker integrations (tastytrade, zerodha, dhan, alpaca, ibkr, schwab) |
 | (2026-03-21) | feat: Dhan full implementation (India) — was stub, now complete |
 | (2026-03-21) | feat: setup wizard — `--setup` flag for first-time onboarding |
 | (2026-03-21) | feat: BYOD adapters — CSV, dict, IBKR/Schwab skeleton importers |

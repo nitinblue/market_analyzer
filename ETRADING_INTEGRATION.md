@@ -26,7 +26,8 @@
 19. [Supported Brokers — What eTrading Needs to Know](#19-supported-brokers--what-etrading-needs-to-know)
 20. [India Market: eTrading Delayed Data Service (Planned)](#20-india-market-etrading-delayed-data-service-planned)
 21. [Desk Management APIs (March 21, 2026)](#21-desk-management-apis-march-21-2026)
-22. [Demo Portfolio — eTrading Notes (March 21, 2026)](#22-demo-portfolio--etrading-notes-march-21-2026)
+22. [Simulation Layer — Offline Market Data (March 21, 2026)](#22-simulation-layer--offline-market-data-march-21-2026)
+23. [Demo Portfolio — eTrading Notes (March 21, 2026)](#23-demo-portfolio--etrading-notes-march-21-2026)
 
 ---
 
@@ -2771,7 +2772,39 @@ scan → rank → [suggest_desk_for_trade] → filter_trades_with_portfolio
 
 ---
 
-## 22. Demo Portfolio — eTrading Notes (March 21, 2026)
+## 22. Simulation Layer — Offline Market Data (March 21, 2026)
+
+MA includes a simulated market data layer for integration testing without a broker connection. Four presets: `calm`, `volatile`, `crash`, `india`.
+
+**CLI Usage:**
+```bash
+analyzer-cli --sim calm       # Start with calm-market preset
+analyzer-cli --sim volatile   # High vol, directional market
+analyzer-cli --sim crash      # Market stress scenario
+analyzer-cli --sim india      # NIFTY/BANKNIFTY with India lot sizes
+analyzer-cli --sim snapshot   # Capture live data for offline use
+```
+
+**What's simulated:**
+- OHLCV data with realistic price moves per regime
+- Option chains (strikes/expirations from yfinance, prices/Greeks generated)
+- IV rank (matched to regime: calm=20-30, volatile=70-90, crash=90+)
+- Broker-like quotes: bid/ask/mid/Greeks
+- Account balance and buying power
+
+**eTrading use:** Integration testing without live broker. Run scan → rank → health checks → adjustment workflows on simulated data. Perfect for:
+- Testing new features in isolation
+- Reproducing edge cases (narrow ORB, earnings, crash scenarios)
+- Training on demo trades before going live
+- CI/CD pipeline validation (no credential setup required)
+
+**Service:** `market_analyzer/simulation/SimulationDataProvider` implements `MarketDataProvider` ABC. Snapshot mode captures current live data (if broker connected) and caches for replay.
+
+**Snapshot refresh:** eTrading can call `refresh_simulation_data()` during market hours to capture fresh OHLCV and vol surfaces for testing.
+
+---
+
+## 23. Demo Portfolio — eTrading Notes (March 21, 2026)
 
 MA's demo portfolio system (`--demo` CLI flag) is **library-only** — it runs inside the CLI for developer exploration and user onboarding. eTrading does NOT need to integrate it.
 

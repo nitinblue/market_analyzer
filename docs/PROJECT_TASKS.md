@@ -113,7 +113,7 @@
 
 ## In Progress
 
-None. All known gaps are DONE per SYSTEMATIC_GAPS.md (2266 tests passing as of 2026-03-21).
+None. All known gaps are DONE per SYSTEMATIC_GAPS.md (2329 tests passing as of 2026-03-21).
 
 ---
 
@@ -121,7 +121,7 @@ None. All known gaps are DONE per SYSTEMATIC_GAPS.md (2266 tests passing as of 2
 
 ### P2 — Nice to Have (Library Quality)
 
-Most P1 items from the March 20 review were completed on March 21. Remaining backlog:
+Most P1 items from the March 20 review were completed on March 21. Simulation layer, Alpaca integration, 6-broker stack, demo portfolio, and desk management all shipped 2026-03-21. Remaining backlog:
 
 | # | Task | Why |
 |---|------|-----|
