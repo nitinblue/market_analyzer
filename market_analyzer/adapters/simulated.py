@@ -305,7 +305,9 @@ def _generate_option_quote(
     # Gaussian proximity centred at ATM, width scaled to IV × sqrt(T)
     width_sq = 2 * iv * iv * dte / 365
     proximity = math.exp(-atm_distance * atm_distance / max(width_sq, 1e-9))
-    time_value = underlying_price * iv * time_factor * proximity * 0.4
+    # Time value scales with IV — elevated IV produces richer premium (matching real market behaviour)
+    iv_boost = 1.0 + max(0.0, (iv - 0.20)) * 2.0  # 20% IV → 1.0×, 30% → 1.2×, 40% → 1.4×
+    time_value = underlying_price * iv * time_factor * proximity * 0.4 * iv_boost
 
     mid = round(intrinsic + time_value, 2)
     mid = max(0.01, mid)
@@ -535,4 +537,65 @@ def create_india_market() -> SimulatedMarketData:
         "BANKNIFTY": {"price": 50_000.0, "iv": 0.18, "iv_rank": 45},
         "RELIANCE":  {"price":  2_800.0, "iv": 0.25, "iv_rank": 40},
         "TCS":       {"price":  3_500.0, "iv": 0.20, "iv_rank": 30},
+    })
+
+
+def create_ideal_income() -> SimulatedMarketData:
+    """R1 regime, elevated IV — the ideal income trading scenario.
+
+    IV rank 50-65%: premium is rich but not extreme.
+    All iron condors should PASS the 10-check validation gate.
+    Use for: demo portfolio, weekend testing, integration testing.
+    """
+    return SimulatedMarketData({
+        "SPY": {"price": 560.0, "iv": 0.26, "iv_rank": 55, "atr_pct": 1.1},
+        "QQQ": {"price": 475.0, "iv": 0.30, "iv_rank": 60, "atr_pct": 1.3},
+        "IWM": {"price": 220.0, "iv": 0.28, "iv_rank": 52, "atr_pct": 1.5},
+        "GLD": {"price": 400.0, "iv": 0.25, "iv_rank": 48, "atr_pct": 1.0},
+        "TLT": {"price": 88.0,  "iv": 0.18, "iv_rank": 45, "atr_pct": 0.8},
+    })
+
+
+def create_post_crash_recovery() -> SimulatedMarketData:
+    """R2 regime transitioning to R1, very elevated IV — post-crash recovery.
+
+    IV rank 75-90%: premiums are 2-3× normal. This is where income traders
+    make their year. Iron condors collect $3-5 on 5-wide wings.
+    Use for: crash playbook Phase 2/3 testing, demo portfolio.
+    """
+    return SimulatedMarketData({
+        "SPY": {"price": 520.0, "iv": 0.35, "iv_rank": 82, "atr_pct": 1.8},
+        "QQQ": {"price": 430.0, "iv": 0.42, "iv_rank": 88, "atr_pct": 2.2},
+        "IWM": {"price": 195.0, "iv": 0.38, "iv_rank": 85, "atr_pct": 2.0},
+        "GLD": {"price": 450.0, "iv": 0.30, "iv_rank": 70, "atr_pct": 1.4},
+        "TLT": {"price": 92.0,  "iv": 0.22, "iv_rank": 72, "atr_pct": 1.0},
+    })
+
+
+def create_wheel_opportunity() -> SimulatedMarketData:
+    """Stocks at support with elevated IV — ideal for wheel strategy.
+
+    Tickers at or near key support levels, IV elevated enough for
+    meaningful CSP premiums. Use for: wheel strategy demo, CSP analysis.
+    """
+    return SimulatedMarketData({
+        "SPY":  {"price": 545.0, "iv": 0.28, "iv_rank": 58, "atr_pct": 1.3},
+        "AAPL": {"price": 210.0, "iv": 0.32, "iv_rank": 62, "atr_pct": 1.6},
+        "MSFT": {"price": 390.0, "iv": 0.30, "iv_rank": 55, "atr_pct": 1.4},
+        "AMD":  {"price": 145.0, "iv": 0.45, "iv_rank": 72, "atr_pct": 2.5},
+        "IWM":  {"price": 200.0, "iv": 0.30, "iv_rank": 55, "atr_pct": 1.6},
+    })
+
+
+def create_india_trading() -> SimulatedMarketData:
+    """India market with NIFTY/BANKNIFTY at tradeable levels.
+
+    IV elevated on expiry week. European exercise (no early assignment).
+    """
+    return SimulatedMarketData({
+        "NIFTY":     {"price": 24_500.0, "iv": 0.16, "iv_rank": 45, "atr_pct": 0.9},
+        "BANKNIFTY": {"price": 48_000.0, "iv": 0.20, "iv_rank": 55, "atr_pct": 1.2},
+        "FINNIFTY":  {"price": 22_000.0, "iv": 0.18, "iv_rank": 50, "atr_pct": 1.0},
+        "RELIANCE":  {"price":  2_700.0, "iv": 0.28, "iv_rank": 48, "atr_pct": 1.4},
+        "TCS":       {"price":  3_400.0, "iv": 0.22, "iv_rank": 35, "atr_pct": 1.1},
     })

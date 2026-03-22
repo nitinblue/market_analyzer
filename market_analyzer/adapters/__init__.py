@@ -15,6 +15,10 @@ from market_analyzer.adapters.simulated import (
     create_volatile_market,
     create_crash_scenario,
     create_india_market,
+    create_ideal_income,
+    create_post_crash_recovery,
+    create_wheel_opportunity,
+    create_india_trading,
 )
 
 __all__ = [
@@ -28,4 +32,8 @@ __all__ = [
     "create_volatile_market",
     "create_crash_scenario",
     "create_india_market",
+    "create_ideal_income",
+    "create_post_crash_recovery",
+    "create_wheel_opportunity",
+    "create_india_trading",
 ]

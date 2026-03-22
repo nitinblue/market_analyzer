@@ -6892,11 +6892,18 @@ def main() -> None:
     )
     parser.add_argument(
         "--sim",
-        choices=["calm", "volatile", "crash", "india", "snapshot"],
+        choices=[
+            "calm", "volatile", "crash", "india", "snapshot",
+            "income", "recovery", "wheel", "india_trading",
+        ],
         help=(
             "Start with simulated market data — no broker or internet required. "
             "Scenarios: calm (R1-like), volatile (R2-like), crash (R4-like), india (NSE), "
-            "snapshot (last saved live capture). "
+            "snapshot (last saved live capture), "
+            "income (R1 elevated IV — all gates pass), "
+            "recovery (post-crash R2, very rich premiums), "
+            "wheel (stocks at support, CSP-ready), "
+            "india_trading (NIFTY/BANKNIFTY with tradeable IV). "
             "Trust: UNRELIABLE — for testing/development only."
         ),
     )
@@ -6931,6 +6938,10 @@ def main() -> None:
             create_crash_scenario,
             create_india_market,
             create_volatile_market,
+            create_ideal_income,
+            create_post_crash_recovery,
+            create_wheel_opportunity,
+            create_india_trading,
         )
 
         if args.sim == "snapshot":
@@ -6955,6 +6966,10 @@ def main() -> None:
                 "volatile": create_volatile_market,
                 "crash": create_crash_scenario,
                 "india": create_india_market,
+                "income": create_ideal_income,
+                "recovery": create_post_crash_recovery,
+                "wheel": create_wheel_opportunity,
+                "india_trading": create_india_trading,
             }
             sim_market_data = _sim_scenarios[args.sim]()
             sim_market_metrics = SimulatedMetrics(sim_market_data)
