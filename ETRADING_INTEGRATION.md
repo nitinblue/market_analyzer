@@ -28,6 +28,7 @@
 21. [Desk Management APIs (March 21, 2026)](#21-desk-management-apis-march-21-2026)
 22. [Simulation Layer — Offline Market Data (March 21, 2026)](#22-simulation-layer--offline-market-data-march-21-2026)
 23. [Demo Portfolio — eTrading Notes (March 21, 2026)](#23-demo-portfolio--etrading-notes-march-21-2026)
+24. [Hedging Domain Integration](#24-hedging-domain-integration)
 
 ---
 
@@ -2819,3 +2820,162 @@ MA's demo portfolio system (`--demo` CLI flag) is **library-only** — it runs i
 3. Call `calibrate_weights(outcomes)` with simulated trade outcomes to pre-train the ML layer before live trading
 
 **No MA API changes required.** The demo portfolio does not expose any new eTrading APIs. All existing lifecycle APIs work identically in demo mode — eTrading just passes simulated data instead of real broker data.
+
+---
+
+## 24. Hedging Domain Integration
+
+eTrading should integrate the hedging domain at 3 levels: per-trade, per-portfolio, and ongoing monitoring.
+
+### Level 1: Per-Trade Hedge Recommendation
+
+Every time eTrading books a new trade, it should also check what hedge is needed.
+
+```python
+from income_desk import resolve_hedge_strategy, compare_hedge_methods
+
+# Before booking any equity position:
+approach = resolve_hedge_strategy(
+    ticker="TATASTEEL",
+    position_value=75000,
+    shares=500,
+    current_price=150.0,
+    regime_id=2,
+    market="India",
+    account_nlv=5000000,
+)
+
+# approach.recommended_tier = "futures_synthetic"
+# approach.rationale = "Options illiquid (spreads >5%), futures available"
+# approach.has_liquid_options = False
+# approach.has_futures = True
+# approach.alternatives = [{tier: "proxy_index", reason_not_chosen: "higher basis risk"}]
+
+# If user wants to see all options:
+comparison = compare_hedge_methods(
+    ticker="TATASTEEL", shares=500, current_price=150.0,
+    regime_id=2, atr=3.0, market="India",
+    account_nlv=5000000,
+)
+# comparison.methods = [futures_hedge, proxy_nifty, ...] ranked by cost
+# comparison.recommended.trade_spec = TradeSpec(FUTURES_SHORT, 1 lot)
+```
+
+**eTrading action:** After booking a trade, show "Hedge recommendation" card with the approach + TradeSpec. One-click to place the hedge.
+
+### Level 2: Portfolio-Level Hedge Analysis
+
+Run daily or on-demand across the entire portfolio.
+
+```python
+from income_desk import analyze_portfolio_hedge
+
+analysis = analyze_portfolio_hedge(
+    positions=[
+        {"ticker": "RELIANCE", "shares": 250, "value": 625000, "current_price": 2500, "delta": 1.0},
+        {"ticker": "TATASTEEL", "shares": 500, "value": 75000, "current_price": 150, "delta": 1.0},
+        {"ticker": "DMART", "shares": 100, "value": 350000, "current_price": 3500, "delta": 1.0},
+        {"ticker": "HDFCBANK", "shares": 550, "value": 825000, "current_price": 1500, "delta": 1.0},
+    ],
+    account_nlv=5000000,
+    regime={"RELIANCE": 1, "TATASTEEL": 2, "DMART": 1, "HDFCBANK": 1},
+    target_hedge_pct=0.80,
+    max_cost_pct=0.02,    # Max 2% of portfolio/month
+    market="India",
+)
+
+# What eTrading gets back:
+analysis.total_positions           # 4
+analysis.coverage_pct              # 0.85 (85% hedged)
+analysis.total_hedge_cost          # ₹12,500/month
+analysis.hedge_cost_pct            # 0.65%
+analysis.portfolio_delta_before    # 4.0
+analysis.portfolio_delta_after     # 0.6
+
+# Per-position detail:
+for ph in analysis.position_hedges:
+    print(f"{ph.ticker}: {ph.tier} → {ph.hedge_type}")
+    # RELIANCE: direct → protective_put (TradeSpec ready)
+    # TATASTEEL: futures_synthetic → futures_short (TradeSpec ready)
+    # DMART: proxy_index → nifty_put (TradeSpec ready)
+    # HDFCBANK: direct → protective_put (TradeSpec ready)
+
+# All executable orders:
+for ts in analysis.trade_specs:
+    place_order(ts)  # eTrading executes
+```
+
+**eTrading action:**
+- Daily portfolio hedge dashboard showing: tier breakdown pie chart, per-position hedge status, total cost, delta before/after
+- "Hedge All" button that places all TradeSpecs
+- Cost budget tracking (actual vs max_cost_pct)
+
+### Level 3: Hedge Monitoring
+
+Run on every monitoring cycle (same schedule as position monitoring).
+
+```python
+from income_desk import monitor_hedge_status, compute_hedge_effectiveness
+
+# Check hedge health
+status = monitor_hedge_status([
+    {"ticker": "RELIANCE", "hedge_type": "protective_put", "dte_remaining": 3},
+    {"ticker": "TATASTEEL", "hedge_type": "futures_short", "dte_remaining": 25},
+    {"ticker": "DMART", "hedge_type": "nifty_put", "dte_remaining": 1},
+])
+
+# status.expiring_soon = ["RELIANCE" (3 DTE), "DMART" (1 DTE)]
+# status.roll_trade_specs = [TradeSpec(close old RELIANCE put, open new), ...]
+# status.alerts = ["2 hedges expiring within 5 days — roll needed"]
+
+# How effective are hedges?
+effectiveness = compute_hedge_effectiveness(
+    positions=[...],
+    hedges=[...],
+    market_move_pct=-0.05,  # Simulate 5% market drop
+)
+# effectiveness.portfolio_loss_unhedged = -₹93,750
+# effectiveness.portfolio_loss_hedged = -₹18,750
+# effectiveness.hedge_savings = ₹75,000
+# effectiveness.roi_on_hedge = 6.0x (₹75K saved / ₹12.5K cost)
+```
+
+**eTrading action:**
+- Alert when hedges expire (SMS/WhatsApp)
+- Auto-generate roll orders
+- Monthly hedge effectiveness report: "Hedges saved you ₹X this month"
+
+### Integration Checklist for eTrading
+
+| Step | When | API | eTrading Action |
+|------|------|-----|-----------------|
+| **New equity trade** | At booking | `resolve_hedge_strategy()` | Show hedge recommendation card |
+| **User wants comparison** | On demand | `compare_hedge_methods()` | Show ranked table with costs |
+| **Daily portfolio check** | Morning | `analyze_portfolio_hedge()` | Hedge dashboard + "Hedge All" button |
+| **Position monitoring** | Every cycle | `monitor_hedge_status()` | Alert on expiring hedges, roll specs |
+| **Monthly review** | Month end | `compute_hedge_effectiveness()` | "Your hedges saved ₹X" report |
+| **Regime change** | On regime shift | Re-run `analyze_portfolio_hedge()` | Adjust hedges (R1→R4: tighten) |
+| **F&O coverage check** | Onboarding | `get_fno_coverage()` | Show which stocks can be hedged |
+
+### Data eTrading Must Maintain
+
+| Data | Where | Used by |
+|------|-------|---------|
+| Position list with shares/value/delta | Portfolio DB | `analyze_portfolio_hedge()` |
+| Active hedges with DTE | Hedge tracking table | `monitor_hedge_status()` |
+| Monthly hedge costs | Cost tracking | `compute_hedge_effectiveness()` |
+| Per-ticker regime | From crash sentinel | Regime-aware hedge sizing |
+
+### India-Specific Notes
+
+- **F&O coverage is limited** — `get_fno_coverage()` shows exactly which stocks have direct/futures/proxy hedging
+- **Lot sizes are large** — resolver checks affordability (20% of account threshold)
+- **European exercise** — no early assignment risk on index options
+- **Weekly expiry** — NIFTY puts expire Thursday, must roll weekly
+- **Futures premium** — India futures typically trade at 0.5-2% premium to spot (basis cost)
+
+### US-Specific Notes
+
+- Most stocks have liquid options — `resolve_hedge_strategy()` returns DIRECT for ~90% of US tickers
+- Standard lot size 100 — affordability rarely an issue above $10K account
+- SPY/QQQ are the primary proxy instruments for Tier 3
