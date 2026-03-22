@@ -239,6 +239,129 @@ Client uploads CSV → income-desk processes →
 
 ---
 
+## Service 7: Hedging-as-a-Service for India Portfolios (₹2999-9999/month)
+
+**The India hedging problem is unique and massive.**
+
+In the US, you can buy puts on almost anything — individual stocks, sector ETFs, indices. Hedging is straightforward. In India:
+
+- **Only ~180 stocks have F&O** (NSE derivatives). If you hold 50 stocks, 30+ may have NO options available.
+- **Lot sizes are large** — NIFTY lot is 25 (₹6.5L notional), BANKNIFTY lot is 15 (₹7.5L notional). A ₹10L portfolio can barely afford one lot.
+- **No sector ETF options** — no India equivalent of XLF/XLK/XLE puts.
+- **Calendar effects** — weekly expiry on NIFTY/BANKNIFTY means short-dated hedges are cheap but expire fast.
+- **SEBI margin rules (2021)** — peak margin reporting makes naked hedging expensive.
+
+Indian retail traders either:
+1. **Don't hedge at all** (90% of them) — fully exposed to gaps
+2. **Over-hedge** — buy expensive NIFTY puts that eat into returns
+3. **Hedge wrong** — buy puts on NIFTY when their portfolio is mostly midcap/smallcap (beta mismatch)
+
+**What you offer: Smart hedging that keeps 50-60% capital deployed at ALL times**
+
+### The Hedging Framework
+
+```
+Total Capital: ₹50L
+├── Always Deployed (50-60%): ₹25-30L
+│   ├── Core equity (₹15L) — blue chips, dividend payers
+│   │   Hedge: NIFTY puts sized to portfolio beta
+│   └── Income options (₹10-15L) — ICs on NIFTY/BANKNIFTY
+│       Hedge: built into structure (defined risk)
+│
+├── Tactical (20-30%): ₹10-15L
+│   ├── Regime R1/R2: deployed in income trades
+│   ├── Regime R3: deployed in directional
+│   └── Regime R4: pulled to cash (crash protocol)
+│
+└── Cash Buffer (10-20%): ₹5-10L
+    └── Always available for: margin, assignment, opportunities
+```
+
+### Hedging Strategies for India Constraints
+
+**Problem 1: Stock has no F&O — how to hedge?**
+
+| Holding | No F&O? | Hedge with | Logic |
+|---------|---------|-----------|-------|
+| TCS, Infosys, Wipro | TCS has F&O, others don't | NIFTY IT index proxy — buy NIFTY put, beta-adjusted | IT stocks move ~0.8× NIFTY |
+| HDFC Bank, Kotak, ICICI | All have F&O | Direct — buy puts on the stock | Best hedge, but lot sizes are large |
+| Midcap basket (15 stocks) | Most don't | NIFTY put + NIFTY BANKNIFTY spread | Midcaps have ~1.2× NIFTY beta |
+| Smallcap basket | None have F&O | NIFTY put, over-weight by 1.5× beta | Imperfect but better than nothing |
+| Gold (SGB/Gold ETF) | MCX gold futures | MCX gold put or sell MCX gold call | Different exchange, complexity |
+
+**Problem 2: Lot sizes are too big for small portfolio**
+
+| Portfolio size | Can afford | Hedge approach |
+|---------------|-----------|----------------|
+| ₹5-10L | 0-1 NIFTY lots | Weekly NIFTY put (cheap, expires fast — roll weekly) |
+| ₹10-25L | 1-2 NIFTY lots | Monthly NIFTY put spread (defined cost, 30 DTE) |
+| ₹25-50L | 2-4 lots | NIFTY + BANKNIFTY puts, sector-weighted |
+| ₹50L+ | Full hedging | Individual stock puts where available + index overlay |
+
+**Problem 3: How to stay 50-60% invested during R4**
+
+The crash playbook says "100% cash in R4." But clients want to stay invested. The compromise:
+
+```
+R4 Hedged Deployment:
+├── Core equity (30%): KEEP — these are long-term holds
+│   └── Add: NIFTY put at 5% OTM, 30 DTE (cost: ~1-2% of portfolio/month)
+│
+├── Income options (0%): CLOSE ALL — R4 destroys income structures
+│
+├── Protective collar (20%): New position
+│   └── Own shares + sell OTM call + buy OTM put = net zero cost hedge
+│   └── Caps upside but eliminates downside
+│
+└── Cash (50%): Ready for post-crash deployment
+```
+
+**Net result:** 50% deployed (core + collar), fully hedged, zero premium cost on the collar, 50% cash ready for recovery.
+
+### The Service
+
+**What client gets:**
+
+| Frequency | Deliverable |
+|-----------|-------------|
+| Onboarding | Portfolio beta analysis, hedge instrument mapping, cost budget |
+| Weekly | Hedge position review — are hedges still sized correctly? |
+| On regime change | Alert: "NIFTY shifted to R3 — tighten hedges" with specific TradeSpec |
+| On R4 trigger | Emergency: "Close income, add NIFTY puts, collar core equity" with exact legs |
+| Monthly | Hedge cost report — what did protection cost vs what it saved |
+
+**Pricing:**
+
+| Tier | Price | Portfolio | What |
+|------|-------|-----------|------|
+| Basic | ₹2999/month | ₹5-25L | Monthly hedge review + regime alerts |
+| Professional | ₹5999/month | ₹25-75L | Weekly review + real-time alerts + position-specific hedges |
+| Desk | ₹9999/month | ₹75L+ | Daily review + custom beta mapping + dedicated WhatsApp support |
+
+**What income-desk already supports:**
+- `ma.regime.detect()` — per-instrument regime (R4 = hedge now)
+- `assess_crash_sentinel()` — GREEN → ORANGE → RED escalation
+- `compute_monitoring_action()` — close signals with TradeSpec
+- `assess_rate_risk()` — bond/rate exposure
+- `assess_portfolio_rate_risk()` — portfolio-level rate sensitivity
+- `compute_risk_dashboard()` — Greeks, correlation, drawdown
+- `hedge` CLI command — same-ticker hedging analysis
+- `stress_test` — portfolio stress scenarios (13 predefined)
+
+**What to build for India hedging:**
+- Beta-adjusted NIFTY hedge sizing (portfolio beta vs NIFTY)
+- Protective collar builder (own shares + sell call + buy put)
+- Cross-instrument hedge mapper (which index proxy for non-F&O stocks)
+- Weekly hedge roll automation (short-dated puts expire, need rolling)
+- Hedge cost tracker (what did protection cost this month?)
+- Sector exposure analyzer (how much IT/banking/auto in portfolio?)
+
+**India market size:** ₹25L+ portfolios in India that are equity-heavy but unhedged = millions. Even the ₹2999 basic tier serving 200 clients = ₹6L/month.
+
+**The pitch to Indian clients:** "You keep 60% of your capital working at all times — even when NIFTY crashes. Your neighbor panics and sells at the bottom. You're hedged, earning income on your core, and have cash ready for recovery."
+
+---
+
 ## India Market Opportunity — Why This Works
 
 1. **10M+ retail F&O traders** — largest options market in the world by volume (NSE)
