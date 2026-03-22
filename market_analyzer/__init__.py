@@ -259,6 +259,12 @@ from market_analyzer.arbitrage import (
 # BYOD adapters — ready-made provider implementations users can plug in
 from market_analyzer.adapters.csv_provider import CSVProvider
 from market_analyzer.adapters.dict_quotes import DictQuoteProvider, DictMetricsProvider
+from market_analyzer.adapters.csv_trades import (
+    ImportedPosition,
+    ImportResult,
+    detect_broker_format,
+    import_trades_csv,
+)
 from market_analyzer.adapters.simulated import (
     SimulatedMarketData,
     SimulatedMetrics,

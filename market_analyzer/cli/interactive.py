@@ -6834,6 +6834,67 @@ stratified by risk category (defined / semi_defined / undefined)."""
 
         print(f"CLOSED: {pos.ticker} {pos.structure_type} -> P&L: ${pos.pnl:+,.0f} ({pos.close_reason})")
 
+    def do_import_trades(self, arg: str) -> None:
+        """Import trades from broker CSV: import_trades PATH [BROKER]
+
+        Auto-detects broker format from CSV headers.
+        Supported: thinkorswim, tastytrade, schwab, ibkr, fidelity, webull, generic
+
+        Examples:
+            import_trades ~/Downloads/trades.csv
+            import_trades ~/Downloads/tos_trades.csv thinkorswim
+        """
+        from market_analyzer.adapters.csv_trades import import_trades_csv, detect_broker_format
+
+        parts = arg.strip().split()
+        if not parts:
+            print("Usage: import_trades PATH [BROKER]")
+            return
+
+        file_path = parts[0]
+        broker_hint = parts[1] if len(parts) > 1 else None
+
+        try:
+            result = import_trades_csv(file_path, broker=broker_hint)
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+            return
+
+        _print_header(f"CSV Trade Import — {result.broker_detected}")
+        print(f"\n  File:     {result.file_path}")
+        print(f"  Broker:   {result.broker_detected}")
+        print(f"  Imported: {result.total_imported}")
+        print(f"  Skipped:  {result.skipped}")
+
+        if result.errors:
+            print(f"\n  {_styled('Parse errors:', 'yellow')}")
+            for err in result.errors[:10]:
+                print(f"    {err}")
+            if len(result.errors) > 10:
+                print(f"    ... and {len(result.errors) - 10} more")
+
+        if result.total_imported == 0:
+            return
+
+        print(f"\n  Positions:")
+        rows = []
+        for pos in result.positions:
+            if pos.option_type:
+                instrument = (
+                    f"{pos.ticker} {pos.strike} {pos.option_type.upper()[:1]}"
+                    f" {pos.expiration}"
+                )
+            else:
+                instrument = pos.ticker
+            rows.append({
+                "Symbol": instrument,
+                "Qty": pos.quantity,
+                "Entry $": f"{pos.entry_price:.2f}",
+                "Date": str(pos.entry_date),
+                "Type": pos.structure_type,
+            })
+        print(tabulate(rows, headers="keys", tablefmt="simple", stralign="right"))
+
     def do_quit(self, arg: str) -> bool:
         """Exit the REPL."""
         print("Goodbye.")

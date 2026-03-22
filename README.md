@@ -309,15 +309,46 @@ income-desk --sim crash       # Test crash playbook
 | Alpaca | US | Free (delayed) |
 | TastyTrade | US | Account required |
 | IBKR | US/Global | Account required |
-| Schwab | US | Account required |
+| Schwab / thinkorswim | US | Account required |
 | Dhan | India | Free API |
 | Zerodha | India | Account required |
+
+> **Note:** thinkorswim is Schwab's trading platform. The Schwab broker integration covers both — connecting via the Schwab API gives you access to thinkorswim accounts. No separate integration needed.
 
 ```bash
 income-desk --setup    # Connect your broker
 ```
 
 Works without any broker (yfinance free data). Connect a broker for real-time quotes, Greeks, and HIGH trust analysis.
+
+## Multi-Account Consolidation
+
+Many traders have accounts across multiple brokers — TastyTrade for options, Schwab for equities, Fidelity for retirement. income-desk treats ALL your accounts as one portfolio.
+
+| Library Features | Platform Ideas |
+|-----------------|----------------|
+| Pluggable broker ABCs — connect multiple simultaneously | Unified portfolio dashboard across brokers |
+| `PortfolioExposure` aggregates across all positions | Cross-broker risk dashboard |
+| `compute_position_size()` considers ALL open positions | Sizing that knows about your Fidelity IRA AND your TastyTrade options |
+| CSV import from any broker | Consolidate without API — just upload trade exports |
+| Correlation checks across all tickers regardless of account | One correlation matrix, all accounts |
+| Crash sentinel monitors all positions | Single alert for all accounts |
+
+**Example:** You have 3 accounts:
+- TastyTrade: 2 iron condors (API connected)
+- Schwab IRA: 5 equity positions (API connected)
+- Fidelity 401K: index funds (CSV import)
+
+income-desk sees all 10 positions as ONE portfolio. Kelly sizing accounts for the Fidelity positions. Correlation checks catch SPY IC + SPY index fund overlap. The crash sentinel monitors everything.
+
+**CSV import for non-API brokers:**
+
+```bash
+> import_trades ~/Downloads/fidelity_trades.csv
+Detected: fidelity | Imported: 12 positions | Skipped: 2
+```
+
+Supported formats: thinkorswim, TastyTrade, Schwab, IBKR, Fidelity, Webull, generic.
 
 ## Trust Framework
 
