@@ -4,9 +4,27 @@ build-backend = "hatchling.build"
 
 [project]
 name = "income-desk"
-version = "0.3.0"
+version = "0.3.1"
 description = "Systematic options trading intelligence for small accounts. Regime detection, profitability gates, Kelly sizing, crash sentinel, decision audit. Your personal trading desk brain."
+readme = "README.md"
+license = {text = "MIT"}
 requires-python = ">=3.11"
+keywords = [
+    "options-trading", "iron-condor", "credit-spread", "theta",
+    "regime-detection", "hmm", "kelly-criterion", "systematic-trading",
+    "income-trading", "small-account", "risk-management",
+    "tastytrade", "alpaca", "interactive-brokers", "schwab", "zerodha", "dhan",
+    "options", "trading", "quant", "finance",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Typing :: Typed",
+]
 dependencies = [
     "pandas>=2.0",
     "numpy>=1.24",
