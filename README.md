@@ -4,7 +4,7 @@
 
 Every trade suggestion is bespoke to your portfolio, your risk profile, your capital. This isn't a signal service — it's a personal trading intelligence system.
 
-[![Tests](https://github.com/YOUR_USER/market-analyzer/actions/workflows/test.yml/badge.svg)](https://github.com/YOUR_USER/market-analyzer/actions)
+[![Tests](https://github.com/nitinblue/market_analyzer/actions/workflows/test.yml/badge.svg)](https://github.com/nitinblue/market_analyzer/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://python.org)
 
