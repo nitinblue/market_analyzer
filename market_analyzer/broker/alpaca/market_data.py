@@ -270,8 +270,13 @@ class AlpacaMarketData(MarketDataProvider):
         return result
 
     def get_underlying_price(self, ticker: str) -> float | None:
-        """Real-time/delayed underlying mid price from Alpaca."""
+        """Real-time/delayed underlying price from Alpaca.
+
+        Tries quote (bid/ask mid) first, falls back to latest trade.
+        Latest trade works after hours; quotes may be empty.
+        """
         try:
+            # Try quote first (real-time during market hours)
             from alpaca.data.requests import StockLatestQuoteRequest
             request = StockLatestQuoteRequest(symbol_or_symbols=ticker)
             quotes = self._stock.get_stock_latest_quote(request)
@@ -281,6 +286,16 @@ class AlpacaMarketData(MarketDataProvider):
                 ask = float(q.ask_price or 0)
                 if bid > 0 and ask > 0:
                     return (bid + ask) / 2
+
+            # Fallback: latest trade (works after hours)
+            from alpaca.data.requests import StockLatestTradeRequest
+            trades = self._stock.get_stock_latest_trade(
+                StockLatestTradeRequest(symbol_or_symbols=ticker)
+            )
+            if ticker in trades:
+                price = float(trades[ticker].price or 0)
+                if price > 0:
+                    return price
         except ImportError as exc:
             raise ImportError(
                 "alpaca-py is not installed. Run: pip install 'market-analyzer[alpaca]'"
