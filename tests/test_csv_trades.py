@@ -9,6 +9,7 @@ import pytest
 from market_analyzer.adapters.csv_trades import (
     ImportedPosition,
     ImportResult,
+    _parse_fidelity_symbol,
     _parse_symbol,
     detect_broker_format,
     import_trades_csv,
@@ -346,3 +347,193 @@ class TestErrorHandling:
         )
         result = import_trades_csv(csv)
         assert result.total_imported == 1
+
+
+# ---------------------------------------------------------------------------
+# _parse_fidelity_symbol
+# ---------------------------------------------------------------------------
+
+_FIDELITY_HDR = (
+    "Account Number,Account Name,Symbol,Description,Quantity,Last Price,"
+    "Last Price Change,Current Value,Today's Gain/Loss Dollar,"
+    "Today's Gain/Loss Percent,Total Gain/Loss Dollar,Total Gain/Loss Percent,"
+    "Percent Of Account,Cost Basis Total,Average Cost Basis,Type\n"
+)
+
+
+class TestParseFidelitySymbol:
+    def test_call_option(self) -> None:
+        ticker, opt_type, strike, exp = _parse_fidelity_symbol(" -META260424C625")
+        assert ticker == "META"
+        assert opt_type == "call"
+        assert strike == pytest.approx(625.0)
+        assert exp == date(2026, 4, 24)
+
+    def test_put_option(self) -> None:
+        ticker, opt_type, strike, exp = _parse_fidelity_symbol(" -SPY260321P570")
+        assert ticker == "SPY"
+        assert opt_type == "put"
+        assert strike == pytest.approx(570.0)
+        assert exp == date(2026, 3, 21)
+
+    def test_plain_equity(self) -> None:
+        ticker, opt_type, strike, exp = _parse_fidelity_symbol("GBTC")
+        assert ticker == "GBTC"
+        assert opt_type is None
+        assert strike is None
+        assert exp is None
+
+    def test_option_no_leading_space(self) -> None:
+        ticker, opt_type, strike, exp = _parse_fidelity_symbol("-META260424C625")
+        assert ticker == "META"
+        assert opt_type == "call"
+        assert strike == pytest.approx(625.0)
+
+
+# ---------------------------------------------------------------------------
+# import_trades_csv — fidelity_positions (synthetic)
+# ---------------------------------------------------------------------------
+
+
+class TestFidelityPositionsFormat:
+    def test_fidelity_positions_detection(self, tmp_path: Path) -> None:
+        csv_file = tmp_path / "fidelity_pos.csv"
+        csv_file.write_text(
+            _FIDELITY_HDR
+            + "123,IRA,AAPL,APPLE INC,50,$210.00,+$2.00,$10500.00,+$100.00,+0.96%,"
+            "+$500.00,+5.00%,10.00%,$10000.00,$200.00,Cash,\n"
+        )
+        assert detect_broker_format(csv_file) == "fidelity_positions"
+
+    def test_equity_long_imported(self, tmp_path: Path) -> None:
+        csv_file = tmp_path / "fidelity_pos.csv"
+        csv_file.write_text(
+            _FIDELITY_HDR
+            + "123,IRA,AAPL,APPLE INC,50,$210.00,+$2.00,$10500.00,+$100.00,+0.96%,"
+            "+$500.00,+5.00%,10.00%,$10000.00,$200.00,Cash,\n"
+        )
+        result = import_trades_csv(csv_file)
+        assert result.broker_detected == "fidelity_positions"
+        assert result.total_imported == 1
+        aapl = result.positions[0]
+        assert aapl.ticker == "AAPL"
+        assert aapl.quantity == 50
+        assert aapl.entry_price == pytest.approx(200.0)
+        assert aapl.structure_type == "equity_long"
+        assert aapl.broker_source == "fidelity_positions"
+
+    def test_option_leg_imported(self, tmp_path: Path) -> None:
+        csv_file = tmp_path / "fidelity_pos.csv"
+        csv_file.write_text(
+            _FIDELITY_HDR
+            + "123,IRA, -SPY260424C580,SPY APR 24 2026 $580 CALL,-1,$5.00,-$1.00,"
+            "-$500.00,+$100.00,+16.67%,+$200.00,+28.57%,-0.50%,$700.00,$7.00,Margin,\n"
+        )
+        result = import_trades_csv(csv_file)
+        assert result.total_imported == 1
+        spy = result.positions[0]
+        assert spy.ticker == "SPY"
+        assert spy.option_type == "call"
+        assert spy.strike == pytest.approx(580.0)
+        assert spy.expiration == date(2026, 4, 24)
+        assert spy.quantity == -1
+        assert spy.entry_price == pytest.approx(7.0)
+        assert spy.structure_type == "option_single_leg"
+
+    def test_skips_spaxx_and_pending(self, tmp_path: Path) -> None:
+        csv_file = tmp_path / "fidelity_pos.csv"
+        csv_file.write_text(
+            _FIDELITY_HDR
+            + "123,IRA,SPAXX**,HELD IN MONEY MARKET,,,,$50000.00,,,,,50.00%,,,Cash,\n"
+            + "123,IRA,Pending activity,,,,,$2000.00,,,,,,,,,\n"
+        )
+        result = import_trades_csv(csv_file)
+        assert result.total_imported == 0
+        assert result.skipped >= 2
+
+    def test_mixed_positions(self, tmp_path: Path) -> None:
+        csv_file = tmp_path / "fidelity_pos.csv"
+        csv_file.write_text(
+            _FIDELITY_HDR
+            + "123,IRA,AAPL,APPLE INC,50,$210.00,+$2.00,$10500.00,+$100.00,+0.96%,"
+            "+$500.00,+5.00%,10.00%,$10000.00,$200.00,Cash,\n"
+            + "123,IRA, -SPY260424C580,SPY APR 24 2026 $580 CALL,-1,$5.00,-$1.00,"
+            "-$500.00,+$100.00,+16.67%,+$200.00,+28.57%,-0.50%,$700.00,$7.00,Margin,\n"
+            + "123,IRA,SPAXX**,HELD IN MONEY MARKET,,,,$50000.00,,,,,50.00%,,,Cash,\n"
+        )
+        result = import_trades_csv(csv_file)
+        assert result.broker_detected == "fidelity_positions"
+        assert result.total_imported == 2
+        tickers = {p.ticker for p in result.positions}
+        assert "AAPL" in tickers
+        assert "SPY" in tickers
+
+    def test_footer_disclaimer_skipped(self, tmp_path: Path) -> None:
+        """Fidelity appends multi-line disclaimer text — should not crash or import."""
+        csv_file = tmp_path / "fidelity_pos.csv"
+        csv_file.write_text(
+            _FIDELITY_HDR
+            + "123,IRA,GBTC,GRAYSCALE BITCOIN TRUST ETF,108,$54.65,-$0.06,"
+            "$5902.20,-$6.48,-0.11%,-$3493.80,-37.19%,3.24%,$9396.00,$87.00,Cash,\n"
+            + "\n"
+            + '"The data and information in this spreadsheet is provided to you solely"\n'
+        )
+        result = import_trades_csv(csv_file)
+        assert result.total_imported == 1
+        assert result.errors == []
+
+
+# ---------------------------------------------------------------------------
+# import_trades_csv — real Fidelity CSV (integration, skipped if absent)
+# ---------------------------------------------------------------------------
+
+
+class TestRealFidelityImport:
+    _REAL_CSV = Path(
+        r"C:\Users\nitin\PythonProjects\eTrading\data\imports"
+        r"\Portfolio_Positions_Mar-22-2026.csv"
+    )
+
+    def test_format_detection(self) -> None:
+        if not self._REAL_CSV.exists():
+            pytest.skip("Real Fidelity CSV not available")
+        assert detect_broker_format(self._REAL_CSV) == "fidelity_positions"
+
+    def test_real_fidelity_csv(self) -> None:
+        if not self._REAL_CSV.exists():
+            pytest.skip("Real Fidelity CSV not available")
+
+        result = import_trades_csv(self._REAL_CSV)
+        assert result.broker_detected == "fidelity_positions"
+        # GBTC + 4 META IC legs = 5 minimum
+        assert result.total_imported >= 5
+        assert result.errors == []
+
+        # META IC: all 4 legs present
+        meta = [p for p in result.positions if p.ticker == "META"]
+        assert len(meta) == 4
+
+        calls = [p for p in meta if p.option_type == "call"]
+        puts = [p for p in meta if p.option_type == "put"]
+        assert len(calls) == 2
+        assert len(puts) == 2
+
+        strikes = sorted(p.strike for p in meta)
+        assert strikes == [580.0, 590.0, 625.0, 635.0]
+
+        # IC structure: short 625C, long 635C, long 580P, short 590P
+        short_calls = [p for p in calls if p.quantity < 0]
+        long_calls = [p for p in calls if p.quantity > 0]
+        short_puts = [p for p in puts if p.quantity < 0]
+        long_puts = [p for p in puts if p.quantity > 0]
+        assert len(short_calls) == 1 and short_calls[0].strike == pytest.approx(625.0)
+        assert len(long_calls) == 1 and long_calls[0].strike == pytest.approx(635.0)
+        assert len(short_puts) == 1 and short_puts[0].strike == pytest.approx(590.0)
+        assert len(long_puts) == 1 and long_puts[0].strike == pytest.approx(580.0)
+
+        # GBTC equity position
+        gbtc = [p for p in result.positions if p.ticker == "GBTC"]
+        assert len(gbtc) == 1
+        assert gbtc[0].quantity == 108
+        assert gbtc[0].structure_type == "equity_long"
+        assert gbtc[0].entry_price == pytest.approx(87.0)

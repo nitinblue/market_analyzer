@@ -88,6 +88,15 @@ _BROKER_FORMATS: dict[str, dict] = {
         "side_col": "Buy/Sell",
         "date_format": "%Y%m%d",
     },
+    "fidelity_positions": {
+        "detect": ["Account Number", "Account Name", "Symbol", "Description", "Quantity", "Last Price", "Cost Basis Total"],
+        "date_col": None,
+        "symbol_col": "Symbol",
+        "qty_col": "Quantity",
+        "price_col": "Average Cost Basis",
+        "side_col": None,
+        "date_format": None,
+    },
     "fidelity": {
         "detect": ["Run Date", "Action", "Symbol", "Description", "Quantity", "Price"],
         "date_col": "Run Date",
@@ -186,6 +195,9 @@ def import_trades_csv(
             broker_detected="unknown",
             file_path=str(path),
         )
+
+    if broker == "fidelity_positions":
+        return _import_fidelity_positions(path)
 
     fmt = _BROKER_FORMATS.get(broker)
     if fmt is None:
@@ -321,6 +333,122 @@ def _parse_symbol(
     # Plain equity symbol — strip leading dot (ToS sometimes prefixes)
     ticker = clean.split()[0].lstrip(".")
     return ticker, None, None, None
+
+
+def _parse_fidelity_symbol(
+    symbol: str,
+) -> tuple[str, str | None, float | None, date | None]:
+    """Parse Fidelity option symbol format.
+
+    Examples::
+
+        " -META260424C625"  → META, call, 625.0, 2026-04-24
+        "GBTC"              → GBTC, None, None, None
+        " -SPY260321P570"   → SPY, put, 570.0, 2026-03-21
+    """
+    # Strip leading whitespace and dash (Fidelity prefixes options with " -")
+    clean = symbol.strip().lstrip("-").strip()
+
+    # Try option pattern: TICKER + YYMMDD + C/P + STRIKE (no zero-padding)
+    match = re.match(r"([A-Z]{1,6})(\d{6})([CP])(\d+\.?\d*)", clean)
+    if match:
+        ticker = match.group(1)
+        exp_str = match.group(2)
+        opt_type = "call" if match.group(3) == "C" else "put"
+        strike = float(match.group(4))
+        try:
+            exp: date | None = datetime.strptime(exp_str, "%y%m%d").date()
+        except ValueError:
+            exp = None
+        return ticker, opt_type, strike, exp
+
+    # Plain equity
+    return clean, None, None, None
+
+
+def _import_fidelity_positions(path: Path) -> ImportResult:
+    """Parse Fidelity portfolio positions CSV (positions export format)."""
+    positions: list[ImportedPosition] = []
+    errors: list[str] = []
+    skipped = 0
+
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        for row_num, row in enumerate(reader, 2):
+            # DictReader may return None key when trailing commas produce extra fields;
+            # also stop on footer/disclaimer rows that lack a real Symbol column.
+            if row.get("Symbol") is None and row.get("Account Number") is None:
+                skipped += 1
+                continue
+
+            symbol = (row.get("Symbol") or "").strip()
+
+            # Skip cash/money-market, pending-activity, and blank rows.
+            if (
+                not symbol
+                or "SPAXX" in symbol
+                or symbol.lower().startswith("pending")
+            ):
+                skipped += 1
+                continue
+
+            # Parse quantity
+            qty_str = (row.get("Quantity") or "").strip().replace(",", "")
+            try:
+                qty = int(float(qty_str))
+            except (ValueError, TypeError):
+                skipped += 1
+                continue
+
+            if qty == 0:
+                skipped += 1
+                continue
+
+            # Parse average cost basis as entry price (strip $, +, commas)
+            price_str = (row.get("Average Cost Basis") or "").strip()
+            price_str = price_str.replace("$", "").replace("+", "").replace(",", "")
+            try:
+                price = abs(float(price_str))
+            except (ValueError, TypeError):
+                price = 0.0
+
+            # Parse symbol
+            ticker, opt_type, strike, exp = _parse_fidelity_symbol(symbol)
+
+            if opt_type:
+                structure = "option_single_leg"
+            elif qty > 0:
+                structure = "equity_long"
+            else:
+                structure = "equity_short"
+
+            try:
+                positions.append(
+                    ImportedPosition(
+                        ticker=ticker,
+                        option_type=opt_type,
+                        strike=strike,
+                        expiration=exp,
+                        quantity=qty,
+                        entry_price=price,
+                        entry_date=date.today(),
+                        structure_type=structure,
+                        broker_source="fidelity_positions",
+                        raw_symbol=symbol,
+                    )
+                )
+            except Exception as exc:
+                errors.append(f"Row {row_num}: {exc}")
+                skipped += 1
+
+    return ImportResult(
+        positions=positions,
+        total_imported=len(positions),
+        skipped=skipped,
+        errors=errors,
+        broker_detected="fidelity_positions",
+        file_path=str(path),
+    )
 
 
 def _import_generic(path: Path, broker: str) -> ImportResult:
