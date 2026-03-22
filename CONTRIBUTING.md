@@ -3,7 +3,7 @@
 ## Development Setup
 
 ```bash
-git clone https://github.com/nitinblue/market_analyzer.git
+git clone https://github.com/nitinblue/income-desk.git
 cd market-analyzer
 
 # Python 3.12 required (hmmlearn has no 3.13+ wheels)
