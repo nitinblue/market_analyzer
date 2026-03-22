@@ -3680,29 +3680,44 @@ Requires --broker connection."""
             print(f"  {contracts:2d} contracts: {m.currency} {m.margin_amount:>10,.0f}  ({m.method})")
 
     def do_hedge(self, arg: str) -> None:
-        """Assess same-ticker hedge for a position.
-        Usage: hedge TICKER [POSITION_TYPE]
-          POSITION_TYPE: long_equity, iron_condor, credit_spread, short_straddle (default: long_equity)
-        Example: hedge NIFTY iron_condor"""
+        """Recommend hedge for a position: hedge TICKER [SHARES] [--market US|India]
+
+        Resolves best hedging approach (direct/futures/proxy) and shows ranked comparison.
+
+        Examples:
+            hedge SPY
+            hedge SPY 100
+            hedge RELIANCE 250 --market India
+        """
+        from income_desk.hedging import compare_hedge_methods
+
         ma = self._get_ma()
         parts = arg.strip().split()
         if not parts:
-            print("Usage: hedge TICKER [POSITION_TYPE]")
-            print("  POSITION_TYPE: long_equity, iron_condor, credit_spread, short_straddle")
-            print("  Example: hedge SPY long_equity")
-            print("  Example: hedge NIFTY iron_condor")
+            print("Usage: hedge TICKER [SHARES] [--market US|India]")
+            print("  Example: hedge SPY")
+            print("  Example: hedge SPY 100")
+            print("  Example: hedge RELIANCE 250 --market India")
             return
 
         ticker = parts[0].upper()
-        position_type = parts[1].lower() if len(parts) > 1 else "long_equity"
+        shares = 100
+        market = self._market.upper()
 
-        valid_types = {"long_equity", "iron_condor", "credit_spread", "short_straddle"}
-        if position_type not in valid_types:
-            print(f"Invalid position type: {position_type}")
-            print(f"  Valid types: {', '.join(sorted(valid_types))}")
-            return
+        i = 1
+        while i < len(parts):
+            if parts[i] == "--market" and i + 1 < len(parts):
+                market = parts[i + 1].upper()
+                i += 2
+            else:
+                try:
+                    shares = int(parts[i])
+                except ValueError:
+                    print(f"Invalid shares: {parts[i]}")
+                    return
+                i += 1
 
-        _print_header(f"Hedge Assessment: {ticker} ({position_type})")
+        _print_header(f"Hedge Analysis: {ticker} ({shares} shares, {market})")
 
         try:
             regime = ma.regime.detect(ticker)
@@ -3712,115 +3727,266 @@ Requires --broker connection."""
             return
 
         current_price = tech.current_price
-        # Estimate position value: price * lot_size (100 for US options)
-        try:
-            inst = ma.registry.get_instrument(ticker)
-            lot_size = inst.lot_size or 100
-        except KeyError:
-            lot_size = 100
-        position_value = current_price * lot_size
+        regime_id = int(regime.regime)
+        atr = current_price * (tech.atr_pct or 1.5) / 100
 
         regime_name = {1: "R1 Low-Vol MR", 2: "R2 High-Vol MR",
                        3: "R3 Low-Vol Trend", 4: "R4 High-Vol Trend"}.get(
-            int(regime.regime), f"R{regime.regime}")
+            regime_id, f"R{regime_id}")
 
         print(f"\n  Ticker:    {_styled(ticker, 'cyan')}")
         print(f"  Price:     ${current_price:,.2f}")
-        print(f"  Position:  {position_type.replace('_', ' ').title()}")
+        print(f"  Shares:    {shares:,}")
+        print(f"  Value:     ${shares * current_price:,.0f}")
         print(f"  Regime:    {_styled(regime_name, 'yellow')} ({regime.confidence:.0%})")
-        print(f"  Est Value: ${position_value:,.0f}")
+        print(f"  ATR:       {tech.atr_pct or 0:.2f}% (${atr:,.2f})")
 
-        # Hedge decision tree (from HEDGING_PLAN.md)
-        r = int(regime.regime)
-        urgency = "none"
-        recommendation = ""
-        rationale = ""
+        try:
+            cmp = compare_hedge_methods(
+                ticker=ticker,
+                shares=shares,
+                current_price=current_price,
+                regime_id=regime_id,
+                atr=atr,
+                market=market,
+            )
+        except Exception as e:
+            print(f"\n  {_styled(f'Hedge comparison error: {e}', 'red')}")
+            return
 
-        if position_type == "long_equity":
-            if r == 1:
-                recommendation = "NO HEDGE"
-                rationale = "Theta decay on protective puts wastes money in range-bound regime"
-                urgency = "none"
-            elif r == 2:
-                recommendation = "COLLAR"
-                rationale = "Sell OTM call + buy OTM put — zero-cost hedge possible in high IV"
-                urgency = "monitor"
-            elif r == 3:
-                trend = getattr(regime, "trend_direction", None)
-                if trend and str(trend).lower() in ("bearish", "down"):
-                    recommendation = "PROTECTIVE PUT"
-                    rationale = "Counter-trend detected in low-vol trending regime"
-                    urgency = "soon"
-                else:
-                    recommendation = "NO HEDGE"
-                    rationale = "Trend is favorable — hedge would cap upside unnecessarily"
-                    urgency = "none"
-            elif r == 4:
-                recommendation = "PROTECTIVE PUT"
-                rationale = "High-vol trend regime — buy ATM put immediately"
-                urgency = "immediate"
+        # Print recommendation
+        rec = cmp.recommended
+        if rec.available:
+            print(f"\n  {_styled('RECOMMENDED:', 'bold')} {_styled(rec.hedge_type.upper().replace('_', ' '), 'green')} "
+                  f"({rec.tier})")
+            print(f"  {cmp.recommendation_rationale}")
+        else:
+            print(f"\n  {_styled('NO HEDGE AVAILABLE', 'red')}: {rec.unavailable_reason}")
 
-        elif position_type == "iron_condor":
-            if r <= 2:
-                recommendation = "NO HEDGE"
-                rationale = "IC is already defined risk — wings are the hedge"
-                urgency = "none"
-            elif r == 3:
-                recommendation = "DELTA HEDGE"
-                rationale = "Add directional leg if trend threatens short strike"
-                urgency = "soon"
-            elif r == 4:
-                recommendation = "CLOSE POSITION"
-                rationale = "Iron condor in R4 is the wrong trade — exit, don't hedge"
-                urgency = "immediate"
+        # Print comparison table
+        rows = []
+        for m in cmp.methods:
+            avail_str = _styled("YES", "green") if m.available else _styled("no", "dim")
+            cost_str = f"{m.cost_pct:.1f}%" if m.cost_pct is not None else "—"
+            delta_str = f"{m.delta_reduction:.0%}" if m.delta_reduction else "—"
+            hedge_name = m.hedge_type.replace("_", " ").title()
+            reason = m.unavailable_reason or ""
+            if len(reason) > 40:
+                reason = reason[:37] + "..."
+            rows.append([
+                hedge_name,
+                m.tier.value,
+                avail_str,
+                cost_str,
+                delta_str,
+                m.basis_risk,
+                reason if not m.available else (", ".join(m.pros[:1]) if m.pros else ""),
+            ])
 
-        elif position_type == "credit_spread":
-            if r <= 2:
-                recommendation = "NO HEDGE"
-                rationale = "Defined risk position in mean-reverting regime"
-                urgency = "none"
-            elif r == 3:
-                recommendation = "ROLL AWAY"
-                rationale = "Roll short strike further OTM in direction of trend"
-                urgency = "soon"
-            elif r == 4:
-                recommendation = "CLOSE POSITION"
-                rationale = "Exit undefined-direction credit spread in volatile trend"
-                urgency = "immediate"
+        print()
+        print(tabulate(
+            rows,
+            headers=["Method", "Tier", "Avail", "Cost%", "Delta↓", "Basis Risk", "Notes"],
+            tablefmt="simple",
+        ))
 
-        elif position_type == "short_straddle":
-            if r == 1:
-                recommendation = "NO HEDGE"
-                rationale = "Mean-reverting regime supports straddle"
-                urgency = "none"
-            elif r == 2:
-                recommendation = "ADD WINGS"
-                rationale = "Convert to iron butterfly — define risk in high vol"
-                urgency = "monitor"
-            elif r == 3:
-                recommendation = "DELTA HEDGE"
-                rationale = "Add directional spread on trending side"
-                urgency = "soon"
-            elif r == 4:
-                recommendation = "CLOSE POSITION"
-                rationale = "Undefined risk in R4 = immediate exit"
-                urgency = "immediate"
+        # Show trade spec for recommended method
+        if rec.available and rec.trade_spec:
+            spec = rec.trade_spec
+            print(f"\n  {_styled('Trade Spec:', 'bold')} {spec.description or spec.structure_type or 'hedge'}")
+            for leg in spec.legs:
+                print(f"    {leg.short_code}")
+        print()
 
-        # Color-coded urgency
-        urgency_colors = {
-            "none": "green", "monitor": "yellow", "soon": "yellow", "immediate": "red",
-        }
-        urgency_color = urgency_colors.get(urgency, "white")
+    def do_portfolio_hedge(self, arg: str) -> None:
+        """Analyze hedging for entire demo portfolio: portfolio_hedge [--market US|India]
 
-        print(f"\n  {_styled('Recommendation:', 'bold')} {_styled(recommendation, urgency_color)}")
-        print(f"  {_styled('Urgency:', 'bold')}        {_styled(urgency.upper(), urgency_color)}")
-        print(f"  {_styled('Rationale:', 'bold')}      {rationale}")
+        Classifies all open positions, builds hedges for each, shows tier breakdown,
+        total cost, and all TradeSpecs ready for execution.
 
-        # ATR context
-        if tech.atr_pct:
-            print(f"\n  ATR:       {tech.atr_pct:.2f}% (${current_price * tech.atr_pct / 100:,.2f})")
-        if tech.rsi:
-            print(f"  RSI:       {tech.rsi.value:.1f}")
+        Requires demo portfolio (run: analyzer-cli --demo first).
+        """
+        from income_desk.demo import load_demo_portfolio
+        from income_desk.hedging import analyze_portfolio_hedge
+
+        market = self._market.upper()
+        parts = arg.strip().split()
+        i = 0
+        while i < len(parts):
+            if parts[i] == "--market" and i + 1 < len(parts):
+                market = parts[i + 1].upper()
+                i += 2
+            else:
+                i += 1
+
+        port = load_demo_portfolio()
+        if port is None:
+            print("No demo portfolio. Run: analyzer-cli --demo")
+            return
+
+        if not port.positions:
+            print("No open positions in demo portfolio.")
+            return
+
+        _print_header(f"Portfolio Hedge Analysis ({market})")
+
+        ma = self._get_ma()
+
+        # Build position dicts from open positions
+        positions = []
+        for p in port.positions:
+            try:
+                tech = ma.technicals.snapshot(p.ticker)
+                current_price = tech.current_price
+                atr_pct = tech.atr_pct or 1.5
+            except Exception:
+                current_price = p.entry_price
+                atr_pct = 1.5
+            contracts = p.contracts or 1
+            # Approximate shares: 1 contract = 100 shares for US options
+            shares = contracts * 100
+            positions.append({
+                "ticker": p.ticker,
+                "shares": shares,
+                "value": shares * current_price,
+                "current_price": current_price,
+                "atr": current_price * atr_pct / 100,
+            })
+
+        atr_by_ticker = {pos["ticker"]: pos["atr"] for pos in positions}
+        account_nlv = port.current_nlv
+
+        print(f"\n  Account NLV:    ${account_nlv:,.0f}")
+        print(f"  Open positions: {len(positions)}")
+        print(f"  Market:         {market}")
+
+        try:
+            analysis = analyze_portfolio_hedge(
+                positions=positions,
+                account_nlv=account_nlv,
+                market=market,
+                atr_by_ticker=atr_by_ticker,
+            )
+        except Exception as e:
+            print(f"\n  {_styled(f'Portfolio hedge error: {e}', 'red')}")
+            return
+
+        # Tier breakdown
+        print(f"\n  {_styled('TIER BREAKDOWN', 'bold')}")
+        for tier, count in analysis.tier_counts.items():
+            value = analysis.tier_values.get(tier, 0.0)
+            print(f"    {tier:<22} {count:>3} positions  ${value:>10,.0f}")
+
+        print(f"\n  Coverage:        {analysis.coverage_pct:.0%} of portfolio value")
+        print(f"  Total hedge cost: ${analysis.total_hedge_cost:,.0f} ({analysis.hedge_cost_pct:.1f}%)")
+        print(f"  Delta before:    {analysis.portfolio_delta_before:.2f}")
+        print(f"  Delta after:     {analysis.portfolio_delta_after:.2f}")
+
+        # Per-position detail
+        print(f"\n  {_styled('PER-POSITION HEDGES', 'bold')}")
+        rows = []
+        for ph in analysis.position_hedges:
+            tier_str = ph.tier.value if ph.tier else "—"
+            hedge_str = (ph.hedge_type or "none").replace("_", " ").title()
+            cost_str = f"${ph.cost_estimate:,.0f}" if ph.cost_estimate is not None else "—"
+            rows.append([
+                ph.ticker,
+                f"${ph.position_value:,.0f}",
+                tier_str,
+                hedge_str,
+                cost_str,
+                f"{ph.delta_before:.2f} → {ph.delta_after:.2f}",
+            ])
+        print()
+        print(tabulate(
+            rows,
+            headers=["Ticker", "Value", "Tier", "Method", "Cost", "Delta"],
+            tablefmt="simple",
+        ))
+
+        # Alerts
+        if analysis.alerts:
+            print(f"\n  {_styled('ALERTS:', 'yellow')}")
+            for alert in analysis.alerts:
+                print(f"    {_styled('!', 'yellow')} {alert}")
+
+        # Trade specs summary
+        if analysis.trade_specs:
+            print(f"\n  {_styled(f'{len(analysis.trade_specs)} TradeSpecs ready for execution', 'green')}")
+            for spec in analysis.trade_specs[:5]:  # Show first 5
+                print(f"    {spec.description or spec.structure_type or 'hedge'}: "
+                      f"{', '.join(leg.short_code for leg in spec.legs[:2])}")
+            if len(analysis.trade_specs) > 5:
+                print(f"    ... and {len(analysis.trade_specs) - 5} more")
+
+        print(f"\n  {analysis.summary}")
+        print()
+
+    def do_fno_coverage(self, arg: str) -> None:
+        """Show F&O coverage for tickers: fno_coverage TICKER [TICKER...] [--market US|India]
+
+        Classifies each ticker: direct (liquid options), futures, or proxy hedging available.
+
+        Examples:
+            fno_coverage SPY QQQ GLD TLT
+            fno_coverage RELIANCE INFY TCS --market India
+        """
+        from income_desk.hedging import get_fno_coverage
+
+        parts = arg.strip().split()
+        if not parts:
+            print("Usage: fno_coverage TICKER [TICKER...] [--market US|India]")
+            print("  Example: fno_coverage SPY QQQ GLD TLT")
+            print("  Example: fno_coverage RELIANCE INFY TCS --market India")
+            return
+
+        market = self._market.upper()
+        tickers = []
+        i = 0
+        while i < len(parts):
+            if parts[i] == "--market" and i + 1 < len(parts):
+                market = parts[i + 1].upper()
+                i += 2
+            else:
+                tickers.append(parts[i].upper())
+                i += 1
+
+        if not tickers:
+            print("No tickers provided.")
+            return
+
+        _print_header(f"F&O Coverage: {', '.join(tickers)} ({market})")
+
+        try:
+            coverage = get_fno_coverage(tickers=tickers, market=market)
+        except Exception as e:
+            print(f"  {_styled(f'Error: {e}', 'red')}")
+            return
+
+        print(f"\n  Tickers:         {coverage.total_tickers}")
+        print(f"  Direct (T1):     {coverage.direct_hedge_count}  (liquid options)")
+        print(f"  Futures (T2):    {coverage.futures_hedge_count}  (futures hedging)")
+        print(f"  Proxy only (T3): {coverage.proxy_only_count}   (index proxy)")
+        print(f"  No hedge:        {coverage.no_hedge_count}")
+        print(f"  Coverage:        {coverage.coverage_pct:.0%}  (direct + futures / total)")
+
+        # Per-tier breakdown
+        rows = []
+        for tier, ticker_list in coverage.tier_breakdown.items():
+            if ticker_list:
+                for t in ticker_list:
+                    tier_label = {
+                        "direct": _styled("DIRECT", "green"),
+                        "futures_synthetic": _styled("FUTURES", "yellow"),
+                        "proxy_index": _styled("PROXY", "dim"),
+                        "none": _styled("NONE", "red"),
+                    }.get(tier, tier)
+                    rows.append([t, tier_label])
+
+        rows.sort(key=lambda r: r[0])
+        print()
+        print(tabulate(rows, headers=["Ticker", "Hedge Tier"], tablefmt="simple"))
+        print(f"\n  {coverage.commentary}")
         print()
 
     def do_currency(self, arg: str) -> None:

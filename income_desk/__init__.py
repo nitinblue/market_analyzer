@@ -518,12 +518,23 @@ from income_desk.capital_deployment import (
     recommend_core_portfolio,
 )
 
-# Same-ticker hedge assessment
+# Same-ticker hedge assessment (legacy) + hedging domain package
 from income_desk.hedging import (
     HedgeType,
     HedgeUrgency,
     HedgeRecommendation,
     assess_hedge,
+    # New hedging domain
+    resolve_hedge_strategy,
+    compare_hedge_methods,
+    analyze_portfolio_hedge,
+    build_protective_put,
+    build_collar,
+    build_futures_hedge,
+    build_index_hedge,
+    HedgeTier,
+    HedgeResult,
+    PortfolioHedgeAnalysis,
 )
 
 # Exit intelligence (regime stops, time-adjusted targets, theta decay, monitoring)
@@ -1037,11 +1048,22 @@ __all__ = [
     "compute_portfolio_exposure",
     "compute_currency_pnl",
     "assess_currency_exposure",
-    # Same-ticker hedge assessment
+    # Same-ticker hedge assessment (legacy)
     "HedgeType",
     "HedgeUrgency",
     "HedgeRecommendation",
     "assess_hedge",
+    # Hedging domain package
+    "resolve_hedge_strategy",
+    "compare_hedge_methods",
+    "analyze_portfolio_hedge",
+    "build_protective_put",
+    "build_collar",
+    "build_futures_hedge",
+    "build_index_hedge",
+    "HedgeTier",
+    "HedgeResult",
+    "PortfolioHedgeAnalysis",
     # Leg execution sequencing
     "ExecutionLeg",
     "ExecutionPlan",
