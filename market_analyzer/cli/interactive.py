@@ -6907,7 +6907,26 @@ def main() -> None:
             "Trust: UNRELIABLE — for testing/development only."
         ),
     )
+    parser.add_argument(
+        "--trader",
+        choices=["us", "india"],
+        help="Run full end-to-end trading simulation and print report. No REPL is started.",
+    )
     args = parser.parse_args()
+
+    if args.trader:
+        from market_analyzer.demo.trader import (
+            print_trader_report,
+            run_india_trader,
+            run_us_trader,
+        )
+
+        if args.trader == "us":
+            report = run_us_trader()
+        else:
+            report = run_india_trader()
+        print_trader_report(report)
+        return
 
     if args.setup:
         from market_analyzer.cli._setup import run_setup_wizard

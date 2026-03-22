@@ -5,6 +5,13 @@ from market_analyzer.demo.portfolio import (
     add_demo_position, close_demo_position, get_demo_summary,
     DEMO_CAPITAL,
 )
+from market_analyzer.demo.trader import (
+    TraderReport,
+    run_trader,
+    run_us_trader,
+    run_india_trader,
+    print_trader_report,
+)
 
 __all__ = [
     "DemoPortfolio",
@@ -16,4 +23,9 @@ __all__ = [
     "close_demo_position",
     "get_demo_summary",
     "DEMO_CAPITAL",
+    "TraderReport",
+    "run_trader",
+    "run_us_trader",
+    "run_india_trader",
+    "print_trader_report",
 ]

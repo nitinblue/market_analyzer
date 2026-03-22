@@ -107,7 +107,7 @@ def save_demo_portfolio(portfolio: DemoPortfolio) -> None:
 def add_demo_position(
     portfolio: DemoPortfolio,
     ticker: str,
-    desk_key: str,
+    desk_key: str | dict,
     trade_spec,          # TradeSpec
     entry_price: float,
     contracts: int,
@@ -115,6 +115,10 @@ def add_demo_position(
 ) -> DemoPosition:
     """Add a simulated position to the demo portfolio."""
     import uuid
+
+    # suggest_desk_for_trade() returns a dict — extract the key if so
+    if isinstance(desk_key, dict):
+        desk_key = desk_key.get("desk_key", "unknown")
 
     position = DemoPosition(
         position_id=str(uuid.uuid4())[:8],
