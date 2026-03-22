@@ -7,12 +7,13 @@
 
 ## Test Suite
 
-- **Total tests: 2329** (as of 2026-03-21, collected by pytest)
+- **Total tests: 2376** (as of 2026-03-21, collected by pytest)
 - All passing: yes (confirmed by `pytest -v`)
 - Test locations:
-  - `tests/` — unit tests (~2284 tests)
-  - `tests/functional/` — functional integration tests (45 tests, 8 modules)
-  - Simulation refresh layer tests (new)
+  - `tests/` — unit tests (~2300+ tests)
+  - `tests/functional/` — functional integration tests (45+ tests, 8 modules)
+  - Simulation refresh layer tests (comprehensive)
+  - Trader runner tests (Trader-US.py, Trader-IND.py)
 
 ---
 
@@ -22,7 +23,8 @@ Commits in reverse chronological order since 2026-03-01:
 
 | Commit | Description |
 |--------|-------------|
-| (2026-03-21) | feat: simulated market data layer (calm/volatile/crash/india presets, --sim flag, 2329 tests) |
+| (2026-03-21) | **Package published to PyPI as `income-desk` v0.3.1** — Trader runners (Trader-US.py, Trader-IND.py), trade-ready sim presets, desk_key bug fix |
+| (2026-03-21) | feat: simulated market data layer (calm/volatile/crash/india presets, --sim flag, 2376 tests) |
 | (2026-03-21) | feat: simulation refresh service (capture live data for offline use, --sim snapshot) |
 | (2026-03-21) | feat: Alpaca broker tested and working (latest trade fallback for after-hours) |
 | (2026-03-21) | Open source infrastructure — README, CONTRIBUTING, CI, issue templates, SECURITY, CODE_OF_CONDUCT |
@@ -792,9 +794,11 @@ Repository made OSS-ready:
 
 ### Documentation
 
-- **USER_MANUAL.md** — 7 new CLI commands from 2026-03-20 not yet documented: `entry_analysis`, `kelly`, `optimal_dte`, `exit_intelligence`, `audit`, `sentinel`, and the expanded `validate`
-- **SYSTEMATIC_GAPS.md** — test count header is stale; actual count is now 1715
-- **MEMORY.md** — CLI command count is stale; actual count is now 67
+- **Status**: All major documentation complete and current as of 2026-03-21
+  - USER_MANUAL.md fully rewritten (80+ CLI commands documented)
+  - SYSTEMATIC_GAPS.md updated with all 9 gaps DONE
+  - MEMORY.md consolidated (index format, topic files)
+- **PyPI**: Package published as `income-desk` v0.3.1; README.md and CONTRIBUTING.md ready for public consumption
 
 ### eTrading Integration Gaps
 

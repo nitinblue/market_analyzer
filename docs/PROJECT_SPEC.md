@@ -1,6 +1,7 @@
-# market_analyzer — Project Specification
+# income-desk (market_analyzer) — Project Specification
 
 > Single source of truth for what this project is, what it does, and how it works.
+> **Package:** income-desk v0.3.1 (published on PyPI)
 > Last updated: 2026-03-21
 
 ---
@@ -717,6 +718,26 @@ Paper-trading simulation without a broker connection. Enables forward testing wi
 | `close_trade TRADE_ID` | Closes a demo position; records `TradeOutcome` for ML feedback |
 
 Demo trades flow through the full validation stack: entry gates, risk checks, Kelly sizing. Closed outcomes can seed `calibrate_weights()` before committing real capital.
+
+---
+
+## 24a. Trader Runners (Trade-Ready Simulation)
+
+**Trade-ready preset runners** in `scripts/` for quick start with realistic trade flows:
+
+| Script | Purpose |
+|--------|---------|
+| `Trader-US.py` | US markets (SPY, QQQ, individual equities); income-first strategy (IC + credit spreads) |
+| `Trader-IND.py` | India markets (NIFTY, BANKNIFTY, NSE equities); equity + F&O; timezone-aware scheduling |
+
+Both runners:
+- Use simulated market data (`--sim` flag) — no broker connection needed
+- Seed demo portfolio with realistic positions
+- Execute full trade lifecycle: scan → rank → validate → size → simulate close
+- Record `TradeOutcome` for learning loop (`calibrate_weights()`, `detect_drift()`)
+- Log all decisions in debug mode for audit trail
+
+Intended for forward testing, education, and live capital deployment (when broker connected).
 
 ---
 

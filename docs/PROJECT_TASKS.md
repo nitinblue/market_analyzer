@@ -8,8 +8,10 @@
 
 ## Recently Completed
 
-### March 2026 — OSS Infrastructure + Desk Management + Demo Portfolio + 6 Brokers (2026-03-21)
+### March 2026 — OSS Infrastructure + Desk Management + Demo Portfolio + 6 Brokers + PyPI (2026-03-21)
 
+- **PyPI publication** — `income-desk` v0.3.1 published; package renamed from market-analyzer; ready for public use
+- **Trader runners** — Trader-US.py and Trader-IND.py in `scripts/` — trade-ready simulation presets with full position lifecycle
 - **Open source infrastructure** — README, CONTRIBUTING, CI (GitHub Actions), issue templates, SECURITY, CODE_OF_CONDUCT
 - **Desk management / capital allocation** — 6 APIs: `recommend_desk_structure`, `suggest_desk_for_trade`, `compute_desk_risk_limits`, `compute_instrument_risk`, `evaluate_desk_health`, `rebalance_desks`; asset class → risk type → desks hierarchy
 - **Demo portfolio system** — `--demo` CLI flag, `portfolio/trade/close_trade` commands; full stack simulation without broker
@@ -113,7 +115,7 @@
 
 ## In Progress
 
-None. All known gaps are DONE per SYSTEMATIC_GAPS.md (2329 tests passing as of 2026-03-21).
+None. All known gaps are DONE per SYSTEMATIC_GAPS.md (2376 tests passing as of 2026-03-21).
 
 ---
 
@@ -121,10 +123,11 @@ None. All known gaps are DONE per SYSTEMATIC_GAPS.md (2329 tests passing as of 2
 
 ### P2 — Nice to Have (Library Quality)
 
-Most P1 items from the March 20 review were completed on March 21. Simulation layer, Alpaca integration, 6-broker stack, demo portfolio, and desk management all shipped 2026-03-21. Remaining backlog:
+Most P1 items from the March 20 review were completed on March 21. Simulation layer, Alpaca integration, 6-broker stack, demo portfolio, desk management, and PyPI publication all shipped 2026-03-21. Remaining backlog:
 
 | # | Task | Why |
 |---|------|-----|
+| P2-0 | **Republish to PyPI** — v0.3.1 now pending with latest features (Traders, desk_key bug fix, sim enhancements) | Income-desk 0.3.0 live on PyPI; next release bundles final session changes |
 | P2-1 | Multi-factor setup scoring — volume profile, relative strength, IV/RV spread in breakout/momentum/mean_reversion assessors | Current assessors use basic indicators; need multi-factor for stronger signal |
 | P2-2 | Richer LEAP/earnings assessors — earnings growth rate for LEAP scoring, vol crush magnitude history | leap/earnings assessors are thin; need deeper fundamental integration |
 | P2-3 | ML regime validation — track regime predictions vs actual price behavior; auto-retrain HMM | Track whether R2 actually mean-reverted, R3 actually trended |
