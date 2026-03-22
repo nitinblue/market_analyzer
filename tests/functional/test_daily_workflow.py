@@ -6,15 +6,15 @@ All checks use synthetic data (no broker required).
 import pytest
 from datetime import date
 
-from market_analyzer.models.opportunity import Verdict
-from market_analyzer.opportunity.option_plays.iron_condor import assess_iron_condor
-from market_analyzer.validation import run_daily_checks
-from market_analyzer.validation.models import Severity
+from income_desk.models.opportunity import Verdict
+from income_desk.opportunity.option_plays.iron_condor import assess_iron_condor
+from income_desk.validation import run_daily_checks
+from income_desk.validation.models import Severity
 
 
 def _technicals_for_workflow(rsi: float = 50.0, atr_pct: float = 1.0, price: float = 580.0):
     """Build a TechnicalSnapshot inline — avoids cross-test-module imports."""
-    from market_analyzer.models.technicals import (
+    from income_desk.models.technicals import (
         BollingerBands, MACDData, MovingAverages, RSIData,
         StochasticData, SupportResistance, TechnicalSnapshot,
         MarketPhase, PhaseIndicator,

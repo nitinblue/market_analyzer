@@ -4,9 +4,9 @@ from datetime import date
 
 import pytest
 
-from market_analyzer.models.opportunity import Verdict
-from market_analyzer.models.regime import RegimeID, RegimeResult, TrendDirection
-from market_analyzer.opportunity.setups.mean_reversion import (
+from income_desk.models.opportunity import Verdict
+from income_desk.models.regime import RegimeID, RegimeResult, TrendDirection
+from income_desk.opportunity.setups.mean_reversion import (
     MeanReversionOpportunity,
     assess_mean_reversion,
 )
@@ -26,7 +26,7 @@ def _make_regime(regime_id: RegimeID = RegimeID.R1_LOW_VOL_MR) -> RegimeResult:
 
 class TestMeanReversionAssessment:
     def test_basic_assessment(self, sample_ohlcv_choppy):
-        from market_analyzer.features.technicals import compute_technicals
+        from income_desk.features.technicals import compute_technicals
 
         regime = _make_regime(RegimeID.R1_LOW_VOL_MR)
         technicals = compute_technicals(sample_ohlcv_choppy, "TEST")
@@ -41,7 +41,7 @@ class TestMeanReversionAssessment:
         assert 0.0 <= result.confidence <= 1.0
 
     def test_r4_hard_stop(self, sample_ohlcv_choppy):
-        from market_analyzer.features.technicals import compute_technicals
+        from income_desk.features.technicals import compute_technicals
 
         regime = _make_regime(RegimeID.R4_HIGH_VOL_TREND)
         technicals = compute_technicals(sample_ohlcv_choppy, "TEST")
@@ -54,7 +54,7 @@ class TestMeanReversionAssessment:
         assert len(result.hard_stops) >= 1
 
     def test_mr_regime_boosts_score(self, sample_ohlcv_choppy):
-        from market_analyzer.features.technicals import compute_technicals
+        from income_desk.features.technicals import compute_technicals
 
         technicals = compute_technicals(sample_ohlcv_choppy, "TEST")
 
@@ -78,7 +78,7 @@ class TestMeanReversionAssessment:
         assert result_mr.confidence >= result_trend.confidence or result_trend.verdict == Verdict.NO_GO
 
     def test_has_summary(self, sample_ohlcv_choppy):
-        from market_analyzer.features.technicals import compute_technicals
+        from income_desk.features.technicals import compute_technicals
 
         regime = _make_regime(RegimeID.R1_LOW_VOL_MR)
         technicals = compute_technicals(sample_ohlcv_choppy, "TEST")

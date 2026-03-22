@@ -6,20 +6,20 @@ from datetime import date, timedelta
 
 import pytest
 
-from market_analyzer.models.adjustment import (
+from income_desk.models.adjustment import (
     AdjustmentType,
     PositionStatus,
     TestedSide,
 )
-from market_analyzer.models.opportunity import (
+from income_desk.models.opportunity import (
     LegAction,
     LegSpec,
     OrderSide,
     StructureType,
     TradeSpec,
 )
-from market_analyzer.models.regime import RegimeID, RegimeResult
-from market_analyzer.models.technicals import (
+from income_desk.models.regime import RegimeID, RegimeResult
+from income_desk.models.technicals import (
     BollingerBands,
     MACDData,
     MovingAverages,
@@ -29,7 +29,7 @@ from market_analyzer.models.technicals import (
     SupportResistance,
     TechnicalSnapshot,
 )
-from market_analyzer.service.adjustment import AdjustmentService
+from income_desk.service.adjustment import AdjustmentService
 
 
 # ---- Fixtures ----
@@ -407,7 +407,7 @@ class TestQuoteSourceProperty:
         assert "no broker" in svc.quote_source
 
     def test_with_broker(self):
-        from market_analyzer.service.option_quotes import OptionQuoteService
+        from income_desk.service.option_quotes import OptionQuoteService
         from tests.test_option_quotes import MockMarketData
         qs = OptionQuoteService(market_data=MockMarketData())
         svc = AdjustmentService(quote_service=qs)

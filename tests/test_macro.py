@@ -4,15 +4,15 @@ from datetime import date
 
 import pytest
 
-from market_analyzer.macro._econ_schedule import (
+from income_desk.macro._econ_schedule import (
     generate_cpi_dates,
     generate_gdp_dates,
     generate_nfp_dates,
     generate_pce_dates,
 )
-from market_analyzer.macro._fomc_dates import FOMC_DATES
-from market_analyzer.macro.calendar import get_macro_calendar, get_next_event
-from market_analyzer.models.macro import MacroEventType
+from income_desk.macro._fomc_dates import FOMC_DATES
+from income_desk.macro.calendar import get_macro_calendar, get_next_event
+from income_desk.models.macro import MacroEventType
 
 
 class TestDateGeneration:

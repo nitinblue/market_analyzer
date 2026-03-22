@@ -4,10 +4,10 @@ import pytest
 from datetime import date, datetime
 from unittest.mock import MagicMock, patch
 
-from market_analyzer.broker.base import MarketDataProvider, MarketMetricsProvider
-from market_analyzer.models.opportunity import LegAction, LegSpec
-from market_analyzer.models.quotes import MarketMetrics, OptionQuote, QuoteSnapshot
-from market_analyzer.service.option_quotes import OptionQuoteService
+from income_desk.broker.base import MarketDataProvider, MarketMetricsProvider
+from income_desk.models.opportunity import LegAction, LegSpec
+from income_desk.models.quotes import MarketMetrics, OptionQuote, QuoteSnapshot
+from income_desk.service.option_quotes import OptionQuoteService
 
 
 # --- Fixtures ---
@@ -173,12 +173,12 @@ class TestOptionQuoteModel:
 class TestAdjustmentUsesRealQuotes:
     def test_adjustment_with_quote_service(self):
         """AdjustmentService with quote_service uses it for P&L."""
-        from market_analyzer.service.adjustment import AdjustmentService
-        from market_analyzer.models.opportunity import (
+        from income_desk.service.adjustment import AdjustmentService
+        from income_desk.models.opportunity import (
             LegAction, LegSpec, OrderSide, StructureType, TradeSpec,
         )
-        from market_analyzer.models.regime import RegimeID, RegimeResult
-        from market_analyzer.models.technicals import TechnicalSnapshot
+        from income_desk.models.regime import RegimeID, RegimeResult
+        from income_desk.models.technicals import TechnicalSnapshot
 
         qs = OptionQuoteService(market_data=MockMarketData())
         adj = AdjustmentService(quote_service=qs)
@@ -186,13 +186,13 @@ class TestAdjustmentUsesRealQuotes:
         assert "real quotes" in adj.quote_source
 
     def test_adjustment_without_broker_no_costs(self):
-        from market_analyzer.service.adjustment import AdjustmentService
+        from income_desk.service.adjustment import AdjustmentService
 
         adj = AdjustmentService()
         assert "no broker" in adj.quote_source
 
     def test_adjustment_with_yfinance_only_no_costs(self):
-        from market_analyzer.service.adjustment import AdjustmentService
+        from income_desk.service.adjustment import AdjustmentService
 
         qs = OptionQuoteService()
         adj = AdjustmentService(quote_service=qs)

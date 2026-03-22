@@ -6,14 +6,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from market_analyzer.models.regime import RegimeID, RegimeResult
-from market_analyzer.models.technicals import (
+from income_desk.models.regime import RegimeID, RegimeResult
+from income_desk.models.technicals import (
     BollingerBands, MACDData, MovingAverages, RSIData,
     StochasticData, SupportResistance, TechnicalSnapshot,
     MarketPhase, PhaseIndicator, ORBData, ORBLevel, ORBStatus,
 )
-from market_analyzer.models.opportunity import Verdict
-from market_analyzer.opportunity.setups.orb import (
+from income_desk.models.opportunity import Verdict
+from income_desk.opportunity.setups.orb import (
     ORBSetupOpportunity, ORBStrategy, assess_orb,
 )
 

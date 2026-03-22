@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from market_analyzer.features.rate_risk import (
+from income_desk.features.rate_risk import (
     RateRiskLevel,
     RateRiskAssessment,
     PortfolioRateRisk,

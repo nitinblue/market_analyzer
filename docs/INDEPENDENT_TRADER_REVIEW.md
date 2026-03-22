@@ -1,7 +1,7 @@
-# Independent Trader Review — market_analyzer Live Session
+# Independent Trader Review — income_desk Live Session
 ## 2026-03-20 | Reviewer: Systematic Income Trader (10+ years options experience)
 
-> This review evaluates market_analyzer's trading decisions on 2026-03-20 from the perspective of an experienced options income trader running a $35K account. I'm reviewing both the system's decisions AND its methodology for blindspots.
+> This review evaluates income_desk's trading decisions on 2026-03-20 from the perspective of an experienced options income trader running a $35K account. I'm reviewing both the system's decisions AND its methodology for blindspots.
 
 ---
 

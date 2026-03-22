@@ -5,11 +5,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from market_analyzer.models.black_swan import AlertLevel, BlackSwanAlert
-from market_analyzer.models.context import IntermarketDashboard, IntermarketEntry, MarketContext
-from market_analyzer.models.macro import MacroCalendar
-from market_analyzer.models.regime import RegimeID, RegimeResult, TrendDirection
-from market_analyzer.service.context import MarketContextService
+from income_desk.models.black_swan import AlertLevel, BlackSwanAlert
+from income_desk.models.context import IntermarketDashboard, IntermarketEntry, MarketContext
+from income_desk.models.macro import MacroCalendar
+from income_desk.models.regime import RegimeID, RegimeResult, TrendDirection
+from income_desk.service.context import MarketContextService
 
 
 def _make_alert(level: AlertLevel = AlertLevel.NORMAL, score: float = 0.1) -> BlackSwanAlert:

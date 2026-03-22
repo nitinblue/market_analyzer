@@ -1,4 +1,4 @@
-# income-desk (market_analyzer) — Project Specification
+# income-desk (income_desk) — Project Specification
 
 > Single source of truth for what this project is, what it does, and how it works.
 > **Package:** income-desk v0.3.1 (published on PyPI)
@@ -8,7 +8,7 @@
 
 ## 1. Mission
 
-`market_analyzer` is a Python library that helps make money trading options. It is a production tool for real capital deployment — not a theoretical exercise.
+`income_desk` is a Python library that helps make money trading options. It is a production tool for real capital deployment — not a theoretical exercise.
 
 It brings institutional-grade systematic trading to small accounts ($30-50K). The gap it fills: there are tools for institutions (expensive, closed) and tools for retail (basic, manual). The space in between — **systematic income trading for small accounts with real risk management** — is empty. MA fills it.
 
@@ -200,7 +200,7 @@ REGIME DETECTION: SPY as of 2026-03-14
 All accessed through the `MarketAnalyzer` facade:
 
 ```python
-from market_analyzer import MarketAnalyzer, DataService
+from income_desk import MarketAnalyzer, DataService
 
 ma = MarketAnalyzer(data_service=DataService())
 ```
@@ -355,7 +355,7 @@ The zero_dte assessor auto-selects among these sub-strategies based on ORB data 
 
 ## 8. Validation Framework
 
-The validation framework (`market_analyzer.validation`) runs pure checks against a `TradeSpec`. No broker required.
+The validation framework (`income_desk.validation`) runs pure checks against a `TradeSpec`. No broker required.
 
 ### Models
 
@@ -553,18 +553,18 @@ Signal levels:
 
 ```python
 # Standalone
-from market_analyzer.broker.tastytrade import connect_tastytrade
+from income_desk.broker.tastytrade import connect_tastytrade
 md, mm, acct, wl = connect_tastytrade(is_paper=True)
 ma = MarketAnalyzer(data_service=DataService(), market_data=md, market_metrics=mm)
 
 # Embedded (eTrading/SaaS)
-from market_analyzer.broker.tastytrade import connect_from_sessions
+from income_desk.broker.tastytrade import connect_from_sessions
 md, mm, acct, wl = connect_from_sessions(sdk_session, data_session)
 ```
 
 ### Primary eTrading APIs
 
-All from `market_analyzer.trade_lifecycle`:
+All from `income_desk.trade_lifecycle`:
 
 | Function | Description |
 |----------|-------------|
@@ -582,11 +582,11 @@ All from `market_analyzer.trade_lifecycle`:
 | `get_adjustment_recommendation(trade_spec, regime_id, ...)` → `AdjustmentAnalysis` | What to do with tested position |
 | `assess_overnight_risk(trade_spec, regime_id, ...)` → `OvernightRisk` | After 15:00 ET — hold or close |
 
-### TradeSpec Factory (from `market_analyzer.trade_spec_factory`)
+### TradeSpec Factory (from `income_desk.trade_spec_factory`)
 
 ```python
-from market_analyzer import build_iron_condor, build_credit_spread, build_debit_spread, build_calendar
-from market_analyzer import from_dxlink_symbols, to_dxlink_symbols, parse_dxlink_symbol
+from income_desk import build_iron_condor, build_credit_spread, build_debit_spread, build_calendar
+from income_desk import from_dxlink_symbols, to_dxlink_symbols, parse_dxlink_symbol
 ```
 
 ### POP Methodology
@@ -798,7 +798,7 @@ Offline market data simulation for development, testing, and integration testing
 | `crash` | Market stress, rapid decline | R4 | 90+ | Risk gate, stop loss, portfolio stress testing |
 | `india` | NSE index (NIFTY/BANKNIFTY) | R2 | 40-60 | India strategy, lot size, timezone testing |
 
-**Service:** `market_analyzer/simulation/` — `SimulationDataProvider` implements `MarketDataProvider` ABC. Snapshot captures OHLCV, option chains, Greeks, IV metrics on demand.
+**Service:** `income_desk/simulation/` — `SimulationDataProvider` implements `MarketDataProvider` ABC. Snapshot captures OHLCV, option chains, Greeks, IV metrics on demand.
 
 **eTrading use:** Simulation layer enables offline integration testing. eTrading can test scan → rank → deploy workflow without live broker connection. Refresh service allows periodic snapshots to keep simulation current.
 

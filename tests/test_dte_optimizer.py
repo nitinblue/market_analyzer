@@ -4,8 +4,8 @@ from datetime import date, timedelta
 
 import pytest
 
-from market_analyzer.features.dte_optimizer import DTERecommendation, select_optimal_dte
-from market_analyzer.models.vol_surface import (
+from income_desk.features.dte_optimizer import DTERecommendation, select_optimal_dte
+from income_desk.models.vol_surface import (
     SkewSlice,
     TermStructurePoint,
     VolatilitySurface,

@@ -2,11 +2,11 @@
 
 import pytest
 
-from market_analyzer.models.instrument import InstrumentAnalysis
-from market_analyzer.service.instrument import InstrumentAnalysisService
-from market_analyzer.service.regime import RegimeService
-from market_analyzer.service.technical import TechnicalService
-from market_analyzer.service.phase import PhaseService
+from income_desk.models.instrument import InstrumentAnalysis
+from income_desk.service.instrument import InstrumentAnalysisService
+from income_desk.service.regime import RegimeService
+from income_desk.service.technical import TechnicalService
+from income_desk.service.phase import PhaseService
 
 
 class TestInstrumentAnalysisService:

@@ -5,7 +5,7 @@ from datetime import date
 
 import pytest
 
-from market_analyzer.models.quotes import AccountBalance, OptionQuote
+from income_desk.models.quotes import AccountBalance, OptionQuote
 
 
 # ---------------------------------------------------------------------------
@@ -15,17 +15,17 @@ from market_analyzer.models.quotes import AccountBalance, OptionQuote
 class TestSchwabImport:
     def test_module_importable(self) -> None:
         """The broker module itself imports cleanly (lazy SDK import)."""
-        import market_analyzer.broker.schwab
+        import income_desk.broker.schwab
 
     def test_submodules_importable(self) -> None:
         """All submodules import without errors."""
-        import market_analyzer.broker.schwab.account
-        import market_analyzer.broker.schwab.market_data
-        import market_analyzer.broker.schwab.metrics
+        import income_desk.broker.schwab.account
+        import income_desk.broker.schwab.market_data
+        import income_desk.broker.schwab.metrics
 
     def test_missing_sdk_raises_helpful_error(self) -> None:
         """If schwab-py not installed, connect_schwab raises ImportError with pip command."""
-        from market_analyzer.broker.schwab import connect_schwab
+        from income_desk.broker.schwab import connect_schwab
         try:
             connect_schwab("fake_key", "fake_secret")
         except ImportError as e:
@@ -40,7 +40,7 @@ class TestSchwabImport:
         """Empty credentials raise ValueError with helpful message."""
         try:
             import schwab  # type: ignore[import]  # noqa: F401
-            from market_analyzer.broker.schwab import connect_schwab
+            from income_desk.broker.schwab import connect_schwab
             with pytest.raises(ValueError, match="app_key"):
                 connect_schwab("", "")
         except ImportError:
@@ -58,7 +58,7 @@ class TestSchwabOCCSymbol:
         option_type: str = "call",
         expiration: date = date(2026, 4, 24),
     ):
-        from market_analyzer.models.opportunity import LegSpec, LegAction
+        from income_desk.models.opportunity import LegSpec, LegAction
         return LegSpec(
             role="test",
             action=LegAction.SELL_TO_OPEN,
@@ -71,7 +71,7 @@ class TestSchwabOCCSymbol:
         )
 
     def test_call_occ_format(self) -> None:
-        from market_analyzer.broker.schwab.market_data import _to_occ
+        from income_desk.broker.schwab.market_data import _to_occ
         leg = self._make_leg(580.0, "call", date(2026, 4, 24))
         occ = _to_occ("SPY", leg)
         assert occ.startswith("SPY")
@@ -80,7 +80,7 @@ class TestSchwabOCCSymbol:
         assert "580000" in occ
 
     def test_put_occ_format(self) -> None:
-        from market_analyzer.broker.schwab.market_data import _to_occ
+        from income_desk.broker.schwab.market_data import _to_occ
         leg = self._make_leg(570.0, "put", date(2026, 6, 20))
         occ = _to_occ("SPY", leg)
         assert "P" in occ
@@ -89,7 +89,7 @@ class TestSchwabOCCSymbol:
 
     def test_short_ticker_padded(self) -> None:
         """Ticker shorter than 6 chars is padded with spaces."""
-        from market_analyzer.broker.schwab.market_data import _to_occ
+        from income_desk.broker.schwab.market_data import _to_occ
         leg = self._make_leg(480.0, "call")
         occ = _to_occ("QQQ", leg)
         assert len(occ) == 21  # 6 + 6 + 1 + 8
@@ -98,22 +98,22 @@ class TestSchwabOCCSymbol:
 
     def test_long_ticker_truncated_to_6(self) -> None:
         """Ticker longer than 6 chars not truncated — just formatted."""
-        from market_analyzer.broker.schwab.market_data import _to_occ
+        from income_desk.broker.schwab.market_data import _to_occ
         leg = self._make_leg(100.0, "call")
         occ = _to_occ("NVDA", leg)
         assert "NVDA" in occ
 
     def test_fractional_strike_encoding(self) -> None:
         """Fractional strikes are encoded correctly (* 1000)."""
-        from market_analyzer.broker.schwab.market_data import _to_occ
+        from income_desk.broker.schwab.market_data import _to_occ
         leg = self._make_leg(580.5, "put")
         occ = _to_occ("SPY", leg)
         assert "580500" in occ
 
     def test_occ_consistent_with_adapter(self) -> None:
         """New schwab package OCC matches legacy adapter format."""
-        from market_analyzer.broker.schwab.market_data import _to_occ as new_occ
-        from market_analyzer.adapters.schwab_adapter import SchwabMarketData
+        from income_desk.broker.schwab.market_data import _to_occ as new_occ
+        from income_desk.adapters.schwab_adapter import SchwabMarketData
         leg = self._make_leg(580.0, "call", date(2026, 4, 24))
         assert new_occ("SPY", leg) == SchwabMarketData._to_occ("SPY", leg)
 
@@ -124,17 +124,17 @@ class TestSchwabOCCSymbol:
 
 class TestSchwabMarketDataProperties:
     def test_provider_name(self) -> None:
-        from market_analyzer.broker.schwab.market_data import SchwabMarketData
+        from income_desk.broker.schwab.market_data import SchwabMarketData
         md = SchwabMarketData.__new__(SchwabMarketData)
         assert md.provider_name == "schwab"
 
     def test_currency(self) -> None:
-        from market_analyzer.broker.schwab.market_data import SchwabMarketData
+        from income_desk.broker.schwab.market_data import SchwabMarketData
         md = SchwabMarketData.__new__(SchwabMarketData)
         assert md.currency == "USD"
 
     def test_timezone(self) -> None:
-        from market_analyzer.broker.schwab.market_data import SchwabMarketData
+        from income_desk.broker.schwab.market_data import SchwabMarketData
         md = SchwabMarketData.__new__(SchwabMarketData)
         assert md.timezone == "US/Eastern"
 
@@ -145,7 +145,7 @@ class TestSchwabMarketDataProperties:
 
 class TestSchwabContractParsing:
     def test_parse_schwab_contract_basic(self) -> None:
-        from market_analyzer.broker.schwab.market_data import _parse_schwab_contract
+        from income_desk.broker.schwab.market_data import _parse_schwab_contract
 
         contract = {
             "bid": 1.20,
@@ -171,7 +171,7 @@ class TestSchwabContractParsing:
         assert quote.open_interest == 8000
 
     def test_parse_schwab_contract_missing_greeks(self) -> None:
-        from market_analyzer.broker.schwab.market_data import _parse_schwab_contract
+        from income_desk.broker.schwab.market_data import _parse_schwab_contract
 
         contract = {
             "bid": 2.00,
@@ -185,7 +185,7 @@ class TestSchwabContractParsing:
 
     def test_parse_schwab_contract_mid_from_mark(self) -> None:
         """Schwab 'mark' field used as mid when present."""
-        from market_analyzer.broker.schwab.market_data import _parse_schwab_contract
+        from income_desk.broker.schwab.market_data import _parse_schwab_contract
 
         contract = {"bid": 1.00, "ask": 1.50, "mark": 1.22}
         quote = _parse_schwab_contract(contract, "SPY", date(2026, 4, 24), 575.0, "put")
@@ -194,7 +194,7 @@ class TestSchwabContractParsing:
 
     def test_parse_schwab_contract_mid_fallback(self) -> None:
         """Without 'mark', mid = (bid + ask) / 2."""
-        from market_analyzer.broker.schwab.market_data import _parse_schwab_contract
+        from income_desk.broker.schwab.market_data import _parse_schwab_contract
 
         contract = {"bid": 1.00, "ask": 1.50}
         quote = _parse_schwab_contract(contract, "SPY", date(2026, 4, 24), 575.0, "put")
@@ -203,7 +203,7 @@ class TestSchwabContractParsing:
 
     def test_parse_bad_contract_returns_none(self) -> None:
         """Malformed contract data returns None without crashing."""
-        from market_analyzer.broker.schwab.market_data import _parse_schwab_contract
+        from income_desk.broker.schwab.market_data import _parse_schwab_contract
 
         # Pass invalid date type to trigger exception
         result = _parse_schwab_contract(None, "SPY", date(2026, 4, 24), 570.0, "put")
@@ -232,7 +232,7 @@ class TestSchwabAccountMapping:
         assert bal.derivative_buying_power == 40000.0
 
     def test_schwab_account_class_importable(self) -> None:
-        from market_analyzer.broker.schwab.account import SchwabAccount
+        from income_desk.broker.schwab.account import SchwabAccount
         assert SchwabAccount is not None
 
 
@@ -242,13 +242,13 @@ class TestSchwabAccountMapping:
 
 class TestSchwabCredentialResolution:
     def test_explicit_credentials_returned(self) -> None:
-        from market_analyzer.broker.schwab import _resolve_credentials
+        from income_desk.broker.schwab import _resolve_credentials
         key, secret = _resolve_credentials("my_key", "my_secret")
         assert key == "my_key"
         assert secret == "my_secret"
 
     def test_env_var_credentials(self, monkeypatch) -> None:
-        from market_analyzer.broker.schwab import _resolve_credentials
+        from income_desk.broker.schwab import _resolve_credentials
         monkeypatch.setenv("SCHWAB_APP_KEY", "env_key")
         monkeypatch.setenv("SCHWAB_APP_SECRET", "env_secret")
         key, secret = _resolve_credentials(None, None)
@@ -256,7 +256,7 @@ class TestSchwabCredentialResolution:
         assert secret == "env_secret"
 
     def test_empty_credentials_returned_as_empty_strings(self, monkeypatch) -> None:
-        from market_analyzer.broker.schwab import _resolve_credentials
+        from income_desk.broker.schwab import _resolve_credentials
         monkeypatch.delenv("SCHWAB_APP_KEY", raising=False)
         monkeypatch.delenv("SCHWAB_APP_SECRET", raising=False)
         key, secret = _resolve_credentials(None, None)
@@ -272,16 +272,16 @@ class TestSchwabAdapterBackwardCompat:
     """Ensure old adapter import path still works."""
 
     def test_old_adapter_still_importable(self) -> None:
-        from market_analyzer.adapters.schwab_adapter import SchwabMarketData
+        from income_desk.adapters.schwab_adapter import SchwabMarketData
         assert SchwabMarketData is not None
 
     def test_new_broker_module_importable(self) -> None:
-        from market_analyzer.broker.schwab.market_data import SchwabMarketData
+        from income_desk.broker.schwab.market_data import SchwabMarketData
         assert SchwabMarketData is not None
 
     def test_both_have_same_provider_name(self) -> None:
-        from market_analyzer.adapters.schwab_adapter import SchwabMarketData as OldSchwab
-        from market_analyzer.broker.schwab.market_data import SchwabMarketData as NewSchwab
+        from income_desk.adapters.schwab_adapter import SchwabMarketData as OldSchwab
+        from income_desk.broker.schwab.market_data import SchwabMarketData as NewSchwab
         old = OldSchwab.__new__(OldSchwab)
         new = NewSchwab.__new__(NewSchwab)
         assert old.provider_name == new.provider_name == "schwab"

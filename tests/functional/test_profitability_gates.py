@@ -2,10 +2,10 @@
 import pytest
 from datetime import date, timedelta
 
-from market_analyzer.trade_spec_factory import build_iron_condor
-from market_analyzer.trade_lifecycle import estimate_pop
-from market_analyzer.validation import run_daily_checks
-from market_analyzer.validation.models import Severity
+from income_desk.trade_spec_factory import build_iron_condor
+from income_desk.trade_lifecycle import estimate_pop
+from income_desk.validation import run_daily_checks
+from income_desk.validation.models import Severity
 
 
 def _ic():

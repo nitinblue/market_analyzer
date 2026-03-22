@@ -1,7 +1,7 @@
 """Functional tests: fill quality (bid-ask spread survival)."""
 import pytest
-from market_analyzer.validation.models import Severity
-from market_analyzer.validation.profitability_audit import check_fill_quality
+from income_desk.validation.models import Severity
+from income_desk.validation.profitability_audit import check_fill_quality
 
 
 class TestFillQualityFunctional:

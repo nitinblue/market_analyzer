@@ -6,10 +6,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from market_analyzer.config import PhaseSettings, get_settings, reset_settings
-from market_analyzer.models.phase import PhaseID, PhaseResult
-from market_analyzer.models.regime import RegimeID, RegimeTimeSeries, RegimeTimeSeriesEntry, TrendDirection
-from market_analyzer.phases.detector import PhaseDetector
+from income_desk.config import PhaseSettings, get_settings, reset_settings
+from income_desk.models.phase import PhaseID, PhaseResult
+from income_desk.models.regime import RegimeID, RegimeTimeSeries, RegimeTimeSeriesEntry, TrendDirection
+from income_desk.phases.detector import PhaseDetector
 
 
 def _make_regime_series(

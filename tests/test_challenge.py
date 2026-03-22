@@ -5,7 +5,7 @@ import tempfile
 from datetime import date
 from pathlib import Path
 
-from market_analyzer.trade_spec_factory import (
+from income_desk.trade_spec_factory import (
     create_trade_spec,
     build_iron_condor,
     build_credit_spread,
@@ -15,7 +15,7 @@ from market_analyzer.trade_spec_factory import (
     to_dxlink_symbols,
     parse_dxlink_symbol,
 )
-from market_analyzer.models.opportunity import TradeSpec, LegAction, StructureType, OrderSide
+from income_desk.models.opportunity import TradeSpec, LegAction, StructureType, OrderSide
 from challenge.portfolio import Portfolio
 from challenge.models import TradeStatus, RiskLimits, PortfolioStatus
 

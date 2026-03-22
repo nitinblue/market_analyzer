@@ -4,9 +4,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from market_analyzer.hmm.inference import RegimeInference
-from market_analyzer.hmm.trainer import HMMTrainer, MODEL_VERSION
-from market_analyzer.models.regime import (
+from income_desk.hmm.inference import RegimeInference
+from income_desk.hmm.trainer import HMMTrainer, MODEL_VERSION
+from income_desk.models.regime import (
     HMMModelInfo,
     RegimeConfig,
     RegimeID,

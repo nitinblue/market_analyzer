@@ -26,13 +26,13 @@ import io
 if sys.stdout.encoding != "utf-8":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-from market_analyzer import (
+from income_desk import (
     DataService,
     MarketAnalyzer,
     MarketRegistry,
     validate_execution_quality,
 )
-from market_analyzer.trade_lifecycle import (
+from income_desk.trade_lifecycle import (
     assess_overnight_risk,
     check_income_entry,
     check_trade_health,
@@ -329,7 +329,7 @@ def run(tickers: list[str] | None = None, detail: bool = False):
 
         try:
             # Build dummy TradeSpec for NIFTY IC
-            from market_analyzer.models.opportunity import TradeSpec, LegSpec, LegAction
+            from income_desk.models.opportunity import TradeSpec, LegSpec, LegAction
             dummy_spec = TradeSpec(
                 ticker="NIFTY", legs=[], underlying_price=tech.current_price,
                 target_dte=7, target_expiration=date.today(),
@@ -423,7 +423,7 @@ def run(tickers: list[str] | None = None, detail: bool = False):
 
     # Check that config has India entry windows
     try:
-        from market_analyzer.config import get_settings
+        from income_desk.config import get_settings
         settings = get_settings()
         if hasattr(settings, 'markets') and hasattr(settings.markets, 'markets'):
             india_market = settings.markets.markets.get("India")

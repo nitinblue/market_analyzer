@@ -5,9 +5,9 @@ from datetime import date, timedelta
 
 import pytest
 
-from market_analyzer.features.assignment_handler import assess_assignment_risk
-from market_analyzer.models.assignment import AssignmentRisk
-from market_analyzer.models.opportunity import LegAction, LegSpec, OrderSide, StructureType, TradeSpec
+from income_desk.features.assignment_handler import assess_assignment_risk
+from income_desk.models.assignment import AssignmentRisk
+from income_desk.models.opportunity import LegAction, LegSpec, OrderSide, StructureType, TradeSpec
 
 
 # ---------------------------------------------------------------------------

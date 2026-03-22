@@ -43,12 +43,12 @@ from challenge.models import (
 )
 
 if TYPE_CHECKING:
-    from market_analyzer.models.opportunity import TradeSpec
+    from income_desk.models.opportunity import TradeSpec
 
 logger = logging.getLogger(__name__)
 
 # Default data directory
-_DEFAULT_DATA_DIR = Path.home() / ".market_analyzer" / "challenge"
+_DEFAULT_DATA_DIR = Path.home() / ".income_desk" / "challenge"
 
 
 class Portfolio:
@@ -88,7 +88,7 @@ class Portfolio:
         """Book a new trade from a TradeSpec + fill data.
 
         Args:
-            trade_spec: The TradeSpec from market_analyzer (plan/opportunity output).
+            trade_spec: The TradeSpec from income_desk (plan/opportunity output).
             entry_price: Actual fill price (net credit or debit per spread).
             contracts: Number of contracts filled.
             notes: Optional trade notes.

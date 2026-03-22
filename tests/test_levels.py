@@ -5,8 +5,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from market_analyzer.config import reset_settings
-from market_analyzer.features.levels import (
+from income_desk.config import reset_settings
+from income_desk.features.levels import (
     _classify_levels,
     _cluster_levels,
     _compute_stop,
@@ -15,7 +15,7 @@ from market_analyzer.features.levels import (
     _extract_raw_levels,
     compute_levels,
 )
-from market_analyzer.models.levels import (
+from income_desk.models.levels import (
     LevelRole,
     LevelSource,
     LevelsAnalysis,
@@ -24,8 +24,8 @@ from market_analyzer.models.levels import (
     Target,
     TradeDirection,
 )
-from market_analyzer.models.regime import RegimeID, RegimeResult, TrendDirection
-from market_analyzer.models.technicals import (
+from income_desk.models.regime import RegimeID, RegimeResult, TrendDirection
+from income_desk.models.technicals import (
     BollingerBands,
     FairValueGap,
     FVGType,
@@ -46,7 +46,7 @@ from market_analyzer.models.technicals import (
     VCPData,
     VCPStage,
 )
-from market_analyzer.service.levels import LevelsService
+from income_desk.service.levels import LevelsService
 
 
 # ---------------------------------------------------------------------------
@@ -735,13 +735,13 @@ class TestService:
 
 class TestFacade:
     def test_levels_exists_on_analyzer(self):
-        from market_analyzer.service.analyzer import MarketAnalyzer
+        from income_desk.service.analyzer import MarketAnalyzer
         ma = MarketAnalyzer()
         assert hasattr(ma, "levels")
         assert isinstance(ma.levels, LevelsService)
 
     def test_levels_shares_services(self):
-        from market_analyzer.service.analyzer import MarketAnalyzer
+        from income_desk.service.analyzer import MarketAnalyzer
         ma = MarketAnalyzer()
         assert ma.levels.technical_service is ma.technicals
         assert ma.levels.regime_service is ma.regime

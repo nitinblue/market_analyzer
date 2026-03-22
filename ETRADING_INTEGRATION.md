@@ -1,4 +1,4 @@
-# eTrading ↔ market_analyzer Integration Guide
+# eTrading ↔ income_desk Integration Guide
 *Last updated: 2026-03-21 | Broker: tastytrade (data mode) | Server: localhost:8080*
 
 ---
@@ -438,7 +438,7 @@ All three return usage string — MCP `id` param not mapped to CLI positional ar
 ### RM1: `estimate_portfolio_loss()` — Daily Expected Loss
 
 ```python
-from market_analyzer.risk import estimate_portfolio_loss, PortfolioPosition
+from income_desk.risk import estimate_portfolio_loss, PortfolioPosition
 
 result = estimate_portfolio_loss(
     positions=[
@@ -496,8 +496,8 @@ result = estimate_portfolio_loss(
 ### Stress Scenarios: `run_stress_suite()` — Scenario Impact
 
 ```python
-from market_analyzer.stress_testing import run_stress_suite, run_stress_test
-from market_analyzer.stress_testing import ScenarioParams, ScenarioType
+from income_desk.stress_testing import run_stress_suite, run_stress_test
+from income_desk.stress_testing import ScenarioParams, ScenarioType
 
 # Run all predefined scenarios at once
 suite = run_stress_suite(positions, account_nlv=50000.0)
@@ -528,7 +528,7 @@ result = run_stress_test(
 Calls all 6 RM functions and returns a single `RiskDashboard`. This is what eTrading should call every monitoring cycle.
 
 ```python
-from market_analyzer.risk import compute_risk_dashboard
+from income_desk.risk import compute_risk_dashboard
 
 dashboard = compute_risk_dashboard(
     positions=positions,
@@ -584,7 +584,7 @@ A positive EV means the trade has statistical edge. Negative EV means you're pay
 ### `estimate_pop()` — POP + EV + R:R in one call
 
 ```python
-from market_analyzer.trade_lifecycle import estimate_pop
+from income_desk.trade_lifecycle import estimate_pop
 
 pop = estimate_pop(
     trade_spec=trade_spec,      # TradeSpec from ma.ranking.rank() or assessor
@@ -645,7 +645,7 @@ POP = P(price moves past breakeven in the right direction over DTE)
 The `trade_quality_score` (0-1) is already wired into the gate framework:
 
 ```python
-from market_analyzer.gate_framework import evaluate_trade_gates
+from income_desk.gate_framework import evaluate_trade_gates
 
 gates = evaluate_trade_gates(
     trade_spec=trade_spec,
@@ -749,7 +749,7 @@ Returns exactly ONE action. Use for systematic/automated trading — no human in
 #### `get_adjustment_recommendation()` — Wrapper in trade_lifecycle.py
 
 ```python
-from market_analyzer.trade_lifecycle import get_adjustment_recommendation
+from income_desk.trade_lifecycle import get_adjustment_recommendation
 
 decision = get_adjustment_recommendation(
     trade_spec=trade_spec,
@@ -967,12 +967,12 @@ User clicks "Connect TastyTrade"
 
 ---
 
-### market_analyzer Integration (Already Correct)
+### income_desk Integration (Already Correct)
 
 MA already supports this pattern via `connect_from_sessions()`:
 
 ```python
-from market_analyzer.broker.tastytrade import connect_from_sessions
+from income_desk.broker.tastytrade import connect_from_sessions
 from tastytrade import Session
 
 # eTrading does the auth — MA never touches credentials
@@ -1088,7 +1088,7 @@ The current `.env` file approach (`TASTYTRADE_REFRESH_TOKEN_LIVE`) is fine for *
 4. Switch from `connect_tastytrade()` → `connect_from_sessions()` (already supported in MA)
 5. The `TASTYTRADE_CLIENT_SECRET` stays as a single env var on the server — just the app identity changes from "Nitin's personal token" to "the eTrading OAuth application"
 
-**Nothing in market_analyzer needs to change.** MA's architecture is already SaaS-ready. The work is entirely in eTrading.
+**Nothing in income_desk needs to change.** MA's architecture is already SaaS-ready. The work is entirely in eTrading.
 
 ---
 
@@ -1126,24 +1126,24 @@ The current `.env` file approach (`TASTYTRADE_REFRESH_TOKEN_LIVE`) is fine for *
 
 ## 9. New Trading Intelligence APIs (March 2026)
 
-Six new API surfaces built into market_analyzer as pure functions. All are stateless, require no broker connection (though some produce richer results with broker data), and return Pydantic models. eTrading is the sole consumer.
+Six new API surfaces built into income_desk as pure functions. All are stateless, require no broker connection (though some produce richer results with broker data), and return Pydantic models. eTrading is the sole consumer.
 
 **Import convention:** all functions and models are re-exported from the top-level package unless noted otherwise.
 
 ```python
 # Top-level imports for everything in this section
-from market_analyzer import (
+from income_desk import (
     # Validation
     # Note: validation lives in its own sub-package
 )
-from market_analyzer.validation import (
+from income_desk.validation import (
     run_daily_checks,
     run_adversarial_checks,
     ValidationReport,
     CheckResult,
     Severity,
 )
-from market_analyzer import (
+from income_desk import (
     # Entry intelligence
     compute_strike_support_proximity,
     select_skew_optimal_strike,
@@ -1171,13 +1171,13 @@ from market_analyzer import (
 
 ### 9.1 Pre-Trade Validation (10-Check Gate)
 
-**File:** `market_analyzer/validation/daily_readiness.py`
-**Models:** `market_analyzer/validation/models.py`
+**File:** `income_desk/validation/daily_readiness.py`
+**Models:** `income_desk/validation/models.py`
 
 eTrading MUST call `run_daily_checks()` before placing ANY income trade. This is the profitability gate. A trade that fails validation should never reach the broker.
 
 ```python
-from market_analyzer.validation import run_daily_checks, run_adversarial_checks, Severity
+from income_desk.validation import run_daily_checks, run_adversarial_checks, Severity
 
 report = run_daily_checks(
     ticker="SPY",
@@ -1248,8 +1248,8 @@ if not stress.is_ready:
 
 ### 9.2 Entry-Level Intelligence (6 Functions)
 
-**File:** `market_analyzer/features/entry_levels.py`
-**Models:** `market_analyzer/models/entry.py`
+**File:** `income_desk/features/entry_levels.py`
+**Models:** `income_desk/models/entry.py`
 
 Call these AFTER validation passes, BEFORE placing the order. They answer: "Where should I enter, and at what price?"
 
@@ -1258,7 +1258,7 @@ Call these AFTER validation passes, BEFORE placing the order. They answer: "Wher
 Multi-factor score combining RSI extremity (35%), Bollinger %B (30%), ATR extension (15%), VWAP deviation (10%), and level proximity (10%).
 
 ```python
-from market_analyzer import score_entry_level
+from income_desk import score_entry_level
 
 score = score_entry_level(
     technicals=technicals_snapshot,  # From ma.technicals.snapshot(ticker)
@@ -1281,7 +1281,7 @@ else:                               # "not_yet", overall_score < 0.40
 Maps regime to urgency, then computes optimal limit price based on bid-ask spread.
 
 ```python
-from market_analyzer import compute_limit_entry_price
+from income_desk import compute_limit_entry_price
 
 # Map regime to urgency
 urgency_map = {1: "patient", 2: "normal", 3: "aggressive", 4: "aggressive"}
@@ -1308,7 +1308,7 @@ limit = compute_limit_entry_price(
 Checks whether short strikes are placed near support/resistance levels. Also used internally by `run_daily_checks()` check #8.
 
 ```python
-from market_analyzer import compute_strike_support_proximity
+from income_desk import compute_strike_support_proximity
 
 proximity = compute_strike_support_proximity(
     trade_spec=trade_spec,
@@ -1330,7 +1330,7 @@ if not proximity.all_backed:
 When vol surface data is available, finds the strike where IV is richest (most premium to sell).
 
 ```python
-from market_analyzer import select_skew_optimal_strike
+from income_desk import select_skew_optimal_strike
 
 optimal = select_skew_optimal_strike(
     underlying_price=580.0,
@@ -1353,7 +1353,7 @@ optimal = select_skew_optimal_strike(
 Returns support levels below current price where entering would materially improve trade quality.
 
 ```python
-from market_analyzer import compute_pullback_levels
+from income_desk import compute_pullback_levels
 
 alerts = compute_pullback_levels(
     current_price=580.0,
@@ -1374,7 +1374,7 @@ for alert in alerts:  # Sorted nearest-first (highest alert_price first)
 ETFs, equities, and indexes have different IV rank thresholds. Also used internally by `run_daily_checks()` check #10.
 
 ```python
-from market_analyzer import compute_iv_rank_quality
+from income_desk import compute_iv_rank_quality
 
 iv_quality = compute_iv_rank_quality(current_iv_rank=42.0, ticker_type="etf")
 # iv_quality.quality: "good" (>= 30 for ETF), "wait" (20-30), "avoid" (< 20)
@@ -1392,13 +1392,13 @@ iv_quality = compute_iv_rank_quality(current_iv_rank=42.0, ticker_type="etf")
 
 ### 9.3 Position Sizing (Kelly + Correlation + Regime Margin)
 
-**File:** `market_analyzer/features/position_sizing.py`
+**File:** `income_desk/features/position_sizing.py`
 **Models:** defined in same file (KellyResult, PortfolioExposure, CorrelationAdjustment, RegimeMarginEstimate)
 
 eTrading MUST use `compute_position_size()` for all position sizing. This replaces any hardcoded contract counts. The function chains three sizing stages: Kelly criterion, correlation penalty, and regime-adjusted margin cap.
 
 ```python
-from market_analyzer import compute_position_size, PortfolioExposure
+from income_desk import compute_position_size, PortfolioExposure
 
 # Build exposure from eTrading's portfolio DB
 exposure = PortfolioExposure(
@@ -1451,7 +1451,7 @@ contracts = result.recommended_contracts  # USE THIS
 
 **Helper: `compute_pairwise_correlation()`:**
 ```python
-from market_analyzer.features.position_sizing import compute_pairwise_correlation
+from income_desk.features.position_sizing import compute_pairwise_correlation
 
 # Pure Python, no pandas needed
 corr = compute_pairwise_correlation(
@@ -1466,15 +1466,15 @@ corr = compute_pairwise_correlation(
 
 ### 9.4 Exit Intelligence (3 Functions)
 
-**File:** `market_analyzer/features/exit_intelligence.py`
-**Models:** `market_analyzer/models/exit.py`
+**File:** `income_desk/features/exit_intelligence.py`
+**Models:** `income_desk/models/exit.py`
 
 Call these on every position monitoring cycle. They supplement the existing `monitor_exit_conditions()` from `trade_lifecycle.py` with regime-aware and time-aware exit logic.
 
 #### 9.4.1 `compute_regime_stop()` -- Regime-Contingent Stop Multiplier
 
 ```python
-from market_analyzer import compute_regime_stop
+from income_desk import compute_regime_stop
 
 stop = compute_regime_stop(
     regime_id=current_regime_id,        # 1-4
@@ -1499,7 +1499,7 @@ stop = compute_regime_stop(
 Adjusts profit target based on how fast profit is accumulating relative to time elapsed.
 
 ```python
-from market_analyzer import compute_time_adjusted_target
+from income_desk import compute_time_adjusted_target
 
 target = compute_time_adjusted_target(
     days_held=10,
@@ -1527,7 +1527,7 @@ else:
 Compares realized profit against remaining theta (approximated by sqrt curve) to determine if holding is still worthwhile.
 
 ```python
-from market_analyzer import compute_remaining_theta_value
+from income_desk import compute_remaining_theta_value
 
 theta = compute_remaining_theta_value(
     dte_remaining=12,
@@ -1575,12 +1575,12 @@ elif target.acceleration_reason:
 
 ### 9.5 DTE Optimization
 
-**File:** `market_analyzer/features/dte_optimizer.py`
+**File:** `income_desk/features/dte_optimizer.py`
 
 Before building a TradeSpec, use the DTE optimizer to select the expiration with the best theta-per-day from the vol surface term structure.
 
 ```python
-from market_analyzer import select_optimal_dte
+from income_desk import select_optimal_dte
 
 dte_rec = select_optimal_dte(
     vol_surface=vol_surface,       # From ma.vol_surface.compute(ticker)
@@ -1620,14 +1620,14 @@ Returns `None` if no expirations in the vol surface fall within `[min_dte, max_d
 
 ### 9.6 Adjustment Outcome Tracking (Learning Loop)
 
-**File:** `market_analyzer/features/position_sizing.py` (analyze function)
-**Models:** `market_analyzer/models/adjustment.py` (AdjustmentOutcome, AdjustmentEffectiveness)
+**File:** `income_desk/features/position_sizing.py` (analyze function)
+**Models:** `income_desk/models/adjustment.py` (AdjustmentOutcome, AdjustmentEffectiveness)
 
 eTrading should record every adjustment outcome for the feedback loop. Over time, this reveals which adjustments actually work in which regimes.
 
 ```python
-from market_analyzer import AdjustmentOutcome, AdjustmentEffectiveness
-from market_analyzer import analyze_adjustment_effectiveness
+from income_desk import AdjustmentOutcome, AdjustmentEffectiveness
+from income_desk import analyze_adjustment_effectiveness
 
 # After closing a position that was adjusted, record the outcome:
 outcome = AdjustmentOutcome(
@@ -1687,7 +1687,7 @@ effectiveness = analyze_adjustment_effectiveness(all_outcomes)
 
 ### 9.8 Data eTrading Must Maintain
 
-These fields are NOT stored by market_analyzer (it is stateless). eTrading must persist them and pass them back on each API call.
+These fields are NOT stored by income_desk (it is stateless). eTrading must persist them and pass them back on each API call.
 
 | Data | Where to Store | Passed To | Why |
 |---|---|---|---|
@@ -1716,7 +1716,7 @@ dte_rec = select_optimal_dte(vol_surface, regime.regime.value)
 target_dte = dte_rec.recommended_dte if dte_rec else 35
 
 # 3. Build trade (via assessor)
-from market_analyzer import assess_iron_condor
+from income_desk import assess_iron_condor
 opp = assess_iron_condor(regime, technicals, target_dte=target_dte)
 trade_spec = opp.trade_spec
 
@@ -1771,8 +1771,8 @@ place_limit_order(
 
 ## 10. Decision Audit Framework (March 20)
 
-**File:** `market_analyzer/features/decision_audit.py`
-**Models:** `market_analyzer/models/decision_audit.py`
+**File:** `income_desk/features/decision_audit.py`
+**Models:** `income_desk/models/decision_audit.py`
 
 A 4-level scoring framework that audits a proposed trade before execution. Returns a single `DecisionReport` with a grade and `approved: bool`. This supplements (not replaces) `run_daily_checks()` — validation gates block bad trades, the audit grades good trades so you can prioritize.
 
@@ -1782,8 +1782,8 @@ A 4-level scoring framework that audits a proposed trade before execution. Retur
 ### 10.1 `audit_decision()` — Top-Level Entry Point
 
 ```python
-from market_analyzer.features.decision_audit import audit_decision
-from market_analyzer.models.decision_audit import DecisionReport
+from income_desk.features.decision_audit import audit_decision
+from income_desk.models.decision_audit import DecisionReport
 
 report: DecisionReport = audit_decision(
     ticker="SPY",
@@ -1826,7 +1826,7 @@ else:
 These are called internally by `audit_decision()`. eTrading can call them directly if partial audits are needed (e.g., only leg quality or only risk audit).
 
 ```python
-from market_analyzer.features.decision_audit import (
+from income_desk.features.decision_audit import (
     audit_legs,        # Level 1: strike placement, S/R backing, skew edge, wing width
     audit_trade,       # Level 2: regime fit, POP, EV, commission drag, exit plan, entry timing
     audit_portfolio,   # Level 3: slot availability, correlation, risk budget, concentration
@@ -2002,7 +2002,7 @@ eTrading MUST run the crash sentinel on every monitoring cycle (minimum every 15
 ### API
 
 ```python
-from market_analyzer import assess_crash_sentinel, SentinelSignal
+from income_desk import assess_crash_sentinel, SentinelSignal
 
 report = assess_crash_sentinel(
     regime_results={
@@ -2220,7 +2220,7 @@ closing_trade_spec: TradeSpec | None  # Pre-built legs to close position
 ### Integration Pattern
 
 ```python
-from market_analyzer.trade_lifecycle import monitor_exit_conditions
+from income_desk.trade_lifecycle import monitor_exit_conditions
 
 result = monitor_exit_conditions(
     trade_spec=position_trade_spec,
@@ -2263,7 +2263,7 @@ if result.exit_signal:
 ### API
 
 ```python
-from market_analyzer.service.stress_monitoring import run_position_stress
+from income_desk.service.stress_monitoring import run_position_stress
 
 result = run_position_stress(
     positions=open_positions,  # list[PortfolioPosition]
@@ -2299,7 +2299,7 @@ result = run_position_stress(
 `snap_strike()` now respects market-specific tick sizes:
 
 ```python
-from market_analyzer.opportunity.option_plays._trade_spec_helpers import snap_strike
+from income_desk.opportunity.option_plays._trade_spec_helpers import snap_strike
 
 # US (1pt step)
 strike = snap_strike(price=580.5, current_ask=580.55, strike_interval=1)  # → 580.5
@@ -2334,7 +2334,7 @@ result = assess_trend_continuation(
 New `StructureType` entries for cash equity positions:
 
 ```python
-from market_analyzer import build_equity_trade_spec
+from income_desk import build_equity_trade_spec
 
 spec = build_equity_trade_spec(
     ticker='NIFTY',
@@ -2406,7 +2406,7 @@ Every opportunity assessor now returns a `trade_spec: TradeSpec | None` field.
 
 ```python
 # Every assessor call returns trade_spec
-from market_analyzer import ma
+from income_desk import ma
 
 result = ma.opportunity.assess_iron_condor(
     ticker='SPY',
@@ -2443,7 +2443,7 @@ MA now supports 6 brokers. eTrading's `connect_from_sessions()` pattern works th
 
 **What changes for eTrading:** NOTHING in the analysis pipeline. All brokers map to the same `OptionQuote`, `MarketMetrics`, `AccountBalance` models. The 27 context-aware APIs work identically regardless of which broker is connected.
 
-**Broker auto-detection:** `connect_broker()` in `cli/_broker.py` checks `~/.market_analyzer/broker.yaml` for `broker_type` field, or probes credentials in order: TastyTrade → Alpaca → Dhan → Schwab → IBKR.
+**Broker auto-detection:** `connect_broker()` in `cli/_broker.py` checks `~/.income_desk/broker.yaml` for `broker_type` field, or probes credentials in order: TastyTrade → Alpaca → Dhan → Schwab → IBKR.
 
 ---
 
@@ -2507,7 +2507,7 @@ Response:
 ### Import
 
 ```python
-from market_analyzer.features.desk_management import (
+from income_desk.features.desk_management import (
     recommend_desk_structure,
     rebalance_desks,
     evaluate_desk_health,
@@ -2515,7 +2515,7 @@ from market_analyzer.features.desk_management import (
     compute_desk_risk_limits,
     compute_instrument_risk,
 )
-from market_analyzer.models.portfolio import (
+from income_desk.models.portfolio import (
     DeskRecommendation, DeskSpec, DeskHealthReport, DeskRiskLimits,
     InstrumentRisk, RebalanceRecommendation, RiskTolerance, DeskHealth,
 )
@@ -2798,7 +2798,7 @@ analyzer-cli --sim snapshot   # Capture live data for offline use
 - Training on demo trades before going live
 - CI/CD pipeline validation (no credential setup required)
 
-**Service:** `market_analyzer/simulation/SimulationDataProvider` implements `MarketDataProvider` ABC. Snapshot mode captures current live data (if broker connected) and caches for replay.
+**Service:** `income_desk/simulation/SimulationDataProvider` implements `MarketDataProvider` ABC. Snapshot mode captures current live data (if broker connected) and caches for replay.
 
 **Snapshot refresh:** eTrading can call `refresh_simulation_data()` during market hours to capture fresh OHLCV and vol surfaces for testing.
 

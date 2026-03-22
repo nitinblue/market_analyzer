@@ -1,4 +1,4 @@
-# eTrading Change Request for market_analyzer
+# eTrading Change Request for income_desk
 # Date: 2026-03-14 | From: eTrading (Session 41)
 # Status: OPEN — Review and implement
 

@@ -9,8 +9,8 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
-from market_analyzer.config import RankingSettings, RankingWeightsSettings, get_settings
-from market_analyzer.features.ranking import (
+from income_desk.config import RankingSettings, RankingWeightsSettings, get_settings
+from income_desk.features.ranking import (
     ConfigWeightProvider,
     composite_from_breakdown,
     compute_composite_score,
@@ -23,9 +23,9 @@ from market_analyzer.features.ranking import (
     get_phase_alignment,
     get_regime_alignment,
 )
-from market_analyzer.models.black_swan import AlertLevel, BlackSwanAlert
-from market_analyzer.models.levels import LevelsAnalysis, PriceLevel, StopLoss, Target, LevelRole, LevelSource, TradeDirection
-from market_analyzer.models.opportunity import (
+from income_desk.models.black_swan import AlertLevel, BlackSwanAlert
+from income_desk.models.levels import LevelsAnalysis, PriceLevel, StopLoss, Target, LevelRole, LevelSource, TradeDirection
+from income_desk.models.opportunity import (
     BreakoutOpportunity,
     BreakoutSetup,
     BreakoutStrategy,
@@ -44,14 +44,14 @@ from market_analyzer.models.opportunity import (
     ZeroDTEOpportunity,
     ZeroDTEStrategy,
 )
-from market_analyzer.models.ranking import (
+from income_desk.models.ranking import (
     RankedEntry,
     RankingFeedback,
     ScoreBreakdown,
     StrategyType,
     TradeRankingResult,
 )
-from market_analyzer.models.technicals import (
+from income_desk.models.technicals import (
     BollingerBands,
     MACDData,
     MovingAverages,
@@ -62,14 +62,14 @@ from market_analyzer.models.technicals import (
     MarketPhase,
     TechnicalSnapshot,
 )
-from market_analyzer.opportunity.option_plays.iron_condor import IronCondorOpportunity
-from market_analyzer.opportunity.option_plays.iron_butterfly import IronButterflyOpportunity
-from market_analyzer.opportunity.option_plays.calendar import CalendarOpportunity
-from market_analyzer.opportunity.option_plays.diagonal import DiagonalOpportunity
-from market_analyzer.opportunity.option_plays.ratio_spread import RatioSpreadOpportunity
-from market_analyzer.opportunity.option_plays.earnings import EarningsOpportunity
-from market_analyzer.opportunity.setups.mean_reversion import MeanReversionOpportunity
-from market_analyzer.service.ranking import TradeRankingService
+from income_desk.opportunity.option_plays.iron_condor import IronCondorOpportunity
+from income_desk.opportunity.option_plays.iron_butterfly import IronButterflyOpportunity
+from income_desk.opportunity.option_plays.calendar import CalendarOpportunity
+from income_desk.opportunity.option_plays.diagonal import DiagonalOpportunity
+from income_desk.opportunity.option_plays.ratio_spread import RatioSpreadOpportunity
+from income_desk.opportunity.option_plays.earnings import EarningsOpportunity
+from income_desk.opportunity.setups.mean_reversion import MeanReversionOpportunity
+from income_desk.service.ranking import TradeRankingService
 
 
 # --- Fixtures ---
@@ -1023,7 +1023,7 @@ class TestAllStrategiesWired:
         assert result.total_assessed == 11
         assert len(result.top_trades) == 11
         # Only options strategies have assess methods — equity/futures are fallback types
-        from market_analyzer.service.ranking import _ASSESS_METHODS
+        from income_desk.service.ranking import _ASSESS_METHODS
         expected = set(_ASSESS_METHODS.keys())
         strategy_types = {e.strategy_type for e in result.top_trades}
         assert strategy_types == expected
@@ -1123,16 +1123,16 @@ class TestFeedback:
         )
         feedback_dir = tmp_path / "feedback"
         with patch(
-            "market_analyzer.service.ranking.Path.home",
-            return_value=tmp_path / ".market_analyzer_test_home",
+            "income_desk.service.ranking.Path.home",
+            return_value=tmp_path / ".income_desk_test_home",
         ):
             # Manually set the path for testing
-            import market_analyzer.service.ranking as ranking_mod
+            import income_desk.service.ranking as ranking_mod
             orig = Path.home
             Path.home = staticmethod(lambda: tmp_path)
             try:
                 svc.record_feedback(fb)
-                path = tmp_path / ".market_analyzer" / "feedback" / "ranking_feedback.parquet"
+                path = tmp_path / ".income_desk" / "feedback" / "ranking_feedback.parquet"
                 assert path.exists()
                 df = pd.read_parquet(path)
                 assert len(df) == 1

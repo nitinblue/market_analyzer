@@ -19,24 +19,24 @@ from datetime import date, time, timedelta
 
 import pytest
 
-from market_analyzer.models.adjustment import (
+from income_desk.models.adjustment import (
     AdjustmentDecision,
     AdjustmentType,
     PositionStatus,
 )
-from market_analyzer.models.opportunity import (
+from income_desk.models.opportunity import (
     LegAction,
     LegSpec,
     OrderSide,
     StructureType,
     TradeSpec,
 )
-from market_analyzer.models.quotes import OptionQuote
-from market_analyzer.models.feedback import TradeOutcome, TradeExitReason
-from market_analyzer.models.learning import DriftSeverity
-from market_analyzer.models.ranking import StrategyType
-from market_analyzer.models.regime import RegimeID, RegimeResult
-from market_analyzer.models.technicals import (
+from income_desk.models.quotes import OptionQuote
+from income_desk.models.feedback import TradeOutcome, TradeExitReason
+from income_desk.models.learning import DriftSeverity
+from income_desk.models.ranking import StrategyType
+from income_desk.models.regime import RegimeID, RegimeResult
+from income_desk.models.technicals import (
     BollingerBands,
     MACDData,
     MovingAverages,
@@ -46,13 +46,13 @@ from market_analyzer.models.technicals import (
     SupportResistance,
     TechnicalSnapshot,
 )
-from market_analyzer.execution_quality import (
+from income_desk.execution_quality import (
     ExecutionQuality,
     ExecutionVerdict,
     validate_execution_quality,
 )
-from market_analyzer.service.adjustment import AdjustmentService
-from market_analyzer.trade_lifecycle import (
+from income_desk.service.adjustment import AdjustmentService
+from income_desk.trade_lifecycle import (
     OvernightRisk,
     OvernightRiskLevel,
     assess_overnight_risk,
@@ -654,7 +654,7 @@ class TestAutoSelectScreening:
 
     def test_min_score_filters_low_candidates(self):
         """ScreeningResult with min_score=0.7 excludes candidates below 0.7."""
-        from market_analyzer.service.screening import ScreenCandidate, ScreeningResult
+        from income_desk.service.screening import ScreenCandidate, ScreeningResult
 
         candidates = [
             ScreenCandidate(
@@ -688,7 +688,7 @@ class TestAutoSelectScreening:
 
     def test_top_n_limits_results(self):
         """top_n=2 returns only top 2."""
-        from market_analyzer.service.screening import ScreenCandidate, ScreeningResult
+        from income_desk.service.screening import ScreenCandidate, ScreeningResult
 
         candidates = [
             ScreenCandidate(
@@ -712,7 +712,7 @@ class TestAutoSelectScreening:
 
     def test_filtered_count_tracks_removed(self):
         """filtered_count reflects how many were cut."""
-        from market_analyzer.service.screening import ScreeningResult
+        from income_desk.service.screening import ScreeningResult
 
         result = ScreeningResult(
             as_of_date=date.today(),
@@ -728,7 +728,7 @@ class TestAutoSelectScreening:
 
     def test_min_score_zero_returns_all(self):
         """min_score=0 returns everything (backward compat)."""
-        from market_analyzer.service.screening import ScreenCandidate, ScreeningResult
+        from income_desk.service.screening import ScreenCandidate, ScreeningResult
 
         candidates = [
             ScreenCandidate(
@@ -754,7 +754,7 @@ class TestAutoSelectScreening:
     def test_default_min_score_is_0_6(self):
         """Verify default parameter is 0.6 in ScreeningService.scan()."""
         import inspect
-        from market_analyzer.service.screening import ScreeningService
+        from income_desk.service.screening import ScreeningService
 
         sig = inspect.signature(ScreeningService.scan)
         min_score_param = sig.parameters["min_score"]
@@ -798,7 +798,7 @@ class TestPerformanceTracking:
 
     def test_compute_strategy_performance_basic(self):
         """5 winning trades + 3 losing -> correct win_rate, avg_pnl."""
-        from market_analyzer.performance import compute_strategy_performance
+        from income_desk.performance import compute_strategy_performance
 
         outcomes = (
             [_make_outcome(pnl_pct=0.10, pnl_dollars=30.0, trade_id=f"w{i}") for i in range(5)]
@@ -814,7 +814,7 @@ class TestPerformanceTracking:
 
     def test_compute_strategy_performance_by_regime(self):
         """Filter by regime_id=1 -> only R1 trades counted."""
-        from market_analyzer.performance import compute_strategy_performance
+        from income_desk.performance import compute_strategy_performance
 
         outcomes = [
             _make_outcome(regime=1, pnl_pct=0.10, pnl_dollars=30.0, trade_id="r1a"),
@@ -831,7 +831,7 @@ class TestPerformanceTracking:
 
     def test_compute_performance_report_groups_by_strategy(self):
         """Multiple strategies -> by_strategy has entries for each."""
-        from market_analyzer.performance import compute_performance_report
+        from income_desk.performance import compute_performance_report
 
         outcomes = [
             _make_outcome(strategy=StrategyType.IRON_CONDOR, trade_id="ic1"),
@@ -848,7 +848,7 @@ class TestPerformanceTracking:
 
     def test_compute_performance_report_groups_by_regime(self):
         """Multiple regimes -> by_regime dict populated."""
-        from market_analyzer.performance import compute_performance_report
+        from income_desk.performance import compute_performance_report
 
         outcomes = [
             _make_outcome(regime=1, trade_id="r1"),
@@ -862,7 +862,7 @@ class TestPerformanceTracking:
 
     def test_calibrate_weights_no_trades_no_adjustments(self):
         """Empty outcomes -> no adjustments."""
-        from market_analyzer.performance import calibrate_weights
+        from income_desk.performance import calibrate_weights
 
         result = calibrate_weights([])
         assert len(result.adjustments) == 0
@@ -870,7 +870,7 @@ class TestPerformanceTracking:
 
     def test_calibrate_weights_few_trades_no_adjustments(self):
         """5 trades (below min_trades=10) -> no adjustments."""
-        from market_analyzer.performance import calibrate_weights
+        from income_desk.performance import calibrate_weights
 
         outcomes = [
             _make_outcome(trade_id=f"t{i}") for i in range(5)
@@ -880,8 +880,8 @@ class TestPerformanceTracking:
 
     def test_calibrate_weights_winning_strategy_increases_weight(self):
         """15 trades all winning in R1 IC -> suggest increasing R1+IC weight if win rate > weight + 0.1."""
-        from market_analyzer.performance import calibrate_weights
-        from market_analyzer.features.ranking import REGIME_STRATEGY_ALIGNMENT
+        from income_desk.performance import calibrate_weights
+        from income_desk.features.ranking import REGIME_STRATEGY_ALIGNMENT
 
         # R1 + IC weight from the alignment matrix
         current_weight = REGIME_STRATEGY_ALIGNMENT.get(
@@ -910,7 +910,7 @@ class TestPerformanceTracking:
 
     def test_calibrate_weights_losing_strategy_decreases_weight(self):
         """15 trades all losing in R1 IC -> suggest decreasing R1+IC weight."""
-        from market_analyzer.performance import calibrate_weights
+        from income_desk.performance import calibrate_weights
 
         # R1 + IC has weight=1.0 typically; 0% win rate is 1.0 below, so diff = -1.0
         outcomes = [
@@ -928,7 +928,7 @@ class TestPerformanceTracking:
 
     def test_calibrate_weights_max_adjustment_clamped(self):
         """Adjustment never exceeds max_adjustment parameter."""
-        from market_analyzer.performance import calibrate_weights
+        from income_desk.performance import calibrate_weights
 
         outcomes = [
             _make_outcome(
@@ -956,7 +956,7 @@ class TestPerformanceTracking:
 
     def test_performance_report_score_correlation(self):
         """With enough trades, score_correlation is computed (not None)."""
-        from market_analyzer.performance import compute_performance_report
+        from income_desk.performance import compute_performance_report
 
         # Create 10 trades with varying scores and PnLs (need >= 5 for correlation)
         outcomes = [
@@ -973,7 +973,7 @@ class TestPerformanceTracking:
 
     def test_profit_factor_no_losses(self):
         """All winning trades -> profit_factor = inf."""
-        from market_analyzer.performance import compute_strategy_performance
+        from income_desk.performance import compute_strategy_performance
 
         outcomes = [
             _make_outcome(pnl_pct=0.10, pnl_dollars=30.0, trade_id=f"w{i}")
@@ -991,7 +991,7 @@ class TestTransparency:
 
     def test_data_gap_model(self):
         """DataGap(field='pop', reason='no broker', impact='off by 10-15%')."""
-        from market_analyzer.models.transparency import DataGap
+        from income_desk.models.transparency import DataGap
 
         gap = DataGap(field="pop", reason="no broker", impact="off by 10-15%")
         assert gap.field == "pop"
@@ -1006,7 +1006,7 @@ class TestTransparency:
 
     def test_regime_result_accepts_commentary(self):
         """RegimeResult with populated commentary list -> accessible."""
-        from market_analyzer.models.transparency import DataGap
+        from income_desk.models.transparency import DataGap
 
         result = RegimeResult(
             ticker="SPY",
@@ -1027,9 +1027,9 @@ class TestTransparency:
 
     def test_ranked_entry_has_data_gaps_field(self):
         """RankedEntry with data_gaps -> accessible."""
-        from market_analyzer.models.ranking import RankedEntry, ScoreBreakdown, StrategyType
-        from market_analyzer.models.opportunity import Verdict
-        from market_analyzer.models.transparency import DataGap
+        from income_desk.models.ranking import RankedEntry, ScoreBreakdown, StrategyType
+        from income_desk.models.opportunity import Verdict
+        from income_desk.models.transparency import DataGap
 
         entry = RankedEntry(
             rank=1,
@@ -1058,10 +1058,10 @@ class TestTransparency:
 
     def test_trading_plan_has_transparency_fields(self):
         """DailyTradingPlan with commentary + data_gaps -> works."""
-        from market_analyzer.models.trading_plan import (
+        from income_desk.models.trading_plan import (
             DailyTradingPlan, DayVerdict, RiskBudget,
         )
-        from market_analyzer.models.transparency import DataGap
+        from income_desk.models.transparency import DataGap
 
         plan = DailyTradingPlan(
             as_of_date=date.today(),
@@ -1091,7 +1091,7 @@ class TestTransparency:
 
     def test_opportunity_models_have_transparency_fields(self):
         """ZeroDTEOpportunity, LEAPOpportunity, BreakoutOpportunity, MomentumOpportunity all declare commentary + data_gaps."""
-        from market_analyzer.models.opportunity import (
+        from income_desk.models.opportunity import (
             ZeroDTEOpportunity, LEAPOpportunity, BreakoutOpportunity, MomentumOpportunity,
         )
 
@@ -1117,8 +1117,8 @@ class TestTransparency:
         assert result.commentary == []
         assert result.data_gaps == []
         # Same for RankedEntry
-        from market_analyzer.models.ranking import RankedEntry, ScoreBreakdown, StrategyType
-        from market_analyzer.models.opportunity import Verdict
+        from income_desk.models.ranking import RankedEntry, ScoreBreakdown, StrategyType
+        from income_desk.models.opportunity import Verdict
 
         entry = RankedEntry(
             rank=1, ticker="SPY", strategy_type=StrategyType.IRON_CONDOR,
@@ -1204,7 +1204,7 @@ class TestEtradingCR3:
 
     def test_strategy_performance_has_avg_dte_and_iv(self):
         """compute_strategy_performance populates avg_dte_at_entry and avg_iv_rank_at_entry when data present."""
-        from market_analyzer.performance import compute_strategy_performance
+        from income_desk.performance import compute_strategy_performance
 
         outcomes = [
             TradeOutcome(
@@ -1235,7 +1235,7 @@ class TestEtradingCR3:
 
     def test_strategy_performance_none_without_dte_iv(self):
         """compute_strategy_performance returns None for avg_dte/avg_iv when not provided."""
-        from market_analyzer.performance import compute_strategy_performance
+        from income_desk.performance import compute_strategy_performance
 
         outcomes = [
             TradeOutcome(
@@ -1299,9 +1299,9 @@ class TestEtradingCR4:
 
     def test_market_context_has_commentary(self):
         """MarketContext accepts and stores commentary field."""
-        from market_analyzer.models.context import MarketContext, IntermarketDashboard
-        from market_analyzer.models.black_swan import BlackSwanAlert, AlertLevel
-        from market_analyzer.models.macro import MacroCalendar
+        from income_desk.models.context import MarketContext, IntermarketDashboard
+        from income_desk.models.black_swan import BlackSwanAlert, AlertLevel
+        from income_desk.models.macro import MacroCalendar
 
         ctx = MarketContext(
             as_of_date=date.today(),
@@ -1338,7 +1338,7 @@ class TestEtradingCR4:
         assert TechnicalSnapshot.model_fields["commentary"].default == []
         assert "commentary" in TechnicalSnapshot.model_fields
 
-        from market_analyzer.models.context import MarketContext
+        from income_desk.models.context import MarketContext
 
         assert MarketContext.model_fields["commentary"].default == []
 
@@ -1351,7 +1351,7 @@ class TestEtradingCR5:
 
     def test_data_gap_has_affects_field(self):
         """DataGap accepts the 'affects' field."""
-        from market_analyzer.models.transparency import DataGap
+        from income_desk.models.transparency import DataGap
 
         gap = DataGap(
             field="pop",
@@ -1365,15 +1365,15 @@ class TestEtradingCR5:
 
     def test_data_gap_affects_defaults_empty(self):
         """DataGap without 'affects' defaults to empty string."""
-        from market_analyzer.models.transparency import DataGap
+        from income_desk.models.transparency import DataGap
 
         gap = DataGap(field="iv_rank", reason="no metrics", impact="medium")
         assert gap.affects == ""
 
     def test_exit_monitor_result_has_data_gaps(self):
         """ExitMonitorResult accepts data_gaps field."""
-        from market_analyzer.trade_lifecycle import ExitMonitorResult, ExitSignal
-        from market_analyzer.models.transparency import DataGap
+        from income_desk.trade_lifecycle import ExitMonitorResult, ExitSignal
+        from income_desk.models.transparency import DataGap
 
         result = ExitMonitorResult(
             trade_id="t1",
@@ -1395,8 +1395,8 @@ class TestEtradingCR5:
 
     def test_trade_health_check_has_data_gaps(self):
         """TradeHealthCheck accepts data_gaps field."""
-        from market_analyzer.trade_lifecycle import TradeHealthCheck, ExitMonitorResult
-        from market_analyzer.models.transparency import DataGap
+        from income_desk.trade_lifecycle import TradeHealthCheck, ExitMonitorResult
+        from income_desk.models.transparency import DataGap
 
         exit_result = ExitMonitorResult(
             trade_id="t1",
@@ -1428,7 +1428,7 @@ class TestEtradingCR5:
 
     def test_exit_monitor_result_data_gaps_defaults_empty(self):
         """ExitMonitorResult without data_gaps defaults to []."""
-        from market_analyzer.trade_lifecycle import ExitMonitorResult
+        from income_desk.trade_lifecycle import ExitMonitorResult
 
         result = ExitMonitorResult(
             trade_id="t1",
@@ -1445,7 +1445,7 @@ class TestEtradingCR5:
 
     def test_trade_health_check_data_gaps_defaults_empty(self):
         """TradeHealthCheck without data_gaps defaults to []."""
-        from market_analyzer.trade_lifecycle import TradeHealthCheck, ExitMonitorResult
+        from income_desk.trade_lifecycle import TradeHealthCheck, ExitMonitorResult
 
         exit_result = ExitMonitorResult(
             trade_id="t1",
@@ -1479,8 +1479,8 @@ class TestSQ1IVIntegration:
 
     def test_iron_condor_hard_stop_low_iv(self):
         """assess_iron_condor with iv_rank=10 -> NO_GO (hard stop: IV rank too low)."""
-        from market_analyzer.opportunity.option_plays.iron_condor import assess_iron_condor
-        from market_analyzer.models.opportunity import Verdict
+        from income_desk.opportunity.option_plays.iron_condor import assess_iron_condor
+        from income_desk.models.opportunity import Verdict
 
         regime = _make_regime(1)
         technicals = _make_technicals()
@@ -1496,7 +1496,7 @@ class TestSQ1IVIntegration:
 
     def test_iron_condor_accepts_iv_rank_none(self):
         """assess_iron_condor with iv_rank=None (default) -> works, no TypeError."""
-        from market_analyzer.opportunity.option_plays.iron_condor import assess_iron_condor
+        from income_desk.opportunity.option_plays.iron_condor import assess_iron_condor
 
         regime = _make_regime(1)
         technicals = _make_technicals()
@@ -1516,8 +1516,8 @@ class TestSQ1IVIntegration:
         function still accepts iv_rank without error.  We verify the hard stop
         names do NOT include the IV rank stop (since 30 > 15).
         """
-        from market_analyzer.opportunity.option_plays.iron_condor import assess_iron_condor
-        from market_analyzer.models.opportunity import Verdict
+        from income_desk.opportunity.option_plays.iron_condor import assess_iron_condor
+        from income_desk.models.opportunity import Verdict
 
         regime = _make_regime(1)
         technicals = _make_technicals()
@@ -1535,12 +1535,12 @@ class TestSQ1IVIntegration:
 
     def test_leap_hard_stop_high_iv(self):
         """assess_leap with iv_rank=80 -> NO_GO (hard stop: IV rank too high)."""
-        from market_analyzer.opportunity.option_plays.leap import assess_leap
-        from market_analyzer.models.opportunity import Verdict
-        from market_analyzer.models.phase import (
+        from income_desk.opportunity.option_plays.leap import assess_leap
+        from income_desk.models.opportunity import Verdict
+        from income_desk.models.phase import (
             PhaseResult, PhaseID, PriceStructure, PhaseEvidence,
         )
-        from market_analyzer.models.macro import MacroCalendar
+        from income_desk.models.macro import MacroCalendar
 
         regime = _make_regime(3)  # R3 for LEAPs
         technicals = _make_technicals()
@@ -1587,11 +1587,11 @@ class TestSQ1IVIntegration:
 
     def test_leap_accepts_iv_rank_none(self):
         """assess_leap with iv_rank=None -> works, no TypeError."""
-        from market_analyzer.opportunity.option_plays.leap import assess_leap
-        from market_analyzer.models.phase import (
+        from income_desk.opportunity.option_plays.leap import assess_leap
+        from income_desk.models.phase import (
             PhaseResult, PhaseID, PriceStructure, PhaseEvidence,
         )
-        from market_analyzer.models.macro import MacroCalendar
+        from income_desk.models.macro import MacroCalendar
 
         regime = _make_regime(3)
         technicals = _make_technicals()
@@ -1632,8 +1632,8 @@ class TestSQ1IVIntegration:
 
     def test_earnings_hard_stop_low_iv(self):
         """assess_earnings_play with iv_rank=20 -> NO_GO (hard stop: IV rank too low)."""
-        from market_analyzer.opportunity.option_plays.earnings import assess_earnings_play
-        from market_analyzer.models.opportunity import Verdict
+        from income_desk.opportunity.option_plays.earnings import assess_earnings_play
+        from income_desk.models.opportunity import Verdict
 
         regime = _make_regime(1)
         technicals = _make_technicals()
@@ -1649,7 +1649,7 @@ class TestSQ1IVIntegration:
 
     def test_earnings_accepts_iv_rank_none(self):
         """assess_earnings_play with iv_rank=None -> works, no TypeError."""
-        from market_analyzer.opportunity.option_plays.earnings import assess_earnings_play
+        from income_desk.opportunity.option_plays.earnings import assess_earnings_play
 
         regime = _make_regime(1)
         technicals = _make_technicals()
@@ -1725,7 +1725,7 @@ class TestSQ3POPCalibration:
 
     def test_estimate_pop_accepts_iv_rank(self):
         """estimate_pop with iv_rank=50 -> works, no error."""
-        from market_analyzer.trade_lifecycle import estimate_pop
+        from income_desk.trade_lifecycle import estimate_pop
 
         ic = _make_iron_condor()
         result = estimate_pop(
@@ -1741,7 +1741,7 @@ class TestSQ3POPCalibration:
 
     def test_estimate_pop_iv_rank_widens_move(self):
         """Higher iv_rank -> lower POP (wider expected move for credit trades)."""
-        from market_analyzer.trade_lifecycle import estimate_pop
+        from income_desk.trade_lifecycle import estimate_pop
 
         ic = _make_iron_condor()
         common = dict(
@@ -1760,7 +1760,7 @@ class TestSQ3POPCalibration:
 
     def test_estimate_pop_iv_rank_none_data_gap(self):
         """estimate_pop with iv_rank=None -> POPEstimate has data_gap."""
-        from market_analyzer.trade_lifecycle import estimate_pop
+        from income_desk.trade_lifecycle import estimate_pop
 
         ic = _make_iron_condor()
         result = estimate_pop(
@@ -1778,7 +1778,7 @@ class TestSQ3POPCalibration:
 
     def test_estimate_pop_iv_rank_provided_no_data_gap(self):
         """estimate_pop with iv_rank=50 -> no IV-related data gap."""
-        from market_analyzer.trade_lifecycle import estimate_pop
+        from income_desk.trade_lifecycle import estimate_pop
 
         ic = _make_iron_condor()
         result = estimate_pop(
@@ -1795,14 +1795,14 @@ class TestSQ3POPCalibration:
 
     def test_calibrate_pop_factors_empty(self):
         """Empty outcomes -> empty dict."""
-        from market_analyzer.performance import calibrate_pop_factors
+        from income_desk.performance import calibrate_pop_factors
 
         result = calibrate_pop_factors([])
         assert result == {}
 
     def test_calibrate_pop_factors_few_trades(self):
         """5 trades (below min=10) -> empty dict."""
-        from market_analyzer.performance import calibrate_pop_factors
+        from income_desk.performance import calibrate_pop_factors
 
         outcomes = [_make_outcome(trade_id=f"t{i}") for i in range(5)]
         result = calibrate_pop_factors(outcomes, min_trades_per_regime=10)
@@ -1810,7 +1810,7 @@ class TestSQ3POPCalibration:
 
     def test_calibrate_pop_factors_enough_trades(self):
         """15 trades all in R1 -> dict has key 1."""
-        from market_analyzer.performance import calibrate_pop_factors
+        from income_desk.performance import calibrate_pop_factors
 
         outcomes = [
             _make_outcome(regime=1, pnl_pct=0.10, trade_id=f"t{i}")
@@ -1822,7 +1822,7 @@ class TestSQ3POPCalibration:
 
     def test_calibrate_pop_factors_clamped(self):
         """Result factors are within [0.15, 2.0]."""
-        from market_analyzer.performance import calibrate_pop_factors
+        from income_desk.performance import calibrate_pop_factors
 
         # All winning -> factor should be low but >= 0.15
         winning = [
@@ -1844,7 +1844,7 @@ class TestSQ3POPCalibration:
 
     def test_performance_report_has_pop_accuracy(self):
         """compute_performance_report with enough outcomes -> pop_accuracy populated."""
-        from market_analyzer.performance import compute_performance_report
+        from income_desk.performance import compute_performance_report
 
         # Need >= 5 trades per regime for pop_accuracy to populate
         outcomes = [
@@ -1863,7 +1863,7 @@ class TestSQ3POPCalibration:
 
     def test_performance_report_pop_accuracy_none_few_trades(self):
         """compute_performance_report with < 5 trades per regime -> pop_accuracy is None."""
-        from market_analyzer.performance import compute_performance_report
+        from income_desk.performance import compute_performance_report
 
         outcomes = [
             _make_outcome(regime=1, trade_id="t1"),
@@ -1903,8 +1903,8 @@ class TestTA1Fibonacci:
 
     def test_fibonacci_computes_levels(self):
         """compute_fibonacci returns FibonacciLevels with all fields populated."""
-        from market_analyzer.features.technicals import compute_fibonacci
-        from market_analyzer.models.technicals import FibonacciLevels
+        from income_desk.features.technicals import compute_fibonacci
+        from income_desk.models.technicals import FibonacciLevels
 
         df = _make_ohlcv()
         result = compute_fibonacci(df["High"], df["Low"], df["Close"])
@@ -1919,7 +1919,7 @@ class TestTA1Fibonacci:
 
     def test_fibonacci_levels_between_swing(self):
         """All fib levels are between swing_high and swing_low."""
-        from market_analyzer.features.technicals import compute_fibonacci
+        from income_desk.features.technicals import compute_fibonacci
 
         df = _make_ohlcv()
         result = compute_fibonacci(df["High"], df["Low"], df["Close"])
@@ -1930,7 +1930,7 @@ class TestTA1Fibonacci:
 
     def test_fibonacci_direction_detected(self):
         """Direction is 'up' or 'down'."""
-        from market_analyzer.features.technicals import compute_fibonacci
+        from income_desk.features.technicals import compute_fibonacci
 
         df = _make_ohlcv()
         result = compute_fibonacci(df["High"], df["Low"], df["Close"])
@@ -1938,7 +1938,7 @@ class TestTA1Fibonacci:
 
     def test_fibonacci_current_price_level(self):
         """current_price_level is a non-empty string."""
-        from market_analyzer.features.technicals import compute_fibonacci
+        from income_desk.features.technicals import compute_fibonacci
 
         df = _make_ohlcv()
         result = compute_fibonacci(df["High"], df["Low"], df["Close"])
@@ -1951,8 +1951,8 @@ class TestTA2ADX:
 
     def test_adx_computes(self):
         """compute_adx returns ADXData with adx, plus_di, minus_di."""
-        from market_analyzer.features.technicals import compute_adx
-        from market_analyzer.models.technicals import ADXData
+        from income_desk.features.technicals import compute_adx
+        from income_desk.models.technicals import ADXData
 
         df = _make_ohlcv()
         result = compute_adx(df["High"], df["Low"], df["Close"])
@@ -1963,7 +1963,7 @@ class TestTA2ADX:
 
     def test_adx_range(self):
         """ADX value is between 0 and 100."""
-        from market_analyzer.features.technicals import compute_adx
+        from income_desk.features.technicals import compute_adx
 
         df = _make_ohlcv()
         result = compute_adx(df["High"], df["Low"], df["Close"])
@@ -1971,7 +1971,7 @@ class TestTA2ADX:
 
     def test_adx_trending_flag(self):
         """is_trending = adx > 25."""
-        from market_analyzer.features.technicals import compute_adx
+        from income_desk.features.technicals import compute_adx
 
         df = _make_ohlcv()
         result = compute_adx(df["High"], df["Low"], df["Close"])
@@ -1979,7 +1979,7 @@ class TestTA2ADX:
 
     def test_adx_ranging_flag(self):
         """is_ranging = adx < 20."""
-        from market_analyzer.features.technicals import compute_adx
+        from income_desk.features.technicals import compute_adx
 
         df = _make_ohlcv()
         result = compute_adx(df["High"], df["Low"], df["Close"])
@@ -1987,7 +1987,7 @@ class TestTA2ADX:
 
     def test_adx_direction(self):
         """trend_direction is 'bullish', 'bearish', or 'neutral'."""
-        from market_analyzer.features.technicals import compute_adx
+        from income_desk.features.technicals import compute_adx
 
         df = _make_ohlcv()
         result = compute_adx(df["High"], df["Low"], df["Close"])
@@ -1999,8 +1999,8 @@ class TestTA3Donchian:
 
     def test_donchian_computes(self):
         """compute_donchian returns DonchianChannels."""
-        from market_analyzer.features.technicals import compute_donchian
-        from market_analyzer.models.technicals import DonchianChannels
+        from income_desk.features.technicals import compute_donchian
+        from income_desk.models.technicals import DonchianChannels
 
         df = _make_ohlcv()
         result = compute_donchian(df["High"], df["Low"], df["Close"])
@@ -2008,7 +2008,7 @@ class TestTA3Donchian:
 
     def test_donchian_upper_gte_lower(self):
         """upper >= lower always."""
-        from market_analyzer.features.technicals import compute_donchian
+        from income_desk.features.technicals import compute_donchian
 
         df = _make_ohlcv()
         result = compute_donchian(df["High"], df["Low"], df["Close"])
@@ -2016,7 +2016,7 @@ class TestTA3Donchian:
 
     def test_donchian_middle_is_average(self):
         """middle = (upper + lower) / 2."""
-        from market_analyzer.features.technicals import compute_donchian
+        from income_desk.features.technicals import compute_donchian
 
         df = _make_ohlcv()
         result = compute_donchian(df["High"], df["Low"], df["Close"])
@@ -2029,8 +2029,8 @@ class TestTA4Keltner:
 
     def test_keltner_computes(self):
         """compute_keltner returns KeltnerChannels."""
-        from market_analyzer.features.technicals import compute_keltner
-        from market_analyzer.models.technicals import KeltnerChannels
+        from income_desk.features.technicals import compute_keltner
+        from income_desk.models.technicals import KeltnerChannels
 
         df = _make_ohlcv()
         result = compute_keltner(df["Close"], df["High"], df["Low"])
@@ -2038,7 +2038,7 @@ class TestTA4Keltner:
 
     def test_keltner_upper_gte_lower(self):
         """upper >= lower always."""
-        from market_analyzer.features.technicals import compute_keltner
+        from income_desk.features.technicals import compute_keltner
 
         df = _make_ohlcv()
         result = compute_keltner(df["Close"], df["High"], df["Low"])
@@ -2046,7 +2046,7 @@ class TestTA4Keltner:
 
     def test_keltner_squeeze_detection(self):
         """squeeze = True when BB inside Keltner."""
-        from market_analyzer.features.technicals import compute_keltner
+        from income_desk.features.technicals import compute_keltner
 
         df = _make_ohlcv()
         # Pass BB values that are inside Keltner (narrow BB = squeeze)
@@ -2069,8 +2069,8 @@ class TestTA5Pivots:
 
     def test_pivots_compute(self):
         """compute_pivot_points returns PivotPoints."""
-        from market_analyzer.features.technicals import compute_pivot_points
-        from market_analyzer.models.technicals import PivotPoints
+        from income_desk.features.technicals import compute_pivot_points
+        from income_desk.models.technicals import PivotPoints
 
         df = _make_ohlcv()
         result = compute_pivot_points(df["High"], df["Low"], df["Close"])
@@ -2078,7 +2078,7 @@ class TestTA5Pivots:
 
     def test_pivots_ordering(self):
         """s3 < s2 < s1 < pp < r1 < r2 < r3."""
-        from market_analyzer.features.technicals import compute_pivot_points
+        from income_desk.features.technicals import compute_pivot_points
 
         df = _make_ohlcv()
         result = compute_pivot_points(df["High"], df["Low"], df["Close"])
@@ -2086,7 +2086,7 @@ class TestTA5Pivots:
 
     def test_pivots_period(self):
         """period == 'daily'."""
-        from market_analyzer.features.technicals import compute_pivot_points
+        from income_desk.features.technicals import compute_pivot_points
 
         df = _make_ohlcv()
         result = compute_pivot_points(df["High"], df["Low"], df["Close"])
@@ -2098,8 +2098,8 @@ class TestTA6VWAP:
 
     def test_vwap_computes(self):
         """compute_daily_vwap returns VWAPData."""
-        from market_analyzer.features.technicals import compute_daily_vwap
-        from market_analyzer.models.technicals import VWAPData
+        from income_desk.features.technicals import compute_daily_vwap
+        from income_desk.models.technicals import VWAPData
 
         df = _make_ohlcv()
         result = compute_daily_vwap(df["High"], df["Low"], df["Close"], df["Volume"])
@@ -2107,7 +2107,7 @@ class TestTA6VWAP:
 
     def test_vwap_positive(self):
         """vwap > 0."""
-        from market_analyzer.features.technicals import compute_daily_vwap
+        from income_desk.features.technicals import compute_daily_vwap
 
         df = _make_ohlcv()
         result = compute_daily_vwap(df["High"], df["Low"], df["Close"], df["Volume"])
@@ -2115,7 +2115,7 @@ class TestTA6VWAP:
 
     def test_vwap_above_below(self):
         """is_above_vwap matches price > vwap."""
-        from market_analyzer.features.technicals import compute_daily_vwap
+        from income_desk.features.technicals import compute_daily_vwap
 
         df = _make_ohlcv()
         result = compute_daily_vwap(df["High"], df["Low"], df["Close"], df["Volume"])
@@ -2128,7 +2128,7 @@ class TestTAOnSnapshot:
 
     def test_snapshot_has_all_ta_fields(self):
         """TechnicalSnapshot accepts fibonacci, adx, donchian, keltner, pivot_points, daily_vwap."""
-        from market_analyzer.models.technicals import (
+        from income_desk.models.technicals import (
             FibonacciLevels, ADXData, DonchianChannels,
             KeltnerChannels, PivotPoints, VWAPData,
             TechnicalSnapshot,
@@ -2199,7 +2199,7 @@ def _make_technicals_with_ta(
     pivot_points: "PivotPoints | None" = None,
 ) -> TechnicalSnapshot:
     """Build TechnicalSnapshot with optional new TA indicators populated."""
-    from market_analyzer.models.technicals import (
+    from income_desk.models.technicals import (
         ADXData,
         DonchianChannels,
         FibonacciLevels,
@@ -2252,7 +2252,7 @@ def _make_technicals_with_ta(
 
 def _make_phase_result() -> "PhaseResult":
     """Build a minimal PhaseResult for assessor tests."""
-    from market_analyzer.models.phase import (
+    from income_desk.models.phase import (
         PhaseEvidence,
         PhaseID,
         PhaseResult,
@@ -2297,7 +2297,7 @@ def _make_phase_result() -> "PhaseResult":
 
 def _make_macro_calendar() -> "MacroCalendar":
     """Build a minimal MacroCalendar for assessor tests."""
-    from market_analyzer.models.macro import MacroCalendar
+    from income_desk.models.macro import MacroCalendar
 
     return MacroCalendar(
         events=[],
@@ -2318,8 +2318,8 @@ class TestSQ4MeanReversionOverhaul:
 
     def test_adx_hard_stop_strong_trend(self):
         """ADX > 35 should produce a hard stop in mean reversion assessment."""
-        from market_analyzer.models.technicals import ADXData
-        from market_analyzer.opportunity.setups.mean_reversion import assess_mean_reversion
+        from income_desk.models.technicals import ADXData
+        from income_desk.opportunity.setups.mean_reversion import assess_mean_reversion
 
         adx = ADXData(adx=40.0, plus_di=30.0, minus_di=15.0,
                        is_trending=True, is_ranging=False, trend_direction="bullish")
@@ -2335,8 +2335,8 @@ class TestSQ4MeanReversionOverhaul:
 
     def test_adx_ranging_no_hard_stop(self):
         """ADX < 20 should NOT produce a hard stop — favorable for MR."""
-        from market_analyzer.models.technicals import ADXData
-        from market_analyzer.opportunity.setups.mean_reversion import assess_mean_reversion
+        from income_desk.models.technicals import ADXData
+        from income_desk.opportunity.setups.mean_reversion import assess_mean_reversion
 
         adx = ADXData(adx=15.0, plus_di=12.0, minus_di=10.0,
                        is_trending=False, is_ranging=True, trend_direction="neutral")
@@ -2349,8 +2349,8 @@ class TestSQ4MeanReversionOverhaul:
 
     def test_fibonacci_signal_present(self):
         """With fibonacci data, fibonacci_reversion signal should appear."""
-        from market_analyzer.models.technicals import FibonacciLevels
-        from market_analyzer.opportunity.setups.mean_reversion import assess_mean_reversion
+        from income_desk.models.technicals import FibonacciLevels
+        from income_desk.opportunity.setups.mean_reversion import assess_mean_reversion
 
         fib = FibonacciLevels(
             swing_high=620.0, swing_low=580.0, direction="up",
@@ -2372,8 +2372,8 @@ class TestSQ4MeanReversionOverhaul:
 
     def test_fibonacci_shallow_unfavorable(self):
         """Shallow retracement should produce unfavorable fibonacci signal."""
-        from market_analyzer.models.technicals import FibonacciLevels
-        from market_analyzer.opportunity.setups.mean_reversion import assess_mean_reversion
+        from income_desk.models.technicals import FibonacciLevels
+        from income_desk.opportunity.setups.mean_reversion import assess_mean_reversion
 
         fib = FibonacciLevels(
             swing_high=620.0, swing_low=580.0, direction="up",
@@ -2390,8 +2390,8 @@ class TestSQ4MeanReversionOverhaul:
 
     def test_vwap_signal_present(self):
         """With daily_vwap data, vwap_deviation signal should appear."""
-        from market_analyzer.models.technicals import VWAPData
-        from market_analyzer.opportunity.setups.mean_reversion import assess_mean_reversion
+        from income_desk.models.technicals import VWAPData
+        from income_desk.opportunity.setups.mean_reversion import assess_mean_reversion
 
         vwap = VWAPData(vwap=595.0, price_vs_vwap_pct=3.0, is_above_vwap=True)
         tech = _make_technicals_with_ta(rsi=30.0, bb_pct_b=0.1, daily_vwap=vwap)
@@ -2408,8 +2408,8 @@ class TestSQ4MeanReversionOverhaul:
 
     def test_vwap_near_unfavorable(self):
         """Price near VWAP (< 2%) should produce unfavorable signal."""
-        from market_analyzer.models.technicals import VWAPData
-        from market_analyzer.opportunity.setups.mean_reversion import assess_mean_reversion
+        from income_desk.models.technicals import VWAPData
+        from income_desk.opportunity.setups.mean_reversion import assess_mean_reversion
 
         vwap = VWAPData(vwap=599.0, price_vs_vwap_pct=0.5, is_above_vwap=True)
         tech = _make_technicals_with_ta(rsi=30.0, bb_pct_b=0.1, daily_vwap=vwap)
@@ -2421,7 +2421,7 @@ class TestSQ4MeanReversionOverhaul:
 
     def test_divergence_signal_bullish(self):
         """RSI < 35 and MACD histogram > 0 should produce favorable divergence."""
-        from market_analyzer.opportunity.setups.mean_reversion import assess_mean_reversion
+        from income_desk.opportunity.setups.mean_reversion import assess_mean_reversion
 
         tech = _make_technicals_with_ta(rsi=30.0, bb_pct_b=0.1, macd_histogram=0.5)
         regime = _make_regime(1)
@@ -2436,7 +2436,7 @@ class TestSQ4MeanReversionOverhaul:
 
     def test_divergence_signal_no_divergence(self):
         """RSI=50 and MACD histogram=0 -> no divergence (unfavorable)."""
-        from market_analyzer.opportunity.setups.mean_reversion import assess_mean_reversion
+        from income_desk.opportunity.setups.mean_reversion import assess_mean_reversion
 
         tech = _make_technicals_with_ta(rsi=50.0, bb_pct_b=0.5, macd_histogram=0.0)
         regime = _make_regime(1)
@@ -2447,8 +2447,8 @@ class TestSQ4MeanReversionOverhaul:
 
     def test_adx_ranging_signal_favorable(self):
         """ADX < 20 (ranging) should produce favorable adx_ranging signal."""
-        from market_analyzer.models.technicals import ADXData
-        from market_analyzer.opportunity.setups.mean_reversion import assess_mean_reversion
+        from income_desk.models.technicals import ADXData
+        from income_desk.opportunity.setups.mean_reversion import assess_mean_reversion
 
         adx = ADXData(adx=15.0, plus_di=12.0, minus_di=10.0,
                        is_trending=False, is_ranging=True, trend_direction="neutral")
@@ -2468,8 +2468,8 @@ class TestSQ5BreakoutVolume:
 
     def test_donchian_signal_present(self):
         """With donchian data at upper, donchian_breakout signal should appear and be favorable."""
-        from market_analyzer.models.technicals import DonchianChannels
-        from market_analyzer.opportunity.setups.breakout import assess_breakout
+        from income_desk.models.technicals import DonchianChannels
+        from income_desk.opportunity.setups.breakout import assess_breakout
 
         donchian = DonchianChannels(
             upper=610.0, lower=580.0, middle=595.0,
@@ -2490,8 +2490,8 @@ class TestSQ5BreakoutVolume:
 
     def test_donchian_not_at_upper_unfavorable(self):
         """Donchian available but not at upper -> unfavorable signal."""
-        from market_analyzer.models.technicals import DonchianChannels
-        from market_analyzer.opportunity.setups.breakout import assess_breakout
+        from income_desk.models.technicals import DonchianChannels
+        from income_desk.opportunity.setups.breakout import assess_breakout
 
         donchian = DonchianChannels(
             upper=610.0, lower=580.0, middle=595.0,
@@ -2508,7 +2508,7 @@ class TestSQ5BreakoutVolume:
 
     def test_donchian_absent_no_signal(self):
         """Without donchian data, no donchian_breakout signal should appear."""
-        from market_analyzer.opportunity.setups.breakout import assess_breakout
+        from income_desk.opportunity.setups.breakout import assess_breakout
 
         tech = _make_technicals_with_ta()
         regime = _make_regime(1)
@@ -2521,8 +2521,8 @@ class TestSQ5BreakoutVolume:
 
     def test_keltner_squeeze_signal(self):
         """With keltner.squeeze=True, keltner_squeeze signal should appear and be favorable."""
-        from market_analyzer.models.technicals import KeltnerChannels
-        from market_analyzer.opportunity.setups.breakout import assess_breakout
+        from income_desk.models.technicals import KeltnerChannels
+        from income_desk.opportunity.setups.breakout import assess_breakout
 
         keltner = KeltnerChannels(
             upper=615.0, middle=600.0, lower=585.0,
@@ -2543,8 +2543,8 @@ class TestSQ5BreakoutVolume:
 
     def test_keltner_no_squeeze_no_signal(self):
         """With keltner.squeeze=False, keltner_squeeze signal should NOT appear."""
-        from market_analyzer.models.technicals import KeltnerChannels
-        from market_analyzer.opportunity.setups.breakout import assess_breakout
+        from income_desk.models.technicals import KeltnerChannels
+        from income_desk.opportunity.setups.breakout import assess_breakout
 
         keltner = KeltnerChannels(
             upper=615.0, middle=600.0, lower=585.0,
@@ -2568,8 +2568,8 @@ class TestSQ8MomentumPullback:
 
     def test_adx_trend_signal_present(self):
         """With ADX data, adx_trend_strength signal should appear."""
-        from market_analyzer.models.technicals import ADXData
-        from market_analyzer.opportunity.setups.momentum import assess_momentum
+        from income_desk.models.technicals import ADXData
+        from income_desk.opportunity.setups.momentum import assess_momentum
 
         adx = ADXData(adx=30.0, plus_di=25.0, minus_di=15.0,
                        is_trending=True, is_ranging=False, trend_direction="bullish")
@@ -2589,8 +2589,8 @@ class TestSQ8MomentumPullback:
 
     def test_adx_weak_trend_unfavorable(self):
         """ADX < 25 should produce unfavorable adx_trend_strength signal."""
-        from market_analyzer.models.technicals import ADXData
-        from market_analyzer.opportunity.setups.momentum import assess_momentum
+        from income_desk.models.technicals import ADXData
+        from income_desk.opportunity.setups.momentum import assess_momentum
 
         adx = ADXData(adx=18.0, plus_di=12.0, minus_di=10.0,
                        is_trending=False, is_ranging=True, trend_direction="neutral")
@@ -2605,8 +2605,8 @@ class TestSQ8MomentumPullback:
 
     def test_adx_very_low_hard_stop(self):
         """ADX < 15 with is_ranging=True should produce no_trend hard stop."""
-        from market_analyzer.models.technicals import ADXData
-        from market_analyzer.opportunity.setups.momentum import assess_momentum
+        from income_desk.models.technicals import ADXData
+        from income_desk.opportunity.setups.momentum import assess_momentum
 
         adx = ADXData(adx=12.0, plus_di=8.0, minus_di=7.0,
                        is_trending=False, is_ranging=True, trend_direction="neutral")
@@ -2623,8 +2623,8 @@ class TestSQ8MomentumPullback:
 
     def test_fib_pullback_signal_present(self):
         """With fibonacci data in healthy pullback zone, fib_pullback signal should appear."""
-        from market_analyzer.models.technicals import FibonacciLevels
-        from market_analyzer.opportunity.setups.momentum import assess_momentum
+        from income_desk.models.technicals import FibonacciLevels
+        from income_desk.opportunity.setups.momentum import assess_momentum
 
         fib = FibonacciLevels(
             swing_high=620.0, swing_low=580.0, direction="up",
@@ -2648,8 +2648,8 @@ class TestSQ8MomentumPullback:
 
     def test_fib_deep_retracement_hard_stop(self):
         """Deep fibonacci retracement in bullish momentum -> hard stop."""
-        from market_analyzer.models.technicals import FibonacciLevels
-        from market_analyzer.opportunity.setups.momentum import assess_momentum
+        from income_desk.models.technicals import FibonacciLevels
+        from income_desk.opportunity.setups.momentum import assess_momentum
 
         fib = FibonacciLevels(
             swing_high=620.0, swing_low=580.0, direction="up",
@@ -2671,7 +2671,7 @@ class TestSQ8MomentumPullback:
 
     def test_fib_absent_no_signal(self):
         """Without fibonacci data, no fib_pullback or deep_retracement signals."""
-        from market_analyzer.opportunity.setups.momentum import assess_momentum
+        from income_desk.opportunity.setups.momentum import assess_momentum
 
         tech = _make_technicals_with_ta(rsi=55.0)
         regime = _make_regime(3)
@@ -2693,7 +2693,7 @@ class TestSQ7ScreeningFilters:
 
     def test_screening_result_has_filtered_count(self):
         """ScreeningResult accepts filtered_count field."""
-        from market_analyzer.service.screening import ScreeningResult
+        from income_desk.service.screening import ScreeningResult
 
         result = ScreeningResult(
             as_of_date=date.today(),
@@ -2708,7 +2708,7 @@ class TestSQ7ScreeningFilters:
 
     def test_screen_candidate_has_atr_pct(self):
         """ScreenCandidate includes atr_pct for liquidity filtering."""
-        from market_analyzer.service.screening import ScreenCandidate
+        from income_desk.service.screening import ScreenCandidate
 
         candidate = ScreenCandidate(
             ticker="SPY",
@@ -2723,7 +2723,7 @@ class TestSQ7ScreeningFilters:
 
     def test_low_atr_filter_concept(self):
         """Verify that candidates with very low ATR% can be filtered."""
-        from market_analyzer.service.screening import ScreenCandidate
+        from income_desk.service.screening import ScreenCandidate
 
         candidates = [
             ScreenCandidate(ticker="SPY", screen="breakout", score=0.8,
@@ -2748,7 +2748,7 @@ class TestSQ9RankingIVRank:
     def test_rank_accepts_iv_rank_map(self):
         """Verify rank() signature accepts iv_rank_map parameter."""
         import inspect
-        from market_analyzer.service.ranking import TradeRankingService
+        from income_desk.service.ranking import TradeRankingService
 
         sig = inspect.signature(TradeRankingService.rank)
         assert "iv_rank_map" in sig.parameters, (
@@ -2758,7 +2758,7 @@ class TestSQ9RankingIVRank:
     def test_iv_rank_map_defaults_to_none(self):
         """iv_rank_map parameter should default to None."""
         import inspect
-        from market_analyzer.service.ranking import TradeRankingService
+        from income_desk.service.ranking import TradeRankingService
 
         sig = inspect.signature(TradeRankingService.rank)
         param = sig.parameters["iv_rank_map"]
@@ -2773,7 +2773,7 @@ class TestSQ10PivotLevels:
 
     def test_pivot_level_sources_exist(self):
         """LevelSource has PIVOT_PP, PIVOT_R1, PIVOT_S1, PIVOT_R2, PIVOT_S2."""
-        from market_analyzer.models.levels import LevelSource
+        from income_desk.models.levels import LevelSource
 
         assert hasattr(LevelSource, "PIVOT_PP")
         assert hasattr(LevelSource, "PIVOT_R1")
@@ -2783,7 +2783,7 @@ class TestSQ10PivotLevels:
 
     def test_pivot_level_source_values(self):
         """Pivot level source values are lowercase strings."""
-        from market_analyzer.models.levels import LevelSource
+        from income_desk.models.levels import LevelSource
 
         assert LevelSource.PIVOT_PP == "pivot_pp"
         assert LevelSource.PIVOT_R1 == "pivot_r1"
@@ -2793,7 +2793,7 @@ class TestSQ10PivotLevels:
 
     def test_pivot_points_model_fields(self):
         """PivotPoints model accepts all required fields."""
-        from market_analyzer.models.technicals import PivotPoints
+        from income_desk.models.technicals import PivotPoints
 
         pivots = PivotPoints(
             pp=600.0, r1=610.0, r2=620.0, r3=630.0,
@@ -2806,7 +2806,7 @@ class TestSQ10PivotLevels:
 
     def test_technical_snapshot_accepts_pivot_points(self):
         """TechnicalSnapshot can hold PivotPoints data."""
-        from market_analyzer.models.technicals import PivotPoints
+        from income_desk.models.technicals import PivotPoints
 
         pivots = PivotPoints(
             pp=600.0, r1=610.0, r2=620.0, r3=630.0,
@@ -2885,14 +2885,14 @@ class TestML1DriftDetection:
 
     def test_no_outcomes_no_alerts(self):
         """Empty outcomes list produces no alerts."""
-        from market_analyzer.performance import detect_drift
+        from income_desk.performance import detect_drift
 
         alerts = detect_drift([])
         assert alerts == []
 
     def test_few_trades_no_alerts(self):
         """Below min_trades threshold produces no alerts."""
-        from market_analyzer.performance import detect_drift
+        from income_desk.performance import detect_drift
 
         outcomes = [
             _make_outcome(pnl_pct=-0.10, pnl_dollars=-40.0) for _ in range(5)
@@ -2902,7 +2902,7 @@ class TestML1DriftDetection:
 
     def test_critical_drift_detected(self):
         """20 historical wins + 10 recent losses triggers critical alert."""
-        from market_analyzer.performance import detect_drift
+        from income_desk.performance import detect_drift
 
         outcomes = _make_outcomes_with_drift(
             n_historical=20,
@@ -2924,7 +2924,7 @@ class TestML1DriftDetection:
 
     def test_warning_drift_detected(self):
         """Historical 80% win rate, recent drops to 60% triggers warning."""
-        from market_analyzer.performance import detect_drift
+        from income_desk.performance import detect_drift
 
         outcomes = _make_outcomes_with_drift(
             n_historical=20,
@@ -2945,7 +2945,7 @@ class TestML1DriftDetection:
 
     def test_no_drift_when_stable(self):
         """Historical 60% win, recent 55% — no alert (5pp drop < 15pp)."""
-        from market_analyzer.performance import detect_drift
+        from income_desk.performance import detect_drift
 
         outcomes = _make_outcomes_with_drift(
             n_historical=20,
@@ -2960,8 +2960,8 @@ class TestML1DriftDetection:
 
     def test_drift_alert_fields(self):
         """DriftAlert has all expected fields populated."""
-        from market_analyzer.performance import detect_drift
-        from market_analyzer.models.learning import DriftAlert, DriftSeverity
+        from income_desk.performance import detect_drift
+        from income_desk.models.learning import DriftAlert, DriftSeverity
 
         outcomes = _make_outcomes_with_drift(
             n_historical=20,
@@ -2989,7 +2989,7 @@ class TestML2ThompsonSampling:
 
     def test_build_bandits_from_outcomes(self):
         """10 IC wins + 5 IC losses in R1 builds bandit with alpha=11, beta=6."""
-        from market_analyzer.performance import build_bandits
+        from income_desk.performance import build_bandits
 
         outcomes = []
         for i in range(10):
@@ -3007,15 +3007,15 @@ class TestML2ThompsonSampling:
 
     def test_build_bandits_empty(self):
         """Empty outcomes produces empty bandit dict."""
-        from market_analyzer.performance import build_bandits
+        from income_desk.performance import build_bandits
 
         bandits = build_bandits([])
         assert bandits == {}
 
     def test_update_bandit_win(self):
         """Update with won=True increments alpha by 1."""
-        from market_analyzer.performance import update_bandit
-        from market_analyzer.models.learning import StrategyBandit
+        from income_desk.performance import update_bandit
+        from income_desk.models.learning import StrategyBandit
 
         b = StrategyBandit(
             regime_id=1,
@@ -3031,8 +3031,8 @@ class TestML2ThompsonSampling:
 
     def test_update_bandit_loss(self):
         """Update with won=False increments beta_param by 1."""
-        from market_analyzer.performance import update_bandit
-        from market_analyzer.models.learning import StrategyBandit
+        from income_desk.performance import update_bandit
+        from income_desk.models.learning import StrategyBandit
 
         b = StrategyBandit(
             regime_id=1,
@@ -3048,8 +3048,8 @@ class TestML2ThompsonSampling:
 
     def test_select_strategies_returns_n(self):
         """select_strategies with n=3 returns exactly 3 tuples."""
-        from market_analyzer.performance import select_strategies
-        from market_analyzer.models.learning import StrategyBandit
+        from income_desk.performance import select_strategies
+        from income_desk.models.learning import StrategyBandit
 
         bandits = {
             "R1_iron_condor": StrategyBandit(
@@ -3072,8 +3072,8 @@ class TestML2ThompsonSampling:
 
     def test_select_strategies_deterministic_with_seed(self):
         """Same seed produces identical results."""
-        from market_analyzer.performance import select_strategies
-        from market_analyzer.models.learning import StrategyBandit
+        from income_desk.performance import select_strategies
+        from income_desk.models.learning import StrategyBandit
 
         bandits = {
             "R1_iron_condor": StrategyBandit(
@@ -3096,7 +3096,7 @@ class TestML2ThompsonSampling:
 
     def test_bandit_expected_win_rate(self):
         """StrategyBandit(alpha=8, beta_param=2) has expected_win_rate=0.8."""
-        from market_analyzer.models.learning import StrategyBandit
+        from income_desk.models.learning import StrategyBandit
 
         b = StrategyBandit(
             regime_id=1,
@@ -3108,7 +3108,7 @@ class TestML2ThompsonSampling:
 
     def test_bandit_key_format(self):
         """StrategyBandit key is 'R{id}_{strategy}'."""
-        from market_analyzer.models.learning import StrategyBandit
+        from income_desk.models.learning import StrategyBandit
 
         b = StrategyBandit(
             regime_id=1,
@@ -3118,7 +3118,7 @@ class TestML2ThompsonSampling:
 
     def test_no_data_bandit_explores(self):
         """Strategy with no bandit data gets uniform prior — wide variance."""
-        from market_analyzer.performance import select_strategies
+        from income_desk.performance import select_strategies
 
         # No bandits at all — all strategies use Beta(1,1) uniform prior
         available = [StrategyType.IRON_CONDOR, StrategyType.CALENDAR]
@@ -3132,8 +3132,8 @@ class TestML2ThompsonSampling:
 
     def test_proven_winner_exploited(self):
         """Bandit with alpha=50, beta=5 is consistently ranked #1."""
-        from market_analyzer.performance import select_strategies
-        from market_analyzer.models.learning import StrategyBandit
+        from income_desk.performance import select_strategies
+        from income_desk.models.learning import StrategyBandit
 
         bandits = {
             "R1_iron_condor": StrategyBandit(
@@ -3162,8 +3162,8 @@ class TestML3ThresholdOptimization:
 
     def test_optimize_empty_outcomes(self):
         """Empty outcomes returns defaults unchanged."""
-        from market_analyzer.performance import optimize_thresholds
-        from market_analyzer.models.learning import ThresholdConfig
+        from income_desk.performance import optimize_thresholds
+        from income_desk.models.learning import ThresholdConfig
 
         result = optimize_thresholds([])
         assert isinstance(result, ThresholdConfig)
@@ -3174,8 +3174,8 @@ class TestML3ThresholdOptimization:
 
     def test_optimize_few_outcomes(self):
         """Below 2*min_trades_per_bucket returns defaults."""
-        from market_analyzer.performance import optimize_thresholds
-        from market_analyzer.models.learning import ThresholdConfig
+        from income_desk.performance import optimize_thresholds
+        from income_desk.models.learning import ThresholdConfig
 
         outcomes = [
             _make_outcome(pnl_pct=0.15, pnl_dollars=40.0, trade_id=f"t-{i}")
@@ -3189,8 +3189,8 @@ class TestML3ThresholdOptimization:
 
     def test_optimize_returns_threshold_config(self):
         """Valid outcomes produce a ThresholdConfig instance."""
-        from market_analyzer.performance import optimize_thresholds
-        from market_analyzer.models.learning import ThresholdConfig
+        from income_desk.performance import optimize_thresholds
+        from income_desk.models.learning import ThresholdConfig
 
         # Need enough outcomes with iv_rank_at_entry for optimization
         outcomes = []
@@ -3224,8 +3224,8 @@ class TestML3ThresholdOptimization:
 
     def test_optimize_clamps_changes(self):
         """No threshold changes by more than max_change_pct."""
-        from market_analyzer.performance import optimize_thresholds
-        from market_analyzer.models.learning import ThresholdConfig
+        from income_desk.performance import optimize_thresholds
+        from income_desk.models.learning import ThresholdConfig
 
         defaults = ThresholdConfig()
         outcomes = []
@@ -3272,7 +3272,7 @@ class TestML3ThresholdOptimization:
 
     def test_threshold_config_defaults(self):
         """ThresholdConfig() has all expected default values."""
-        from market_analyzer.models.learning import ThresholdConfig
+        from income_desk.models.learning import ThresholdConfig
 
         config = ThresholdConfig()
         assert config.ic_iv_rank_min == 15.0
@@ -3289,8 +3289,8 @@ class TestML3ThresholdOptimization:
 
     def test_optimize_sets_metadata(self):
         """trades_analyzed and last_optimized are populated."""
-        from market_analyzer.performance import optimize_thresholds
-        from market_analyzer.models.learning import ThresholdConfig
+        from income_desk.performance import optimize_thresholds
+        from income_desk.models.learning import ThresholdConfig
 
         outcomes = [
             _make_outcome(pnl_pct=0.15, pnl_dollars=40.0, trade_id=f"meta-{i}")
@@ -3308,17 +3308,17 @@ class TestCR6MultiBroker:
     """CR-6: Dhan and Zerodha broker stubs are importable and have correct properties."""
 
     def test_dhan_imports(self):
-        from market_analyzer.broker.dhan import connect_dhan, connect_dhan_from_session
+        from income_desk.broker.dhan import connect_dhan, connect_dhan_from_session
         assert callable(connect_dhan)
         assert callable(connect_dhan_from_session)
 
     def test_zerodha_imports(self):
-        from market_analyzer.broker.zerodha import connect_zerodha, connect_zerodha_from_session
+        from income_desk.broker.zerodha import connect_zerodha, connect_zerodha_from_session
         assert callable(connect_zerodha)
         assert callable(connect_zerodha_from_session)
 
     def test_dhan_market_data_properties(self):
-        from market_analyzer.broker.dhan.market_data import DhanMarketData
+        from income_desk.broker.dhan.market_data import DhanMarketData
         md = DhanMarketData()
         assert md.currency == "INR"
         assert md.timezone == "Asia/Kolkata"
@@ -3326,7 +3326,7 @@ class TestCR6MultiBroker:
         assert md.provider_name == "dhan"
 
     def test_zerodha_market_data_properties(self):
-        from market_analyzer.broker.zerodha.market_data import ZerodhaMarketData
+        from income_desk.broker.zerodha.market_data import ZerodhaMarketData
         md = ZerodhaMarketData()
         assert md.currency == "INR"
         assert md.timezone == "Asia/Kolkata"
@@ -3334,21 +3334,21 @@ class TestCR6MultiBroker:
         assert md.provider_name == "zerodha"
 
     def test_dhan_market_hours(self):
-        from market_analyzer.broker.dhan.market_data import DhanMarketData
+        from income_desk.broker.dhan.market_data import DhanMarketData
         md = DhanMarketData()
         open_t, close_t = md.market_hours
         assert open_t == time(9, 15)
         assert close_t == time(15, 30)
 
     def test_zerodha_market_hours(self):
-        from market_analyzer.broker.zerodha.market_data import ZerodhaMarketData
+        from income_desk.broker.zerodha.market_data import ZerodhaMarketData
         md = ZerodhaMarketData()
         open_t, close_t = md.market_hours
         assert open_t == time(9, 15)
         assert close_t == time(15, 30)
 
     def test_dhan_connect_returns_4_tuple(self):
-        from market_analyzer.broker.dhan import connect_dhan_from_session
+        from income_desk.broker.dhan import connect_dhan_from_session
         # connect_dhan() requires the dhanhq SDK; use connect_dhan_from_session
         # which accepts any client object (no SDK needed for the session path)
         class FakeClient:
@@ -3357,13 +3357,13 @@ class TestCR6MultiBroker:
         assert len(result) == 4
 
     def test_zerodha_connect_returns_4_tuple(self):
-        from market_analyzer.broker.zerodha import connect_zerodha
+        from income_desk.broker.zerodha import connect_zerodha
         result = connect_zerodha(api_key="test", access_token="test")
         assert len(result) == 4
 
     def test_dhan_is_real_implementation(self):
         """Dhan is now a real implementation — returns empty without credentials/SDK."""
-        from market_analyzer.broker.dhan.market_data import DhanMarketData
+        from income_desk.broker.dhan.market_data import DhanMarketData
         md = DhanMarketData()  # No client — data-fetching methods return [] gracefully
         # Without a real dhanhq client, get_option_chain returns [] (not NotImplementedError)
         result = md.get_option_chain("NIFTY")
@@ -3371,7 +3371,7 @@ class TestCR6MultiBroker:
 
     def test_zerodha_is_real_implementation(self):
         """Zerodha is a real implementation — returns empty without credentials."""
-        from market_analyzer.broker.zerodha.market_data import ZerodhaMarketData
+        from income_desk.broker.zerodha.market_data import ZerodhaMarketData
         md = ZerodhaMarketData()
         # Without valid API key, returns empty (not NotImplementedError)
         result = md.get_option_chain("NIFTY")
@@ -3386,7 +3386,7 @@ class TestCR7CurrencyTimezone:
 
     def test_account_balance_currency_default(self):
         """AccountBalance.currency defaults to USD."""
-        from market_analyzer.models.quotes import AccountBalance
+        from income_desk.models.quotes import AccountBalance
         bal = AccountBalance(
             account_number="TEST001",
             net_liquidating_value=50000.0,
@@ -3400,7 +3400,7 @@ class TestCR7CurrencyTimezone:
 
     def test_account_balance_currency_inr(self):
         """AccountBalance accepts INR currency."""
-        from market_analyzer.models.quotes import AccountBalance
+        from income_desk.models.quotes import AccountBalance
         bal = AccountBalance(
             account_number="DHAN001",
             net_liquidating_value=5000000.0,
@@ -3518,7 +3518,7 @@ class TestCR7CurrencyTimezone:
 
     def test_market_data_provider_defaults(self):
         """MarketDataProvider base class has USD/US/Eastern defaults."""
-        from market_analyzer.broker.base import MarketDataProvider
+        from income_desk.broker.base import MarketDataProvider
         # Check that the properties exist on the class
         assert hasattr(MarketDataProvider, "currency")
         assert hasattr(MarketDataProvider, "timezone")
@@ -3534,7 +3534,7 @@ class TestCR11Analytics:
 
     def test_compute_sharpe_basic(self):
         """10 outcomes produce a SharpeResult with non-zero sharpe_ratio."""
-        from market_analyzer.performance import compute_sharpe
+        from income_desk.performance import compute_sharpe
         outcomes = [
             _make_outcome(
                 pnl_pct=0.10 if i % 3 != 0 else -0.05,
@@ -3552,21 +3552,21 @@ class TestCR11Analytics:
 
     def test_compute_sharpe_empty(self):
         """Empty outcomes produce sharpe_ratio = 0."""
-        from market_analyzer.performance import compute_sharpe
+        from income_desk.performance import compute_sharpe
         result = compute_sharpe([])
         assert result.sharpe_ratio == 0.0
         assert result.total_trades == 0
 
     def test_compute_sharpe_single_trade(self):
         """Single trade (< 2 required) produces sharpe_ratio = 0."""
-        from market_analyzer.performance import compute_sharpe
+        from income_desk.performance import compute_sharpe
         result = compute_sharpe([_make_outcome(trade_id="single-1")])
         assert result.sharpe_ratio == 0.0
         assert result.total_trades == 1
 
     def test_compute_drawdown_basic(self):
         """Outcomes with a loss streak produce max_drawdown_dollars > 0."""
-        from market_analyzer.performance import compute_drawdown
+        from income_desk.performance import compute_drawdown
         outcomes = [
             _make_outcome(pnl_pct=0.10, pnl_dollars=100.0, trade_id="dd-0"),
             _make_outcome(pnl_pct=0.10, pnl_dollars=100.0, trade_id="dd-1"),
@@ -3580,7 +3580,7 @@ class TestCR11Analytics:
 
     def test_compute_drawdown_empty(self):
         """Empty outcomes produce max_drawdown = 0."""
-        from market_analyzer.performance import compute_drawdown
+        from income_desk.performance import compute_drawdown
         result = compute_drawdown([])
         assert result.max_drawdown_dollars == 0.0
         assert result.max_drawdown_pct == 0.0
@@ -3588,7 +3588,7 @@ class TestCR11Analytics:
 
     def test_compute_regime_performance_basic(self):
         """Outcomes in R1 and R2 produce dict with keys 1, 2."""
-        from market_analyzer.performance import compute_regime_performance
+        from income_desk.performance import compute_regime_performance
         outcomes = [
             _make_outcome(regime=1, pnl_pct=0.10, pnl_dollars=40.0, trade_id="rp-0"),
             _make_outcome(regime=1, pnl_pct=0.15, pnl_dollars=60.0, trade_id="rp-1"),
@@ -3605,13 +3605,13 @@ class TestCR11Analytics:
 
     def test_compute_regime_performance_empty(self):
         """Empty outcomes produce empty dict."""
-        from market_analyzer.performance import compute_regime_performance
+        from income_desk.performance import compute_regime_performance
         result = compute_regime_performance([])
         assert result == {}
 
     def test_sharpe_result_model_fields(self):
         """SharpeResult has all expected fields."""
-        from market_analyzer.models.feedback import SharpeResult
+        from income_desk.models.feedback import SharpeResult
         fields = SharpeResult.model_fields
         assert "sharpe_ratio" in fields
         assert "sortino_ratio" in fields
@@ -3622,7 +3622,7 @@ class TestCR11Analytics:
 
     def test_drawdown_result_model_fields(self):
         """DrawdownResult has all expected fields."""
-        from market_analyzer.models.feedback import DrawdownResult
+        from income_desk.models.feedback import DrawdownResult
         fields = DrawdownResult.model_fields
         assert "max_drawdown_pct" in fields
         assert "max_drawdown_dollars" in fields
@@ -3633,7 +3633,7 @@ class TestCR11Analytics:
 
     def test_regime_performance_model_fields(self):
         """RegimePerformance has all expected fields."""
-        from market_analyzer.models.feedback import RegimePerformance
+        from income_desk.models.feedback import RegimePerformance
         fields = RegimePerformance.model_fields
         assert "regime_id" in fields
         assert "regime_name" in fields
@@ -3646,7 +3646,7 @@ class TestCR11Analytics:
 
     def test_compute_sharpe_custom_risk_free(self):
         """Custom risk-free rate is passed through."""
-        from market_analyzer.performance import compute_sharpe
+        from income_desk.performance import compute_sharpe
         outcomes = [
             _make_outcome(pnl_pct=0.10, pnl_dollars=40.0, trade_id=f"rfr-{i}")
             for i in range(5)
@@ -3662,19 +3662,19 @@ class TestCR12IndiaData:
     """CR-12: yfinance aliases for Indian indices."""
 
     def test_nifty_alias_exists(self):
-        from market_analyzer.data.providers.yfinance import _YFINANCE_ALIASES
+        from income_desk.data.providers.yfinance import _YFINANCE_ALIASES
         assert _YFINANCE_ALIASES.get("NIFTY") == "^NSEI"
 
     def test_banknifty_alias(self):
-        from market_analyzer.data.providers.yfinance import _YFINANCE_ALIASES
+        from income_desk.data.providers.yfinance import _YFINANCE_ALIASES
         assert _YFINANCE_ALIASES.get("BANKNIFTY") == "^NSEBANK"
 
     def test_finnifty_alias(self):
-        from market_analyzer.data.providers.yfinance import _YFINANCE_ALIASES
+        from income_desk.data.providers.yfinance import _YFINANCE_ALIASES
         assert _YFINANCE_ALIASES.get("FINNIFTY") == "NIFTY_FIN_SERVICE.NS"
 
     def test_sensex_alias(self):
-        from market_analyzer.data.providers.yfinance import _YFINANCE_ALIASES
+        from income_desk.data.providers.yfinance import _YFINANCE_ALIASES
         assert _YFINANCE_ALIASES.get("SENSEX") == "^BSESN"
 
 
@@ -3685,7 +3685,7 @@ class TestCR13MarketRegistry:
     """CR-13: MarketRegistry for static market/instrument data."""
 
     def test_get_market_us(self):
-        from market_analyzer import MarketRegistry
+        from income_desk import MarketRegistry
         r = MarketRegistry()
         m = r.get_market("US")
         assert m.currency == "USD"
@@ -3693,7 +3693,7 @@ class TestCR13MarketRegistry:
         assert m.market_id == "US"
 
     def test_get_market_india(self):
-        from market_analyzer import MarketRegistry
+        from income_desk import MarketRegistry
         r = MarketRegistry()
         m = r.get_market("INDIA")
         assert m.currency == "INR"
@@ -3701,13 +3701,13 @@ class TestCR13MarketRegistry:
         assert m.market_id == "INDIA"
 
     def test_get_market_case_insensitive(self):
-        from market_analyzer import MarketRegistry
+        from income_desk import MarketRegistry
         r = MarketRegistry()
         m = r.get_market("india")
         assert m.market_id == "INDIA"
 
     def test_get_instrument_nifty(self):
-        from market_analyzer import MarketRegistry
+        from income_desk import MarketRegistry
         r = MarketRegistry()
         inst = r.get_instrument("NIFTY")
         assert inst.lot_size == 25
@@ -3717,7 +3717,7 @@ class TestCR13MarketRegistry:
         assert inst.exercise_style == "european"
 
     def test_get_instrument_spy(self):
-        from market_analyzer import MarketRegistry
+        from income_desk import MarketRegistry
         r = MarketRegistry()
         inst = r.get_instrument("SPY")
         assert inst.lot_size == 100
@@ -3726,58 +3726,58 @@ class TestCR13MarketRegistry:
         assert inst.settlement == "physical"
 
     def test_strategy_available_leaps_india(self):
-        from market_analyzer import MarketRegistry
+        from income_desk import MarketRegistry
         r = MarketRegistry()
         assert r.strategy_available("leaps", "NIFTY") is False
 
     def test_strategy_available_pmcc_india(self):
-        from market_analyzer import MarketRegistry
+        from income_desk import MarketRegistry
         r = MarketRegistry()
         assert r.strategy_available("pmcc", "NIFTY") is False
 
     def test_strategy_available_ic_india(self):
-        from market_analyzer import MarketRegistry
+        from income_desk import MarketRegistry
         r = MarketRegistry()
         assert r.strategy_available("iron_condor", "NIFTY") is True
 
     def test_strategy_available_zero_dte_india(self):
-        from market_analyzer import MarketRegistry
+        from income_desk import MarketRegistry
         r = MarketRegistry()
         assert r.strategy_available("zero_dte", "NIFTY") is True
 
     def test_strategy_available_leaps_us(self):
-        from market_analyzer import MarketRegistry
+        from income_desk import MarketRegistry
         r = MarketRegistry()
         assert r.strategy_available("leaps", "SPY") is True
 
     def test_to_yfinance_nifty(self):
-        from market_analyzer import MarketRegistry
+        from income_desk import MarketRegistry
         r = MarketRegistry()
         assert r.to_yfinance("NIFTY") == "^NSEI"
 
     def test_to_yfinance_reliance(self):
-        from market_analyzer import MarketRegistry
+        from income_desk import MarketRegistry
         r = MarketRegistry()
         assert r.to_yfinance("RELIANCE") == "RELIANCE.NS"
 
     def test_to_yfinance_spy(self):
-        from market_analyzer import MarketRegistry
+        from income_desk import MarketRegistry
         r = MarketRegistry()
         assert r.to_yfinance("SPY") == "SPY"
 
     def test_to_yfinance_banknifty(self):
-        from market_analyzer import MarketRegistry
+        from income_desk import MarketRegistry
         r = MarketRegistry()
         assert r.to_yfinance("BANKNIFTY") == "^NSEBANK"
 
     def test_to_yfinance_unknown_india_fallback(self):
         """Unknown ticker with market=INDIA gets .NS suffix."""
-        from market_analyzer import MarketRegistry
+        from income_desk import MarketRegistry
         r = MarketRegistry()
         assert r.to_yfinance("ZOMATO", market="INDIA") == "ZOMATO.NS"
 
     def test_estimate_margin_us(self):
-        from market_analyzer import MarketRegistry
+        from income_desk import MarketRegistry
         r = MarketRegistry()
         m = r.estimate_margin("iron_condor", "SPY", wing_width=5)
         assert m.currency == "USD"
@@ -3785,7 +3785,7 @@ class TestCR13MarketRegistry:
         assert m.method == "reg_t"
 
     def test_estimate_margin_india(self):
-        from market_analyzer import MarketRegistry
+        from income_desk import MarketRegistry
         r = MarketRegistry()
         m = r.estimate_margin("iron_condor", "NIFTY", wing_width=200)
         assert m.currency == "INR"
@@ -3793,43 +3793,43 @@ class TestCR13MarketRegistry:
         assert m.method == "span_exposure"
 
     def test_estimate_margin_contracts(self):
-        from market_analyzer import MarketRegistry
+        from income_desk import MarketRegistry
         r = MarketRegistry()
         m = r.estimate_margin("iron_condor", "SPY", wing_width=5, contracts=3)
         assert m.margin_amount == 1500  # 5 * 100 * 3
 
     def test_list_instruments_india(self):
-        from market_analyzer import MarketRegistry
+        from income_desk import MarketRegistry
         r = MarketRegistry()
         india = r.list_instruments(market="INDIA")
         assert len(india) >= 23  # 3 indices + 20 stocks
 
     def test_list_instruments_us(self):
-        from market_analyzer import MarketRegistry
+        from income_desk import MarketRegistry
         r = MarketRegistry()
         us = r.list_instruments(market="US")
         assert len(us) >= 14  # SPY, QQQ, IWM, SPX, GLD, TLT, + 8 equities
 
     def test_list_instruments_all(self):
-        from market_analyzer import MarketRegistry
+        from income_desk import MarketRegistry
         r = MarketRegistry()
         all_inst = r.list_instruments()
         assert len(all_inst) >= 37  # 14 US + 23 India
 
     def test_unknown_market_raises(self):
-        from market_analyzer import MarketRegistry
+        from income_desk import MarketRegistry
         r = MarketRegistry()
         with pytest.raises(KeyError, match="Unknown market"):
             r.get_market("MARS")
 
     def test_unknown_instrument_raises(self):
-        from market_analyzer import MarketRegistry
+        from income_desk import MarketRegistry
         r = MarketRegistry()
         with pytest.raises(KeyError, match="Unknown instrument"):
             r.get_instrument("ZZZZZ")
 
     def test_india_stock_lot_sizes(self):
-        from market_analyzer import MarketRegistry
+        from income_desk import MarketRegistry
         r = MarketRegistry()
         assert r.get_instrument("RELIANCE").lot_size == 250
         assert r.get_instrument("BANKNIFTY").lot_size == 15
@@ -3838,35 +3838,35 @@ class TestCR13MarketRegistry:
         assert r.get_instrument("INFY").lot_size == 300
 
     def test_us_market_hours(self):
-        from market_analyzer import MarketRegistry
+        from income_desk import MarketRegistry
         r = MarketRegistry()
         m = r.get_market("US")
         assert m.open_time == time(9, 30)
         assert m.close_time == time(16, 0)
 
     def test_india_market_hours(self):
-        from market_analyzer import MarketRegistry
+        from income_desk import MarketRegistry
         r = MarketRegistry()
         m = r.get_market("INDIA")
         assert m.open_time == time(9, 15)
         assert m.close_time == time(15, 30)
 
     def test_nifty_has_0dte(self):
-        from market_analyzer import MarketRegistry
+        from income_desk import MarketRegistry
         r = MarketRegistry()
         inst = r.get_instrument("NIFTY")
         assert inst.has_0dte is True
         assert inst.max_dte == 90
 
     def test_india_stock_no_0dte(self):
-        from market_analyzer import MarketRegistry
+        from income_desk import MarketRegistry
         r = MarketRegistry()
         inst = r.get_instrument("RELIANCE")
         assert inst.has_0dte is False
 
     def test_market_info_model(self):
         """MarketInfo Pydantic model has expected fields."""
-        from market_analyzer.registry import MarketInfo
+        from income_desk.registry import MarketInfo
         fields = MarketInfo.model_fields
         assert "market_id" in fields
         assert "currency" in fields
@@ -3878,7 +3878,7 @@ class TestCR13MarketRegistry:
 
     def test_instrument_info_model(self):
         """InstrumentInfo Pydantic model has expected fields."""
-        from market_analyzer.registry import InstrumentInfo
+        from income_desk.registry import InstrumentInfo
         fields = InstrumentInfo.model_fields
         assert "ticker" in fields
         assert "lot_size" in fields
@@ -3890,7 +3890,7 @@ class TestCR13MarketRegistry:
 
     def test_margin_estimate_model(self):
         """MarginEstimate Pydantic model has expected fields."""
-        from market_analyzer.registry import MarginEstimate
+        from income_desk.registry import MarginEstimate
         fields = MarginEstimate.model_fields
         assert "strategy" in fields
         assert "ticker" in fields
@@ -3908,14 +3908,14 @@ class TestH1CurrencyConversion:
 
     def test_convert_same_currency(self):
         """USD to USD = same amount, no rate needed."""
-        from market_analyzer.currency import convert_amount
+        from income_desk.currency import convert_amount
 
         result = convert_amount(1000.0, "USD", "USD", {})
         assert result == 1000.0
 
     def test_convert_usd_to_inr(self):
         """1000 USD * 83.5 = 83500 INR."""
-        from market_analyzer.currency import CurrencyPair, convert_amount
+        from income_desk.currency import CurrencyPair, convert_amount
 
         rates = {
             "USD/INR": CurrencyPair(base="USD", quote="INR", rate=83.5, as_of=date.today()),
@@ -3925,7 +3925,7 @@ class TestH1CurrencyConversion:
 
     def test_convert_inr_to_usd(self):
         """83500 INR / 83.5 = 1000 USD (inverse lookup)."""
-        from market_analyzer.currency import CurrencyPair, convert_amount
+        from income_desk.currency import CurrencyPair, convert_amount
 
         rates = {
             "USD/INR": CurrencyPair(base="USD", quote="INR", rate=83.5, as_of=date.today()),
@@ -3935,14 +3935,14 @@ class TestH1CurrencyConversion:
 
     def test_convert_missing_rate_raises(self):
         """Unknown currency pair raises KeyError."""
-        from market_analyzer.currency import convert_amount
+        from income_desk.currency import convert_amount
 
         with pytest.raises(KeyError, match="No exchange rate found"):
             convert_amount(100.0, "USD", "EUR", {})
 
     def test_portfolio_exposure(self):
         """2 USD positions + 1 INR position: computes total in USD and foreign pct."""
-        from market_analyzer.currency import (
+        from income_desk.currency import (
             CurrencyPair,
             PositionExposure,
             compute_portfolio_exposure,
@@ -3967,7 +3967,7 @@ class TestH1CurrencyConversion:
 
     def test_portfolio_exposure_all_base(self):
         """All USD positions -> currency_risk_pct = 0."""
-        from market_analyzer.currency import (
+        from income_desk.currency import (
             PositionExposure,
             compute_portfolio_exposure,
         )
@@ -3988,7 +3988,7 @@ class TestH3CurrencyHedge:
     """H3: assess_currency_exposure recommendations."""
 
     def _make_positions(self, usd_amount: float, inr_amount: float):
-        from market_analyzer.currency import PositionExposure
+        from income_desk.currency import PositionExposure
 
         positions = [
             PositionExposure(ticker="SPY", market="US", currency="USD", notional_value=usd_amount, unrealized_pnl=0),
@@ -4000,7 +4000,7 @@ class TestH3CurrencyHedge:
         return positions
 
     def _rates(self):
-        from market_analyzer.currency import CurrencyPair
+        from income_desk.currency import CurrencyPair
 
         return {
             "USD/INR": CurrencyPair(base="USD", quote="INR", rate=83.5, as_of=date.today()),
@@ -4008,7 +4008,7 @@ class TestH3CurrencyHedge:
 
     def test_low_foreign_exposure(self):
         """< 10% foreign -> natural hedge sufficient."""
-        from market_analyzer.currency import assess_currency_exposure
+        from income_desk.currency import assess_currency_exposure
 
         # INR 418K / 83.5 = ~5K USD. Total ~55K. Foreign ~9%
         positions = self._make_positions(50000, 418000)
@@ -4017,7 +4017,7 @@ class TestH3CurrencyHedge:
 
     def test_high_foreign_exposure(self):
         """> 30% foreign -> hedge recommended."""
-        from market_analyzer.currency import assess_currency_exposure
+        from income_desk.currency import assess_currency_exposure
 
         # INR 4,175,000 / 83.5 = 50K USD. Total ~80K. Foreign ~62%
         positions = self._make_positions(30000, 4175000)
@@ -4033,7 +4033,7 @@ class TestH4CurrencyPnL:
 
     def test_same_currency_no_fx(self):
         """USD position -> currency_pnl = 0."""
-        from market_analyzer.currency import compute_currency_pnl
+        from income_desk.currency import compute_currency_pnl
 
         result = compute_currency_pnl(
             ticker="SPY", trading_pnl_local=500.0, position_value_local=30000.0,
@@ -4045,7 +4045,7 @@ class TestH4CurrencyPnL:
 
     def test_inr_weakens_hurts_usd_investor(self):
         """INR weakens (rate goes from 83 to 85) -> negative currency P&L in USD."""
-        from market_analyzer.currency import compute_currency_pnl
+        from income_desk.currency import compute_currency_pnl
 
         result = compute_currency_pnl(
             ticker="RELIANCE", trading_pnl_local=5000.0,
@@ -4060,7 +4060,7 @@ class TestH4CurrencyPnL:
 
     def test_inr_strengthens_helps_usd_investor(self):
         """INR strengthens (rate goes from 85 to 83) -> positive currency P&L."""
-        from market_analyzer.currency import compute_currency_pnl
+        from income_desk.currency import compute_currency_pnl
 
         result = compute_currency_pnl(
             ticker="RELIANCE", trading_pnl_local=5000.0,
@@ -4075,7 +4075,7 @@ class TestH4CurrencyPnL:
 
     def test_pnl_decomposition_sums(self):
         """total_pnl = trading_pnl_base + currency_pnl_base."""
-        from market_analyzer.currency import compute_currency_pnl
+        from income_desk.currency import compute_currency_pnl
 
         result = compute_currency_pnl(
             ticker="RELIANCE", trading_pnl_local=10000.0,
@@ -4095,7 +4095,7 @@ class TestH2HedgeAssessment:
     """H2: assess_hedge regime-aware hedge recommendations."""
 
     def _regime(self, regime_id: int, trend: str | None = None) -> RegimeResult:
-        from market_analyzer.models.regime import TrendDirection
+        from income_desk.models.regime import TrendDirection
 
         td = None
         if trend == "bullish":
@@ -4123,21 +4123,21 @@ class TestH2HedgeAssessment:
 
     def test_long_equity_r1_no_hedge(self):
         """R1 -> NO_HEDGE for long equity."""
-        from market_analyzer.hedging import HedgeType, assess_hedge
+        from income_desk.hedging import HedgeType, assess_hedge
 
         rec = assess_hedge("SPY", "long_equity", 50000.0, self._regime(1), self._tech())
         assert rec.hedge_type == HedgeType.NO_HEDGE
 
     def test_long_equity_r2_collar(self):
         """R2 -> COLLAR for long equity."""
-        from market_analyzer.hedging import HedgeType, assess_hedge
+        from income_desk.hedging import HedgeType, assess_hedge
 
         rec = assess_hedge("SPY", "long_equity", 50000.0, self._regime(2), self._tech())
         assert rec.hedge_type == HedgeType.COLLAR
 
     def test_long_equity_r4_protective_put(self):
         """R4 -> PROTECTIVE_PUT with IMMEDIATE urgency."""
-        from market_analyzer.hedging import HedgeType, HedgeUrgency, assess_hedge
+        from income_desk.hedging import HedgeType, HedgeUrgency, assess_hedge
 
         rec = assess_hedge("SPY", "long_equity", 50000.0, self._regime(4), self._tech())
         assert rec.hedge_type == HedgeType.PROTECTIVE_PUT
@@ -4145,35 +4145,35 @@ class TestH2HedgeAssessment:
 
     def test_short_straddle_r4_close(self):
         """R4 -> CLOSE_POSITION for short straddle (undefined risk)."""
-        from market_analyzer.hedging import HedgeType, assess_hedge
+        from income_desk.hedging import HedgeType, assess_hedge
 
         rec = assess_hedge("SPY", "short_straddle", 50000.0, self._regime(4), self._tech())
         assert rec.hedge_type == HedgeType.CLOSE_POSITION
 
     def test_short_straddle_r2_add_wing(self):
         """R2 -> ADD_WING to convert undefined to defined risk."""
-        from market_analyzer.hedging import HedgeType, assess_hedge
+        from income_desk.hedging import HedgeType, assess_hedge
 
         rec = assess_hedge("SPY", "short_straddle", 50000.0, self._regime(2), self._tech())
         assert rec.hedge_type == HedgeType.ADD_WING
 
     def test_iron_condor_r1_no_hedge(self):
         """R1 -> NO_HEDGE for iron condor (wings are the hedge)."""
-        from market_analyzer.hedging import HedgeType, assess_hedge
+        from income_desk.hedging import HedgeType, assess_hedge
 
         rec = assess_hedge("SPY", "iron_condor", 50000.0, self._regime(1), self._tech())
         assert rec.hedge_type == HedgeType.NO_HEDGE
 
     def test_iron_condor_r4_close(self):
         """R4 -> CLOSE_POSITION for iron condor."""
-        from market_analyzer.hedging import HedgeType, assess_hedge
+        from income_desk.hedging import HedgeType, assess_hedge
 
         rec = assess_hedge("SPY", "iron_condor", 50000.0, self._regime(4), self._tech())
         assert rec.hedge_type == HedgeType.CLOSE_POSITION
 
     def test_unknown_position_type(self):
         """Unknown position type -> NO_HEDGE with MONITOR."""
-        from market_analyzer.hedging import HedgeType, HedgeUrgency, assess_hedge
+        from income_desk.hedging import HedgeType, HedgeUrgency, assess_hedge
 
         rec = assess_hedge("SPY", "exotic_butterfly", 50000.0, self._regime(2), self._tech())
         assert rec.hedge_type == HedgeType.NO_HEDGE
@@ -4188,7 +4188,7 @@ class TestCR14CacheIsolation:
 
     def test_option_quote_cache_per_instance(self):
         """Each OptionQuoteService instance has its own cache dict."""
-        from market_analyzer.service.option_quotes import OptionQuoteService
+        from income_desk.service.option_quotes import OptionQuoteService
 
         svc1 = OptionQuoteService()
         svc2 = OptionQuoteService()
@@ -4203,13 +4203,13 @@ class TestCR16TokenExpiry:
 
     def test_token_expired_error_exists(self):
         """TokenExpiredError is an Exception subclass."""
-        from market_analyzer.broker.base import TokenExpiredError
+        from income_desk.broker.base import TokenExpiredError
 
         assert issubclass(TokenExpiredError, Exception)
 
     def test_is_token_valid_default_true(self):
         """MarketDataProvider.is_token_valid() defaults to True (via Dhan stub)."""
-        from market_analyzer.broker.dhan.market_data import DhanMarketData
+        from income_desk.broker.dhan.market_data import DhanMarketData
 
         md = DhanMarketData()
         assert md.is_token_valid() is True
@@ -4223,18 +4223,18 @@ class TestCR17RateLimits:
 
     def test_dhan_rate_limit(self):
         """Dhan rate limit is 25 req/s."""
-        from market_analyzer.broker.dhan.market_data import DhanMarketData
+        from income_desk.broker.dhan.market_data import DhanMarketData
 
         assert DhanMarketData().rate_limit_per_second == 25
 
     def test_zerodha_rate_limit(self):
         """Zerodha rate limit is 3 req/s."""
-        from market_analyzer.broker.zerodha.market_data import ZerodhaMarketData
+        from income_desk.broker.zerodha.market_data import ZerodhaMarketData
 
         assert ZerodhaMarketData().rate_limit_per_second == 3
 
     def test_supports_batch_default_false(self):
         """Dhan supports_batch defaults to False."""
-        from market_analyzer.broker.dhan.market_data import DhanMarketData
+        from income_desk.broker.dhan.market_data import DhanMarketData
 
         assert DhanMarketData().supports_batch is False

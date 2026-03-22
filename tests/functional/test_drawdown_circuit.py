@@ -1,7 +1,7 @@
 """Functional tests: drawdown circuit breaker and portfolio risk dashboard."""
 import pytest
 
-from market_analyzer.risk import (
+from income_desk.risk import (
     check_drawdown_circuit_breaker,
     compute_risk_dashboard,
     PortfolioPosition,

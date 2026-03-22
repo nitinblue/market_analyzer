@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
-from market_analyzer.hmm.trainer import HMMTrainer
-from market_analyzer.models.regime import RegimeConfig, RegimeID
+from income_desk.hmm.trainer import HMMTrainer
+from income_desk.models.regime import RegimeConfig, RegimeID
 
 
 class TestLabelAlignmentSemantics:

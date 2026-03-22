@@ -2,7 +2,7 @@
 
 from unittest.mock import MagicMock
 
-from market_analyzer.models.universe import (
+from income_desk.models.universe import (
     PRESETS,
     AssetType,
     SortField,
@@ -10,7 +10,7 @@ from market_analyzer.models.universe import (
     UniverseFilter,
     UniverseScanResult,
 )
-from market_analyzer.service.universe import UniverseService
+from income_desk.service.universe import UniverseService
 
 
 class TestUniverseFilter:
@@ -95,7 +95,7 @@ class TestUniverseService:
             {"symbol": "ILLIQ", "is_etf": True, "is_index": False, "is_illiquid": True},
         ]
 
-        from market_analyzer.models.quotes import MarketMetrics
+        from income_desk.models.quotes import MarketMetrics
 
         mock_metrics = MagicMock()
         mock_metrics.get_metrics.return_value = {
@@ -129,7 +129,7 @@ class TestUniverseService:
             {"symbol": "LOW", "is_etf": True, "is_index": False, "is_illiquid": False},
         ]
 
-        from market_analyzer.models.quotes import MarketMetrics
+        from income_desk.models.quotes import MarketMetrics
 
         mock_metrics = MagicMock()
         mock_metrics.get_metrics.return_value = {
@@ -166,7 +166,7 @@ class TestUniverseService:
         ]
         mock_wl.create_watchlist.return_value = True
 
-        from market_analyzer.models.quotes import MarketMetrics
+        from income_desk.models.quotes import MarketMetrics
 
         mock_metrics = MagicMock()
         mock_metrics.get_metrics.return_value = {
@@ -187,7 +187,7 @@ class TestUniverseService:
             {"symbol": "C", "is_etf": True, "is_index": False, "is_illiquid": False},
         ]
 
-        from market_analyzer.models.quotes import MarketMetrics
+        from income_desk.models.quotes import MarketMetrics
 
         mock_metrics = MagicMock()
         mock_metrics.get_metrics.return_value = {
@@ -208,7 +208,7 @@ class TestUniverseService:
 
 class TestWatchlistProviderABC:
     def test_create_watchlist_default(self):
-        from market_analyzer.broker.base import WatchlistProvider
+        from income_desk.broker.base import WatchlistProvider
         # Default implementation returns False
         class DummyWL(WatchlistProvider):
             def get_watchlist(self, name): return []

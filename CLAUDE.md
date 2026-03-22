@@ -1,8 +1,8 @@
-# market_analyzer
+# income_desk
 
 **A library that helps make money trading options.** Not a theoretical exercise — a production tool for real capital deployment.
 
-Serves as the canonical data + analysis layer for the trading ecosystem (market_analyzer, cotrader/eTrading, decision agent). Detects per-instrument regime state (R1–R4) using HMMs, generates ranked trade recommendations, and provides every analytical building block needed to make informed options trading decisions.
+Serves as the canonical data + analysis layer for the trading ecosystem (income_desk, cotrader/eTrading, decision agent). Detects per-instrument regime state (R1–R4) using HMMs, generates ranked trade recommendations, and provides every analytical building block needed to make informed options trading decisions.
 
 ---
 
@@ -163,7 +163,7 @@ analyzer-plot                   # Regime charts
 ### Key Python Usage
 
 ```python
-from market_analyzer import MarketAnalyzer, DataService
+from income_desk import MarketAnalyzer, DataService
 
 ma = MarketAnalyzer(data_service=DataService())
 
@@ -177,14 +177,14 @@ plan = ma.plan.generate(skip_intraday=True)
 result = ma.ranking.rank(['SPY', 'GLD', 'QQQ', 'TLT'])
 
 # With broker (real quotes)
-from market_analyzer.broker.tastytrade import connect_tastytrade
+from income_desk.broker.tastytrade import connect_tastytrade
 md, mm, acct, wl = connect_tastytrade(is_paper=True)
 ma = MarketAnalyzer(data_service=DataService(), market_data=md, market_metrics=mm)
 ```
 
 ### Integration with eTrading (SaaS)
 
-market_analyzer is a **stateless library**. eTrading owns auth, tenant isolation, caching, credentials. Two broker modes:
+income_desk is a **stateless library**. eTrading owns auth, tenant isolation, caching, credentials. Two broker modes:
 - **Standalone:** `connect_tastytrade()` — library manages credentials
 - **Embedded:** `connect_from_sessions(sdk_session, data_session)` — caller passes pre-authenticated sessions
 

@@ -4,9 +4,9 @@ from datetime import date, timedelta
 
 import pytest
 
-from market_analyzer.models.opportunity import LegAction, LegSpec, TradeSpec
-from market_analyzer.models.vol_surface import TermStructurePoint, SkewSlice, VolatilitySurface
-from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
+from income_desk.models.opportunity import LegAction, LegSpec, TradeSpec
+from income_desk.models.vol_surface import TermStructurePoint, SkewSlice, VolatilitySurface
+from income_desk.opportunity.option_plays._trade_spec_helpers import (
     snap_strike,
     find_best_expiration,
     compute_atm_strike,
@@ -360,7 +360,7 @@ class TestBuildInverseIronCondorLegs:
     """Tests for the Iron Man (inverse IC) leg builder."""
 
     def test_produces_4_legs(self) -> None:
-        from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
+        from income_desk.opportunity.option_plays._trade_spec_helpers import (
             build_inverse_iron_condor_legs,
         )
         # Use price=$100 (tick=$1) with atr=$5 for clear strike separation
@@ -373,7 +373,7 @@ class TestBuildInverseIronCondorLegs:
 
     def test_long_strikes_inside_short_strikes(self) -> None:
         """Inner (long) strikes should be closer to price than outer (short) strikes."""
-        from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
+        from income_desk.opportunity.option_plays._trade_spec_helpers import (
             build_inverse_iron_condor_legs,
         )
         legs, _ = build_inverse_iron_condor_legs(
@@ -392,7 +392,7 @@ class TestBuildInverseIronCondorLegs:
 
     def test_actions_correct(self) -> None:
         """BTO on inner legs, STO on outer legs."""
-        from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
+        from income_desk.opportunity.option_plays._trade_spec_helpers import (
             build_inverse_iron_condor_legs,
         )
         legs, _ = build_inverse_iron_condor_legs(
@@ -407,7 +407,7 @@ class TestBuildInverseIronCondorLegs:
 
     def test_orb_aware_uses_range_for_long_strikes(self) -> None:
         """When ORB range provided, long strikes placed at ORB edges."""
-        from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
+        from income_desk.opportunity.option_plays._trade_spec_helpers import (
             build_inverse_iron_condor_legs,
         )
         legs, _ = build_inverse_iron_condor_legs(
@@ -423,7 +423,7 @@ class TestBuildInverseIronCondorLegs:
         assert long_call.strike == 102.0
 
     def test_without_orb_uses_atr_for_long_strikes(self) -> None:
-        from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
+        from income_desk.opportunity.option_plays._trade_spec_helpers import (
             build_inverse_iron_condor_legs,
         )
         legs, _ = build_inverse_iron_condor_legs(
@@ -437,7 +437,7 @@ class TestBuildInverseIronCondorLegs:
         assert long_call.strike > 100.0
 
     def test_labels_mention_orb(self) -> None:
-        from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
+        from income_desk.opportunity.option_plays._trade_spec_helpers import (
             build_inverse_iron_condor_legs,
         )
         legs, _ = build_inverse_iron_condor_legs(
@@ -598,8 +598,8 @@ class TestStructureTypeAndExitFields:
 
 class TestNoGoNoTradeSpec:
     def test_iron_condor_no_go_no_spec(self) -> None:
-        from market_analyzer.models.regime import RegimeID, RegimeResult
-        from market_analyzer.opportunity.option_plays.iron_condor import assess_iron_condor
+        from income_desk.models.regime import RegimeID, RegimeResult
+        from income_desk.opportunity.option_plays.iron_condor import assess_iron_condor
 
         regime = RegimeResult(
             ticker="SPY", regime=RegimeID.R4_HIGH_VOL_TREND, confidence=0.85,
@@ -652,7 +652,7 @@ class TestIndiaTradeSpec:
 
     def test_setup_trade_spec_nifty_no_vol_surface_bullish_r1(self) -> None:
         """NIFTY bullish R1 should produce a credit spread even without vol_surface."""
-        from market_analyzer.opportunity.option_plays._trade_spec_helpers import build_setup_trade_spec
+        from income_desk.opportunity.option_plays._trade_spec_helpers import build_setup_trade_spec
         result = build_setup_trade_spec(
             ticker="NIFTY", price=26000.0, atr=400.0,
             direction="bullish", regime_id=1,
@@ -666,7 +666,7 @@ class TestIndiaTradeSpec:
 
     def test_setup_trade_spec_banknifty_no_vol_surface_neutral_r2(self) -> None:
         """BANKNIFTY neutral R2 should produce an iron condor without vol_surface."""
-        from market_analyzer.opportunity.option_plays._trade_spec_helpers import build_setup_trade_spec
+        from income_desk.opportunity.option_plays._trade_spec_helpers import build_setup_trade_spec
         result = build_setup_trade_spec(
             ticker="BANKNIFTY", price=48000.0, atr=800.0,
             direction="neutral", regime_id=2,
@@ -681,7 +681,7 @@ class TestIndiaTradeSpec:
 
     def test_setup_trade_spec_nifty_r4_returns_none(self) -> None:
         """R4 always returns None regardless of vol_surface availability."""
-        from market_analyzer.opportunity.option_plays._trade_spec_helpers import build_setup_trade_spec
+        from income_desk.opportunity.option_plays._trade_spec_helpers import build_setup_trade_spec
         result = build_setup_trade_spec(
             ticker="NIFTY", price=26000.0, atr=400.0,
             direction="bullish", regime_id=4,
@@ -691,7 +691,7 @@ class TestIndiaTradeSpec:
 
     def test_setup_trade_spec_unknown_ticker_no_vol_surface_returns_none(self) -> None:
         """Unknown ticker with no vol_surface returns None (not in registry)."""
-        from market_analyzer.opportunity.option_plays._trade_spec_helpers import build_setup_trade_spec
+        from income_desk.opportunity.option_plays._trade_spec_helpers import build_setup_trade_spec
         result = build_setup_trade_spec(
             ticker="UNKNOWNXYZ", price=100.0, atr=5.0,
             direction="bullish", regime_id=1,
@@ -701,7 +701,7 @@ class TestIndiaTradeSpec:
 
     def test_setup_trade_spec_nifty_r3_directional_no_vol_surface(self) -> None:
         """NIFTY R3 bearish should produce a debit spread without vol_surface."""
-        from market_analyzer.opportunity.option_plays._trade_spec_helpers import build_setup_trade_spec
+        from income_desk.opportunity.option_plays._trade_spec_helpers import build_setup_trade_spec
         result = build_setup_trade_spec(
             ticker="NIFTY", price=26000.0, atr=400.0,
             direction="bearish", regime_id=3,

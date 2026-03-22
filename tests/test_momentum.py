@@ -4,7 +4,7 @@ from datetime import date, datetime
 
 import pytest
 
-from market_analyzer.models.fundamentals import (
+from income_desk.models.fundamentals import (
     BusinessInfo,
     CashMetrics,
     DebtMetrics,
@@ -18,26 +18,26 @@ from market_analyzer.models.fundamentals import (
     UpcomingEvents,
     ValuationMetrics,
 )
-from market_analyzer.models.macro import (
+from income_desk.models.macro import (
     MacroCalendar,
     MacroEvent,
     MacroEventImpact,
     MacroEventType,
 )
-from market_analyzer.models.opportunity import (
+from income_desk.models.opportunity import (
     MomentumDirection,
     MomentumOpportunity,
     MomentumStrategy,
     Verdict,
 )
-from market_analyzer.models.phase import (
+from income_desk.models.phase import (
     PhaseEvidence,
     PhaseID,
     PhaseResult,
     PriceStructure,
 )
-from market_analyzer.models.regime import RegimeID, RegimeResult, TrendDirection
-from market_analyzer.models.technicals import (
+from income_desk.models.regime import RegimeID, RegimeResult, TrendDirection
+from income_desk.models.technicals import (
     BollingerBands,
     MACDData,
     MarketPhase,
@@ -48,7 +48,7 @@ from market_analyzer.models.technicals import (
     SupportResistance,
     TechnicalSnapshot,
 )
-from market_analyzer.opportunity.setups.momentum import assess_momentum
+from income_desk.opportunity.setups.momentum import assess_momentum
 
 
 # --- Test helpers ---

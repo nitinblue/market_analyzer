@@ -7,9 +7,9 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pandas as pd
 
-from market_analyzer.broker.base import MarketDataProvider
-from market_analyzer.models.quotes import OptionQuote
-from market_analyzer.service.technical import TechnicalService
+from income_desk.broker.base import MarketDataProvider
+from income_desk.models.quotes import OptionQuote
+from income_desk.service.technical import TechnicalService
 
 
 # --- ABC default behavior ---
@@ -195,7 +195,7 @@ class TestTechnicalServiceBrokerFirst:
 class TestOpportunityAutoFetchesORB:
     def test_assess_zero_dte_attempts_orb(self):
         """assess_zero_dte tries to auto-fetch ORB when no intraday provided."""
-        from market_analyzer.service.opportunity import OpportunityService
+        from income_desk.service.opportunity import OpportunityService
 
         mock_tech_svc = MagicMock()
         mock_tech_svc.snapshot.return_value = MagicMock(atr=5.0)
@@ -218,7 +218,7 @@ class TestOpportunityAutoFetchesORB:
 
         # Patch the actual assessor so we don't need real models
         with patch(
-            "market_analyzer.opportunity.option_plays.zero_dte.assess_zero_dte",
+            "income_desk.opportunity.option_plays.zero_dte.assess_zero_dte",
         ) as mock_assess:
             mock_assess.return_value = MagicMock()
             opp.assess_zero_dte("SPY")
@@ -233,7 +233,7 @@ class TestOpportunityAutoFetchesORB:
 class TestUnderlyingPriceBrokerFirst:
     def test_broker_underlying_used_in_chain(self):
         """_infer_underlying_price tries broker direct quote first."""
-        from market_analyzer.service.option_quotes import OptionQuoteService
+        from income_desk.service.option_quotes import OptionQuoteService
 
         md = MockBrokerWithIntraday(price=581.50)
         qs = OptionQuoteService(market_data=md)
@@ -244,7 +244,7 @@ class TestUnderlyingPriceBrokerFirst:
 
     def test_broker_underlying_none_falls_back(self):
         """If broker returns None, falls back to put-call parity."""
-        from market_analyzer.service.option_quotes import OptionQuoteService
+        from income_desk.service.option_quotes import OptionQuoteService
 
         md = MockBrokerWithIntraday(price=None)
         qs = OptionQuoteService(market_data=md)
@@ -255,7 +255,7 @@ class TestUnderlyingPriceBrokerFirst:
 
     def test_broker_failure_falls_back_to_parity(self):
         """If broker raises, falls back to put-call parity."""
-        from market_analyzer.service.option_quotes import OptionQuoteService
+        from income_desk.service.option_quotes import OptionQuoteService
 
         md = FailingBroker()
         qs = OptionQuoteService(market_data=md)
@@ -275,7 +275,7 @@ class TestUnderlyingPriceBrokerFirst:
 
     def test_no_broker_uses_parity(self):
         """Without broker, goes straight to put-call parity."""
-        from market_analyzer.service.option_quotes import OptionQuoteService
+        from income_desk.service.option_quotes import OptionQuoteService
 
         qs = OptionQuoteService()
         call = OptionQuote(
@@ -307,7 +307,7 @@ class TestCandleToDataFrame:
 
     def test_broker_returns_valid_orb_input(self):
         """Broker intraday data can be fed to compute_orb."""
-        from market_analyzer.features.orb import compute_orb
+        from income_desk.features.orb import compute_orb
 
         df = _make_intraday_df()
         orb = compute_orb(df, "SPY", daily_atr=5.0)

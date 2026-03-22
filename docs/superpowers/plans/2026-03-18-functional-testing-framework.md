@@ -4,7 +4,7 @@
 
 **Goal:** Build a profitability-first functional testing framework that validates the full trading pipeline (scan → rank → entry → exit) and exposes a `validate` CLI command for daily pre-market use and MCP consumption.
 
-**Architecture:** Pure validation functions in `market_analyzer/validation/` (no broker required) called by both `tests/functional/` pytest tests and a new `do_validate` CLI command. The CLI command's structured output makes it directly consumable as an MCP tool.
+**Architecture:** Pure validation functions in `income_desk/validation/` (no broker required) called by both `tests/functional/` pytest tests and a new `do_validate` CLI command. The CLI command's structured output makes it directly consumable as an MCP tool.
 
 **Tech Stack:** Python 3.12, Pydantic BaseModel, pytest, existing `trade_lifecycle.py` / `risk.py` / `trade_spec_factory.py` APIs.
 
@@ -15,11 +15,11 @@
 ### New files
 | File | Responsibility |
 |------|---------------|
-| `market_analyzer/validation/__init__.py` | Package exports |
-| `market_analyzer/validation/models.py` | `CheckResult`, `Severity`, `Suite`, `ValidationReport` |
-| `market_analyzer/validation/profitability_audit.py` | `check_commission_drag`, `check_fill_quality`, `check_margin_efficiency` |
-| `market_analyzer/validation/daily_readiness.py` | `run_daily_checks`, `run_adversarial_checks` orchestrators |
-| `market_analyzer/validation/stress_scenarios.py` | `check_gamma_stress`, `check_vega_shock`, `check_breakeven_spread` |
+| `income_desk/validation/__init__.py` | Package exports |
+| `income_desk/validation/models.py` | `CheckResult`, `Severity`, `Suite`, `ValidationReport` |
+| `income_desk/validation/profitability_audit.py` | `check_commission_drag`, `check_fill_quality`, `check_margin_efficiency` |
+| `income_desk/validation/daily_readiness.py` | `run_daily_checks`, `run_adversarial_checks` orchestrators |
+| `income_desk/validation/stress_scenarios.py` | `check_gamma_stress`, `check_vega_shock`, `check_breakeven_spread` |
 | `tests/functional/__init__.py` | Empty, marks directory as test package |
 | `tests/functional/conftest.py` | Shared fixtures for all functional tests |
 | `tests/functional/test_daily_workflow.py` | Full pipeline: regime → assessor → GO verdict → trade spec quality |
@@ -34,15 +34,15 @@
 ### Modified files
 | File | Change |
 |------|--------|
-| `market_analyzer/cli/interactive.py` | Add `do_validate` command |
+| `income_desk/cli/interactive.py` | Add `do_validate` command |
 
 ---
 
 ## Task 1: Validation Models
 
 **Files:**
-- Create: `market_analyzer/validation/models.py`
-- Create: `market_analyzer/validation/__init__.py` (stub)
+- Create: `income_desk/validation/models.py`
+- Create: `income_desk/validation/__init__.py` (stub)
 
 - [ ] **Step 1: Write the failing test**
 
@@ -50,7 +50,7 @@ Create `tests/test_validation_models.py`:
 
 ```python
 """Tests for validation result models."""
-from market_analyzer.validation.models import (
+from income_desk.validation.models import (
     CheckResult, Severity, Suite, ValidationReport,
 )
 from datetime import date
@@ -106,7 +106,7 @@ def test_validation_report_summary_not_ready() -> None:
 ```
 Expected: `ImportError` (module doesn't exist yet)
 
-- [ ] **Step 3: Create `market_analyzer/validation/models.py`**
+- [ ] **Step 3: Create `income_desk/validation/models.py`**
 
 ```python
 """Validation result models for the profitability testing framework."""
@@ -177,7 +177,7 @@ class ValidationReport(BaseModel):
         return f"{status} ({self.passed}/{total} passed, {self.warnings} warnings)"
 ```
 
-- [ ] **Step 4: Create `market_analyzer/validation/__init__.py`** (stub for now)
+- [ ] **Step 4: Create `income_desk/validation/__init__.py`** (stub for now)
 
 ```python
 """Profitability validation framework — pure functions, no broker required."""
@@ -193,7 +193,7 @@ Expected: 4 tests PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add market_analyzer/validation/ tests/test_validation_models.py
+git add income_desk/validation/ tests/test_validation_models.py
 git commit -m "feat: add validation models (CheckResult, Severity, ValidationReport)"
 ```
 
@@ -202,7 +202,7 @@ git commit -m "feat: add validation models (CheckResult, Severity, ValidationRep
 ## Task 2: Profitability Audit Functions
 
 **Files:**
-- Create: `market_analyzer/validation/profitability_audit.py`
+- Create: `income_desk/validation/profitability_audit.py`
 - Test: `tests/test_validation_profitability_audit.py`
 
 These are pure functions — no broker, no MA services. Input: numbers and TradeSpec. Output: CheckResult.
@@ -216,14 +216,14 @@ Create `tests/test_validation_profitability_audit.py`:
 from datetime import date, timedelta
 import pytest
 
-from market_analyzer.trade_spec_factory import build_iron_condor
-from market_analyzer.validation.models import Severity
-from market_analyzer.validation.profitability_audit import (
+from income_desk.trade_spec_factory import build_iron_condor
+from income_desk.validation.models import Severity
+from income_desk.validation.profitability_audit import (
     check_commission_drag,
     check_fill_quality,
     check_margin_efficiency,
 )
-from market_analyzer.trade_lifecycle import compute_income_yield
+from income_desk.trade_lifecycle import compute_income_yield
 
 
 def _ic_spec():
@@ -324,13 +324,13 @@ Expected: `ImportError`
 """Profitability audit checks — pure functions, no broker required.
 
 All functions take numbers / models as input and return a CheckResult.
-No market_analyzer services are called here.
+No income_desk services are called here.
 """
 from __future__ import annotations
 
-from market_analyzer.models.opportunity import TradeSpec
-from market_analyzer.trade_lifecycle import IncomeYield
-from market_analyzer.validation.models import CheckResult, Severity
+from income_desk.models.opportunity import TradeSpec
+from income_desk.trade_lifecycle import IncomeYield
+from income_desk.validation.models import CheckResult, Severity
 
 # Commission constants
 _COMMISSION_PER_CONTRACT = 0.65  # $ per leg per direction (TastyTrade rate)
@@ -468,7 +468,7 @@ Expected: all PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add market_analyzer/validation/profitability_audit.py tests/test_validation_profitability_audit.py
+git add income_desk/validation/profitability_audit.py tests/test_validation_profitability_audit.py
 git commit -m "feat: add profitability audit checks (commission drag, fill quality, margin efficiency)"
 ```
 
@@ -477,7 +477,7 @@ git commit -m "feat: add profitability audit checks (commission drag, fill quali
 ## Task 3: Stress Scenarios
 
 **Files:**
-- Create: `market_analyzer/validation/stress_scenarios.py`
+- Create: `income_desk/validation/stress_scenarios.py`
 - Test: `tests/test_validation_stress.py`
 
 - [ ] **Step 1: Write failing tests**
@@ -490,9 +490,9 @@ from datetime import date, timedelta
 
 import pytest
 
-from market_analyzer.trade_spec_factory import build_iron_condor
-from market_analyzer.validation.models import Severity
-from market_analyzer.validation.stress_scenarios import (
+from income_desk.trade_spec_factory import build_iron_condor
+from income_desk.validation.models import Severity
+from income_desk.validation.stress_scenarios import (
     check_breakeven_spread,
     check_gamma_stress,
     check_vega_shock,
@@ -576,8 +576,8 @@ No broker required. All inputs are numbers/models.
 """
 from __future__ import annotations
 
-from market_analyzer.models.opportunity import StructureType, TradeSpec
-from market_analyzer.validation.models import CheckResult, Severity
+from income_desk.models.opportunity import StructureType, TradeSpec
+from income_desk.validation.models import CheckResult, Severity
 
 # Structures that are short vega (harmed by IV spikes)
 _SHORT_VEGA_STRUCTURES = {
@@ -808,7 +808,7 @@ Expected: all PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add market_analyzer/validation/stress_scenarios.py tests/test_validation_stress.py
+git add income_desk/validation/stress_scenarios.py tests/test_validation_stress.py
 git commit -m "feat: add adversarial stress checks (gamma, vega shock, breakeven spread)"
 ```
 
@@ -817,7 +817,7 @@ git commit -m "feat: add adversarial stress checks (gamma, vega shock, breakeven
 ## Task 4: Daily Readiness Orchestrator
 
 **Files:**
-- Create: `market_analyzer/validation/daily_readiness.py`
+- Create: `income_desk/validation/daily_readiness.py`
 - Test: `tests/test_validation_daily_readiness.py`
 
 - [ ] **Step 1: Write failing tests**
@@ -830,9 +830,9 @@ from datetime import date, timedelta, time
 
 import pytest
 
-from market_analyzer.trade_spec_factory import build_iron_condor
-from market_analyzer.validation.models import Severity, Suite
-from market_analyzer.validation.daily_readiness import (
+from income_desk.trade_spec_factory import build_iron_condor
+from income_desk.validation.models import Severity, Suite
+from income_desk.validation.daily_readiness import (
     run_daily_checks,
     run_adversarial_checks,
 )
@@ -973,19 +973,19 @@ from __future__ import annotations
 
 from datetime import date, time
 
-from market_analyzer.models.opportunity import TradeSpec
-from market_analyzer.trade_lifecycle import (
+from income_desk.models.opportunity import TradeSpec
+from income_desk.trade_lifecycle import (
     check_income_entry,
     compute_income_yield,
     estimate_pop,
 )
-from market_analyzer.validation.models import CheckResult, Severity, Suite, ValidationReport
-from market_analyzer.validation.profitability_audit import (
+from income_desk.validation.models import CheckResult, Severity, Suite, ValidationReport
+from income_desk.validation.profitability_audit import (
     check_commission_drag,
     check_fill_quality,
     check_margin_efficiency,
 )
-from market_analyzer.validation.stress_scenarios import (
+from income_desk.validation.stress_scenarios import (
     check_breakeven_spread,
     check_gamma_stress,
     check_vega_shock,
@@ -1182,7 +1182,7 @@ Expected: all PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add market_analyzer/validation/daily_readiness.py tests/test_validation_daily_readiness.py
+git add income_desk/validation/daily_readiness.py tests/test_validation_daily_readiness.py
 git commit -m "feat: add daily readiness + adversarial orchestrators"
 ```
 
@@ -1191,7 +1191,7 @@ git commit -m "feat: add daily readiness + adversarial orchestrators"
 ## Task 5: Package Exports
 
 **Files:**
-- Modify: `market_analyzer/validation/__init__.py`
+- Modify: `income_desk/validation/__init__.py`
 
 - [ ] **Step 1: Update `__init__.py` with clean exports**
 
@@ -1200,8 +1200,8 @@ git commit -m "feat: add daily readiness + adversarial orchestrators"
 
 Usage::
 
-    from market_analyzer.validation import run_daily_checks, run_adversarial_checks
-    from market_analyzer.validation.models import ValidationReport, CheckResult, Severity, Suite
+    from income_desk.validation import run_daily_checks, run_adversarial_checks
+    from income_desk.validation.models import ValidationReport, CheckResult, Severity, Suite
 
     report = run_daily_checks(
         ticker="SPY",
@@ -1216,14 +1216,14 @@ Usage::
     )
     print(report.summary)
 """
-from market_analyzer.validation.daily_readiness import run_adversarial_checks, run_daily_checks
-from market_analyzer.validation.models import CheckResult, Severity, Suite, ValidationReport
-from market_analyzer.validation.profitability_audit import (
+from income_desk.validation.daily_readiness import run_adversarial_checks, run_daily_checks
+from income_desk.validation.models import CheckResult, Severity, Suite, ValidationReport
+from income_desk.validation.profitability_audit import (
     check_commission_drag,
     check_fill_quality,
     check_margin_efficiency,
 )
-from market_analyzer.validation.stress_scenarios import (
+from income_desk.validation.stress_scenarios import (
     check_breakeven_spread,
     check_gamma_stress,
     check_vega_shock,
@@ -1248,7 +1248,7 @@ __all__ = [
 - [ ] **Step 2: Verify import works**
 
 ```bash
-.venv_312/Scripts/python -c "from market_analyzer.validation import run_daily_checks, ValidationReport; print('OK')"
+.venv_312/Scripts/python -c "from income_desk.validation import run_daily_checks, ValidationReport; print('OK')"
 ```
 Expected: `OK`
 
@@ -1262,7 +1262,7 @@ Expected: all PASS
 - [ ] **Step 4: Commit**
 
 ```bash
-git add market_analyzer/validation/__init__.py
+git add income_desk/validation/__init__.py
 git commit -m "feat: wire validation package exports"
 ```
 
@@ -1300,9 +1300,9 @@ from datetime import date, timedelta
 
 import pytest
 
-from market_analyzer.models.regime import RegimeID, RegimeResult
-from market_analyzer.models.vol_surface import SkewSlice, TermStructurePoint, VolatilitySurface
-from market_analyzer.trade_spec_factory import build_iron_condor, build_credit_spread
+from income_desk.models.regime import RegimeID, RegimeResult
+from income_desk.models.vol_surface import SkewSlice, TermStructurePoint, VolatilitySurface
+from income_desk.trade_spec_factory import build_iron_condor, build_credit_spread
 
 
 # ── Regime fixtures ──────────────────────────────────────────────────────────
@@ -1470,17 +1470,17 @@ All checks use synthetic data (no broker required).
 import pytest
 from datetime import date, timedelta
 
-from market_analyzer.models.opportunity import Verdict
-from market_analyzer.opportunity.option_plays.iron_condor import assess_iron_condor
-from market_analyzer.opportunity.option_plays.zero_dte import assess_zero_dte
-from market_analyzer.validation import run_daily_checks
-from market_analyzer.validation.models import Severity
+from income_desk.models.opportunity import Verdict
+from income_desk.opportunity.option_plays.iron_condor import assess_iron_condor
+from income_desk.opportunity.option_plays.zero_dte import assess_zero_dte
+from income_desk.validation import run_daily_checks
+from income_desk.validation.models import Severity
 
 
 def _technicals_for_workflow(rsi: float = 50.0, atr_pct: float = 1.0, price: float = 580.0):
     """Build a TechnicalSnapshot inline — avoids cross-test-module imports."""
     from datetime import date
-    from market_analyzer.models.technicals import (
+    from income_desk.models.technicals import (
         BollingerBands, MACDData, MovingAverages, RSIData,
         StochasticData, SupportResistance, TechnicalSnapshot,
         MarketPhase, PhaseIndicator,
@@ -1568,9 +1568,9 @@ class TestAssessorVerdicts:
 import pytest
 from datetime import date, timedelta
 
-from market_analyzer.trade_spec_factory import build_iron_condor
-from market_analyzer.validation.models import Severity
-from market_analyzer.validation.profitability_audit import check_commission_drag
+from income_desk.trade_spec_factory import build_iron_condor
+from income_desk.validation.models import Severity
+from income_desk.validation.profitability_audit import check_commission_drag
 
 
 def _ic(wing_width=5.0):
@@ -1621,8 +1621,8 @@ class TestCommissionDragFunctional:
 ```python
 """Functional tests: fill quality (bid-ask spread survival)."""
 import pytest
-from market_analyzer.validation.models import Severity
-from market_analyzer.validation.profitability_audit import check_fill_quality
+from income_desk.validation.models import Severity
+from income_desk.validation.profitability_audit import check_fill_quality
 
 
 class TestFillQualityFunctional:
@@ -1657,10 +1657,10 @@ class TestFillQualityFunctional:
 import pytest
 from datetime import date, timedelta
 
-from market_analyzer.trade_spec_factory import build_iron_condor
-from market_analyzer.trade_lifecycle import compute_income_yield
-from market_analyzer.validation.models import Severity
-from market_analyzer.validation.profitability_audit import check_margin_efficiency
+from income_desk.trade_spec_factory import build_iron_condor
+from income_desk.trade_lifecycle import compute_income_yield
+from income_desk.validation.models import Severity
+from income_desk.validation.profitability_audit import check_margin_efficiency
 
 
 def _ic(wing_width=5.0, underlying=580.0):
@@ -1707,14 +1707,14 @@ These are the 'what if' tests — where does our edge break down?
 import pytest
 from datetime import date, timedelta
 
-from market_analyzer.trade_spec_factory import build_iron_condor
-from market_analyzer.validation.models import Severity
-from market_analyzer.validation.stress_scenarios import (
+from income_desk.trade_spec_factory import build_iron_condor
+from income_desk.validation.models import Severity
+from income_desk.validation.stress_scenarios import (
     check_breakeven_spread,
     check_gamma_stress,
     check_vega_shock,
 )
-from market_analyzer.validation import run_adversarial_checks
+from income_desk.validation import run_adversarial_checks
 
 
 def _ic(wing_width=5.0):
@@ -1787,10 +1787,10 @@ class TestBreakevenSpreadFunctional:
 import pytest
 from datetime import date, timedelta
 
-from market_analyzer.trade_spec_factory import build_iron_condor
-from market_analyzer.trade_lifecycle import estimate_pop
-from market_analyzer.validation import run_daily_checks
-from market_analyzer.validation.models import Severity
+from income_desk.trade_spec_factory import build_iron_condor
+from income_desk.trade_lifecycle import estimate_pop
+from income_desk.validation import run_daily_checks
+from income_desk.validation.models import Severity
 
 
 def _ic():
@@ -1873,8 +1873,8 @@ class TestPOPGate:
 import pytest
 from datetime import date, timedelta
 
-from market_analyzer.trade_spec_factory import build_iron_condor
-from market_analyzer.trade_lifecycle import monitor_exit_conditions
+from income_desk.trade_spec_factory import build_iron_condor
+from income_desk.trade_lifecycle import monitor_exit_conditions
 
 
 def _ic():
@@ -1996,7 +1996,7 @@ class TestExitDiscipline:
 """Functional tests: drawdown circuit breaker and position scaling."""
 import pytest
 
-from market_analyzer.risk import check_drawdown_circuit_breaker, compute_risk_dashboard, PortfolioPosition
+from income_desk.risk import check_drawdown_circuit_breaker, compute_risk_dashboard, PortfolioPosition
 
 
 class TestDrawdownCircuit:
@@ -2080,7 +2080,7 @@ git commit -m "feat: add functional test suite (9 modules, daily/adversarial cov
 ## Task 7: CLI `do_validate` Command
 
 **Files:**
-- Modify: `market_analyzer/cli/interactive.py`
+- Modify: `income_desk/cli/interactive.py`
 
 **Design:** The command fetches real market data via MA services, runs the appropriate assessor
 to get a real TradeSpec (with ATR/vol-surface-based strikes), fetches real entry credit from
@@ -2098,7 +2098,7 @@ import pytest
 
 def test_do_validate_no_args_prints_usage(capsys) -> None:
     """do_validate with no args prints usage without crashing."""
-    from market_analyzer.cli.interactive import InteractiveShell
+    from income_desk.cli.interactive import InteractiveShell
     shell = InteractiveShell.__new__(InteractiveShell)
     shell.do_validate("")
     out = capsys.readouterr().out
@@ -2107,7 +2107,7 @@ def test_do_validate_no_args_prints_usage(capsys) -> None:
 
 def test_do_validate_invalid_suite_prints_error(capsys) -> None:
     """--suite with unknown value prints error without crashing."""
-    from market_analyzer.cli.interactive import InteractiveShell
+    from income_desk.cli.interactive import InteractiveShell
     shell = InteractiveShell.__new__(InteractiveShell)
     shell.do_validate("SPY --suite bad_value")
     out = capsys.readouterr().out
@@ -2153,10 +2153,10 @@ def do_validate(self, arg: str) -> None:
     Output is MCP-consumable: structured PASS/WARN/FAIL per check.
     Run pre-market before trading.
     """
-    from market_analyzer.models.opportunity import LegAction, Verdict
-    from market_analyzer.opportunity.option_plays.iron_condor import assess_iron_condor
-    from market_analyzer.validation import run_adversarial_checks, run_daily_checks
-    from market_analyzer.validation.models import Severity
+    from income_desk.models.opportunity import LegAction, Verdict
+    from income_desk.opportunity.option_plays.iron_condor import assess_iron_condor
+    from income_desk.validation import run_adversarial_checks, run_daily_checks
+    from income_desk.validation.models import Severity
 
     # ── Argument parsing ──────────────────────────────────────────────────
     parts = arg.strip().split()
@@ -2348,7 +2348,7 @@ Expected: all existing tests PASS, new tests PASS, no regressions
 - [ ] **Step 7: Final commit**
 
 ```bash
-git add market_analyzer/cli/interactive.py tests/test_cli_functional.py
+git add income_desk/cli/interactive.py tests/test_cli_functional.py
 git commit -m "feat: add validate CLI command for daily pre-trade profitability check"
 ```
 
@@ -2360,7 +2360,7 @@ git commit -m "feat: add validate CLI command for daily pre-trade profitability 
 - [ ] Daily suite is fast: `pytest tests/functional/ -m daily -v` completes in < 15 seconds
 - [ ] CLI validate command works: `validate SPY` in REPL
 - [ ] No regressions: `pytest tests/ -v` passes
-- [ ] Validation module importable: `python -c "from market_analyzer.validation import run_daily_checks; print('OK')"`
+- [ ] Validation module importable: `python -c "from income_desk.validation import run_daily_checks; print('OK')"`
 - [ ] Update `USER_MANUAL.md` with `validate` command documentation
 
 ---
@@ -2369,9 +2369,9 @@ git commit -m "feat: add validate CLI command for daily pre-trade profitability 
 
 | Component | Location | Purpose |
 |---|---|---|
-| `validation/models.py` | `market_analyzer/` | CheckResult, Severity, Suite, ValidationReport |
-| `validation/profitability_audit.py` | `market_analyzer/` | commission_drag, fill_quality, margin_efficiency |
-| `validation/stress_scenarios.py` | `market_analyzer/` | gamma_stress, vega_shock, breakeven_spread |
-| `validation/daily_readiness.py` | `market_analyzer/` | run_daily_checks, run_adversarial_checks |
+| `validation/models.py` | `income_desk/` | CheckResult, Severity, Suite, ValidationReport |
+| `validation/profitability_audit.py` | `income_desk/` | commission_drag, fill_quality, margin_efficiency |
+| `validation/stress_scenarios.py` | `income_desk/` | gamma_stress, vega_shock, breakeven_spread |
+| `validation/daily_readiness.py` | `income_desk/` | run_daily_checks, run_adversarial_checks |
 | `tests/functional/` | `tests/` | 9 test modules, `@pytest.mark.daily` subset |
 | `do_validate` | `cli/interactive.py` | Daily pre-market CLI command, MCP-consumable |

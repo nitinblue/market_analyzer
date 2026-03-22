@@ -3,13 +3,13 @@
 import pandas as pd
 import pytest
 
-from market_analyzer.models.regime import (
+from income_desk.models.regime import (
     HMMModelInfo,
     RegimeExplanation,
     RegimeResult,
     RegimeTimeSeries,
 )
-from market_analyzer.service.regime_service import RegimeService
+from income_desk.service.regime_service import RegimeService
 
 
 class TestDetect:

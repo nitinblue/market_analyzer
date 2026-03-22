@@ -7,9 +7,9 @@ from datetime import date, timedelta
 
 import pytest
 
-from market_analyzer.models.regime import RegimeID, RegimeResult
-from market_analyzer.models.vol_surface import SkewSlice, TermStructurePoint, VolatilitySurface
-from market_analyzer.trade_spec_factory import build_iron_condor, build_credit_spread
+from income_desk.models.regime import RegimeID, RegimeResult
+from income_desk.models.vol_surface import SkewSlice, TermStructurePoint, VolatilitySurface
+from income_desk.trade_spec_factory import build_iron_condor, build_credit_spread
 
 
 # ── Regime fixtures ──────────────────────────────────────────────────────────

@@ -2,9 +2,9 @@
 from datetime import date
 import pytest
 
-from market_analyzer.models.opportunity import LegAction, LegSpec, TradeSpec
-from market_analyzer.validation.stress_scenarios import run_position_stress
-from market_analyzer.validation.models import Severity
+from income_desk.models.opportunity import LegAction, LegSpec, TradeSpec
+from income_desk.validation.stress_scenarios import run_position_stress
+from income_desk.validation.models import Severity
 
 
 def _leg(role, action, opt_type, strike):
@@ -150,12 +150,12 @@ class TestRunPositionStress:
 
     def test_imported_from_validation_package(self):
         """run_position_stress is accessible via the validation package."""
-        from market_analyzer.validation import run_position_stress as rps
+        from income_desk.validation import run_position_stress as rps
         report = rps(_ic(), 1.50, 1.0, 1.50)
         assert len(report.checks) == 4
 
     def test_imported_from_top_level(self):
-        """run_position_stress is accessible from market_analyzer root."""
-        from market_analyzer import run_position_stress as rps
+        """run_position_stress is accessible from income_desk root."""
+        from income_desk import run_position_stress as rps
         report = rps(_ic(), 1.50, 1.0, 1.50)
         assert len(report.checks) == 4

@@ -4,14 +4,14 @@ from datetime import date
 
 import pytest
 
-from market_analyzer.models.exit_plan import ExitPlan, ExitReason
-from market_analyzer.models.regime import RegimeID, RegimeResult, TrendDirection
-from market_analyzer.models.strategy import (
+from income_desk.models.exit_plan import ExitPlan, ExitReason
+from income_desk.models.regime import RegimeID, RegimeResult, TrendDirection
+from income_desk.models.strategy import (
     OptionStructure,
     OptionStructureType,
     StrategyParameters,
 )
-from market_analyzer.service.exit import ExitService
+from income_desk.service.exit import ExitService
 
 
 def _make_regime(regime_id: RegimeID = RegimeID.R1_LOW_VOL_MR) -> RegimeResult:
@@ -47,7 +47,7 @@ def _make_strategy(
 
 class TestExitService:
     def test_plan_basic(self, sample_ohlcv_trending):
-        from market_analyzer.features.technicals import compute_technicals
+        from income_desk.features.technicals import compute_technicals
 
         svc = ExitService()
         regime = _make_regime()
@@ -71,7 +71,7 @@ class TestExitService:
         assert plan.trailing_stop is not None
 
     def test_plan_has_profit_targets(self, sample_ohlcv_trending):
-        from market_analyzer.features.technicals import compute_technicals
+        from income_desk.features.technicals import compute_technicals
 
         svc = ExitService()
         regime = _make_regime()
@@ -87,7 +87,7 @@ class TestExitService:
             assert target.reason == ExitReason.PROFIT_TARGET
 
     def test_plan_has_adjustments(self, sample_ohlcv_trending):
-        from market_analyzer.features.technicals import compute_technicals
+        from income_desk.features.technicals import compute_technicals
 
         svc = ExitService()
         regime = _make_regime()
@@ -103,7 +103,7 @@ class TestExitService:
         assert len(plan.adjustments) >= 2
 
     def test_plan_with_debit_spread(self, sample_ohlcv_trending):
-        from market_analyzer.features.technicals import compute_technicals
+        from income_desk.features.technicals import compute_technicals
 
         svc = ExitService()
         regime = _make_regime(RegimeID.R3_LOW_VOL_TREND)
@@ -121,7 +121,7 @@ class TestExitService:
         assert len(partial) >= 1
 
     def test_regime_change_action_income(self, sample_ohlcv_trending):
-        from market_analyzer.features.technicals import compute_technicals
+        from income_desk.features.technicals import compute_technicals
 
         svc = ExitService()
         regime = _make_regime(RegimeID.R1_LOW_VOL_MR)
@@ -136,7 +136,7 @@ class TestExitService:
         assert "R3/R4" in plan.regime_change_action or "directional" in plan.regime_change_action.lower()
 
     def test_income_strategy_has_theta_exit(self, sample_ohlcv_trending):
-        from market_analyzer.features.technicals import compute_technicals
+        from income_desk.features.technicals import compute_technicals
 
         svc = ExitService()
         regime = _make_regime()

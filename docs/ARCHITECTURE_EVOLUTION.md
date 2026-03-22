@@ -1,13 +1,13 @@
 # income-desk — Architecture Evolution Plan
 
-> How the project structure should evolve from "market_analyzer with everything flat" to "income-desk with clean domain boundaries."
+> How the project structure should evolve from "income_desk with everything flat" to "income-desk with clean domain boundaries."
 
 ---
 
 ## Current Architecture (v0.3.x)
 
 ```
-market_analyzer/                    # Python module (mismatched with package name)
+income_desk/                    # Python module (mismatched with package name)
 ├── models/                         # 15 model files (mixed domains)
 │   ├── opportunity.py              # TradeSpec, LegSpec, assessor results
 │   ├── regime.py                   # RegimeResult
@@ -62,7 +62,7 @@ market_analyzer/                    # Python module (mismatched with package nam
 
 ### Phase 1: Create Domain Facades (non-breaking)
 
-Add a new top-level `income_desk` module that re-exports everything through clean domain APIs. The old `market_analyzer` module stays as-is for backward compatibility.
+Add a new top-level `income_desk` module that re-exports everything through clean domain APIs. The old `income_desk` module stays as-is for backward compatibility.
 
 ```python
 # New: income_desk/__init__.py
@@ -73,7 +73,7 @@ class TradingDesk:
     """The primary API for income-desk users."""
 
     def __init__(self, capital=100_000, market="US", risk_tolerance="moderate"):
-        from market_analyzer import MarketAnalyzer, DataService
+        from income_desk import MarketAnalyzer, DataService
         self._ma = MarketAnalyzer(data_service=DataService())
         self.markets = MarketsAPI(self._ma)
         self.trading = TradingAPI(self._ma)
@@ -89,15 +89,15 @@ class TradingDesk:
 
 This way:
 - `from income_desk import TradingDesk` works for new users
-- `from market_analyzer import MarketAnalyzer` still works for existing users / eTrading
+- `from income_desk import MarketAnalyzer` still works for existing users / eTrading
 - No breaking changes
 
-### Phase 2: Domain Packages (within market_analyzer)
+### Phase 2: Domain Packages (within income_desk)
 
 Split the big files into domain packages without changing the top-level module name:
 
 ```
-market_analyzer/
+income_desk/
 ├── risk/                           # EXPAND from risk.py
 │   ├── __init__.py                 # Re-exports for backward compat
 │   ├── portfolio_risk.py           # Risk dashboard, expected loss
@@ -171,9 +171,9 @@ market_analyzer/
 ### Phase 3: Rename Module (v2.0 — major breaking change)
 
 Only when ready for a major version bump:
-- Rename `market_analyzer/` → `income_desk/`
+- Rename `income_desk/` → `income_desk/`
 - Update all 200+ files
-- Keep `market_analyzer` as a thin re-export shim for 1 version
+- Keep `income_desk` as a thin re-export shim for 1 version
 - eTrading migrates imports
 
 ---
@@ -302,7 +302,7 @@ def analyze_sector_exposure(
 | **1c** | Split risk.py into risk/ package | Medium | No (re-export from __init__) |
 | **2** | Split trade_lifecycle.py into monitoring/ package | Medium | No (re-export) |
 | **2** | Split features/ into trading/entry, trading/exit, trading/sizing | Medium | No |
-| **3** | Rename market_analyzer → income_desk (v2.0) | Large | YES — major version |
+| **3** | Rename income_desk → income_desk (v2.0) | Large | YES — major version |
 
 **Recommendation:** Do 1a + 1b now. The TradingDesk facade gives new users a clean API. The hedging domain is the revenue driver. Everything else can wait.
 

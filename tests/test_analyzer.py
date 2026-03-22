@@ -3,17 +3,17 @@
 import pandas as pd
 import pytest
 
-from market_analyzer.service.analyzer import MarketAnalyzer
-from market_analyzer.service.technical import TechnicalService
-from market_analyzer.service.phase import PhaseService
-from market_analyzer.service.fundamental import FundamentalService
-from market_analyzer.service.macro import MacroService
-from market_analyzer.service.opportunity import OpportunityService
-from market_analyzer.service.regime import RegimeService
-from market_analyzer.models.regime import RegimeResult
-from market_analyzer.models.technicals import TechnicalSnapshot
-from market_analyzer.models.phase import PhaseResult
-from market_analyzer.models.macro import MacroCalendar
+from income_desk.service.analyzer import MarketAnalyzer
+from income_desk.service.technical import TechnicalService
+from income_desk.service.phase import PhaseService
+from income_desk.service.fundamental import FundamentalService
+from income_desk.service.macro import MacroService
+from income_desk.service.opportunity import OpportunityService
+from income_desk.service.regime import RegimeService
+from income_desk.models.regime import RegimeResult
+from income_desk.models.technicals import TechnicalSnapshot
+from income_desk.models.phase import PhaseResult
+from income_desk.models.macro import MacroCalendar
 
 
 class TestMarketAnalyzerInit:
@@ -27,7 +27,7 @@ class TestMarketAnalyzerInit:
         assert isinstance(ma.opportunity, OpportunityService)
 
     def test_facade_shares_data_service(self, tmp_path):
-        from market_analyzer.data.service import DataService
+        from income_desk.data.service import DataService
 
         ds = DataService()
         ma = MarketAnalyzer(data_service=ds)
@@ -65,7 +65,7 @@ class TestTechnicalService:
 
 class TestPhaseService:
     def test_detect_with_ohlcv(self, sample_ohlcv_mixed, tmp_path):
-        from market_analyzer.service.regime_service import RegimeService as RS
+        from income_desk.service.regime_service import RegimeService as RS
 
         regime_svc = RS(model_dir=tmp_path / "models")
         phase_svc = PhaseService(regime_service=regime_svc)
@@ -88,7 +88,7 @@ class TestFundamentalService:
     def test_get_delegates_to_fetch(self, mocker):
         sentinel = object()
         mocker.patch(
-            "market_analyzer.fundamentals.fetch.fetch_fundamentals",
+            "income_desk.fundamentals.fetch.fetch_fundamentals",
             return_value=sentinel,
         )
         svc = FundamentalService()
@@ -124,11 +124,11 @@ class TestOpportunityService:
 
 class TestTopLevelImports:
     def test_market_analyzer_importable(self):
-        from market_analyzer import MarketAnalyzer
+        from income_desk import MarketAnalyzer
         assert MarketAnalyzer is not None
 
     def test_all_services_importable(self):
-        from market_analyzer import (
+        from income_desk import (
             MarketAnalyzer,
             RegimeService,
             TechnicalService,
@@ -145,14 +145,14 @@ class TestTopLevelImports:
         ])
 
     def test_regime_service_from_both_paths(self):
-        from market_analyzer.service.regime_service import RegimeService as RS1
-        from market_analyzer.service.regime import RegimeService as RS2
+        from income_desk.service.regime_service import RegimeService as RS1
+        from income_desk.service.regime import RegimeService as RS2
         assert RS1 is RS2
 
 
 class TestFacadeIntegration:
     def test_regime_detect_via_facade(self, sample_ohlcv_mixed, tmp_path):
-        from market_analyzer.models.regime import RegimeConfig
+        from income_desk.models.regime import RegimeConfig
 
         ma = MarketAnalyzer(config=RegimeConfig())
         ma.regime.model_dir = tmp_path / "models"

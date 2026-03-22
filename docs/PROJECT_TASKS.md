@@ -1,4 +1,4 @@
-# market_analyzer — Task Board
+# income_desk — Task Board
 
 > Single source of truth for what's being worked on and what comes next.
 > Update this file as tasks are completed or added.
@@ -46,7 +46,7 @@
 - **Bug fixes** — max_loss POP computation, credit estimation double-count, stress graceful degradation, momentum R4 override, minimum credit filter ($0.15/share)
 
 ### March 2026 — Functional Testing / Validation Framework
-- Built `market_analyzer/validation/` package: `models.py` (CheckResult, Severity, Suite, ValidationReport), `profitability_audit.py`, `daily_readiness.py`, `stress_scenarios.py`
+- Built `income_desk/validation/` package: `models.py` (CheckResult, Severity, Suite, ValidationReport), `profitability_audit.py`, `daily_readiness.py`, `stress_scenarios.py`
 - 8 functional test modules in `tests/functional/`: daily workflow, commission drag, fill quality, margin efficiency, adversarial stress, profitability gates, exit discipline, drawdown circuit
 - Added `do_validate` CLI command for daily pre-market use and MCP consumption
 - ~45 functional tests added (see git commits 2026-03-18 / 2026-03-19)

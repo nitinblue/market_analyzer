@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from market_analyzer.macro.expiry import (
+from income_desk.macro.expiry import (
     ExpiryEvent,
     ExpiryType,
     get_expiry_calendar,
@@ -27,7 +27,7 @@ from market_analyzer.macro.expiry import (
     vix_settlement,
     weekly_opex_fridays,
 )
-from market_analyzer.models.opportunity import (
+from income_desk.models.opportunity import (
     LegAction,
     LegSpec,
     OrderSide,
@@ -35,19 +35,19 @@ from market_analyzer.models.opportunity import (
     TradeSpec,
     Verdict,
 )
-from market_analyzer.models.trading_plan import (
+from income_desk.models.trading_plan import (
     DailyTradingPlan,
     DayVerdict,
     PlanHorizon,
     PlanTrade,
     RiskBudget,
 )
-from market_analyzer.models.ranking import StrategyType
-from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
+from income_desk.models.ranking import StrategyType
+from income_desk.opportunity.option_plays._trade_spec_helpers import (
     build_double_calendar_legs,
     compute_max_entry_price_from_quotes,
 )
-from market_analyzer.models.vol_surface import TermStructurePoint
+from income_desk.models.vol_surface import TermStructurePoint
 
 
 # ===== Phase 1: Expiry Calendar =====
@@ -307,39 +307,39 @@ class TestComputeMaxEntryPriceFromQuotes:
 
 class TestDteToHorizon:
     def test_zero_dte(self):
-        from market_analyzer.service.trading_plan import _dte_to_horizon
+        from income_desk.service.trading_plan import _dte_to_horizon
         assert _dte_to_horizon(0) == PlanHorizon.ZERO_DTE
         assert _dte_to_horizon(None) == PlanHorizon.ZERO_DTE
 
     def test_weekly(self):
-        from market_analyzer.service.trading_plan import _dte_to_horizon
+        from income_desk.service.trading_plan import _dte_to_horizon
         assert _dte_to_horizon(1) == PlanHorizon.WEEKLY
         assert _dte_to_horizon(7) == PlanHorizon.WEEKLY
 
     def test_monthly(self):
-        from market_analyzer.service.trading_plan import _dte_to_horizon
+        from income_desk.service.trading_plan import _dte_to_horizon
         assert _dte_to_horizon(8) == PlanHorizon.MONTHLY
         assert _dte_to_horizon(30) == PlanHorizon.MONTHLY
         assert _dte_to_horizon(60) == PlanHorizon.MONTHLY
 
     def test_leap(self):
-        from market_analyzer.service.trading_plan import _dte_to_horizon
+        from income_desk.service.trading_plan import _dte_to_horizon
         assert _dte_to_horizon(61) == PlanHorizon.LEAP
         assert _dte_to_horizon(365) == PlanHorizon.LEAP
 
 
 class TestStrategyToHorizon:
     def test_zero_dte_strategy_override(self):
-        from market_analyzer.service.trading_plan import TradingPlanService
+        from income_desk.service.trading_plan import TradingPlanService
         assert TradingPlanService._strategy_to_horizon(StrategyType.ZERO_DTE, 0) == PlanHorizon.ZERO_DTE
         assert TradingPlanService._strategy_to_horizon(StrategyType.ZERO_DTE, None) == PlanHorizon.ZERO_DTE
 
     def test_leap_strategy_override(self):
-        from market_analyzer.service.trading_plan import TradingPlanService
+        from income_desk.service.trading_plan import TradingPlanService
         assert TradingPlanService._strategy_to_horizon(StrategyType.LEAP, 180) == PlanHorizon.LEAP
 
     def test_other_strategy_uses_dte(self):
-        from market_analyzer.service.trading_plan import TradingPlanService
+        from income_desk.service.trading_plan import TradingPlanService
         assert TradingPlanService._strategy_to_horizon(StrategyType.IRON_CONDOR, 35) == PlanHorizon.MONTHLY
         assert TradingPlanService._strategy_to_horizon(StrategyType.BREAKOUT, 5) == PlanHorizon.WEEKLY
 
@@ -355,9 +355,9 @@ class TestDayVerdict:
         cpi_today=False,
     ):
         """Build a mock MarketContext."""
-        from market_analyzer.models.black_swan import AlertLevel, BlackSwanAlert
-        from market_analyzer.models.context import IntermarketDashboard, MarketContext
-        from market_analyzer.models.macro import MacroCalendar, MacroEvent, MacroEventType
+        from income_desk.models.black_swan import AlertLevel, BlackSwanAlert
+        from income_desk.models.context import IntermarketDashboard, MarketContext
+        from income_desk.models.macro import MacroCalendar, MacroEvent, MacroEventType
 
         today = date(2026, 2, 26)
 
@@ -410,7 +410,7 @@ class TestDayVerdict:
         )
 
     def test_normal_conditions(self):
-        from market_analyzer.service.trading_plan import TradingPlanService
+        from income_desk.service.trading_plan import TradingPlanService
         svc = TradingPlanService.__new__(TradingPlanService)
         ctx = self._make_context()
         verdict, reasons = svc._compute_day_verdict(ctx, [])
@@ -418,14 +418,14 @@ class TestDayVerdict:
         assert "Normal conditions" in reasons[0]
 
     def test_critical_black_swan(self):
-        from market_analyzer.service.trading_plan import TradingPlanService
+        from income_desk.service.trading_plan import TradingPlanService
         svc = TradingPlanService.__new__(TradingPlanService)
         ctx = self._make_context(alert_level="critical")
         verdict, reasons = svc._compute_day_verdict(ctx, [])
         assert verdict == DayVerdict.NO_TRADE
 
     def test_fomc_day_avoid(self):
-        from market_analyzer.service.trading_plan import TradingPlanService
+        from income_desk.service.trading_plan import TradingPlanService
         svc = TradingPlanService.__new__(TradingPlanService)
         ctx = self._make_context(fomc_today=True)
         verdict, reasons = svc._compute_day_verdict(ctx, [])
@@ -433,7 +433,7 @@ class TestDayVerdict:
         assert any("FOMC" in r for r in reasons)
 
     def test_quad_witching_avoid(self):
-        from market_analyzer.service.trading_plan import TradingPlanService
+        from income_desk.service.trading_plan import TradingPlanService
         svc = TradingPlanService.__new__(TradingPlanService)
         ctx = self._make_context()
         qw = [ExpiryEvent(
@@ -445,21 +445,21 @@ class TestDayVerdict:
         assert verdict == DayVerdict.AVOID
 
     def test_high_black_swan_avoid(self):
-        from market_analyzer.service.trading_plan import TradingPlanService
+        from income_desk.service.trading_plan import TradingPlanService
         svc = TradingPlanService.__new__(TradingPlanService)
         ctx = self._make_context(alert_level="high")
         verdict, reasons = svc._compute_day_verdict(ctx, [])
         assert verdict == DayVerdict.AVOID
 
     def test_cpi_today_trade_light(self):
-        from market_analyzer.service.trading_plan import TradingPlanService
+        from income_desk.service.trading_plan import TradingPlanService
         svc = TradingPlanService.__new__(TradingPlanService)
         ctx = self._make_context(cpi_today=True)
         verdict, reasons = svc._compute_day_verdict(ctx, [])
         assert verdict == DayVerdict.TRADE_LIGHT
 
     def test_monthly_opex_trade_light(self):
-        from market_analyzer.service.trading_plan import TradingPlanService
+        from income_desk.service.trading_plan import TradingPlanService
         svc = TradingPlanService.__new__(TradingPlanService)
         ctx = self._make_context()
         opex = [ExpiryEvent(
@@ -471,7 +471,7 @@ class TestDayVerdict:
         assert verdict == DayVerdict.TRADE_LIGHT
 
     def test_vix_settlement_trade_light(self):
-        from market_analyzer.service.trading_plan import TradingPlanService
+        from income_desk.service.trading_plan import TradingPlanService
         svc = TradingPlanService.__new__(TradingPlanService)
         ctx = self._make_context()
         vix = [ExpiryEvent(
@@ -483,7 +483,7 @@ class TestDayVerdict:
         assert verdict == DayVerdict.TRADE_LIGHT
 
     def test_elevated_black_swan_trade_light(self):
-        from market_analyzer.service.trading_plan import TradingPlanService
+        from income_desk.service.trading_plan import TradingPlanService
         svc = TradingPlanService.__new__(TradingPlanService)
         ctx = self._make_context(alert_level="elevated")
         verdict, reasons = svc._compute_day_verdict(ctx, [])
@@ -495,7 +495,7 @@ class TestDayVerdict:
 
 class TestTradingPlanConfig:
     def test_default_settings(self):
-        from market_analyzer.config import TradingPlanSettings
+        from income_desk.config import TradingPlanSettings
         s = TradingPlanSettings()
         assert s.max_trades_per_plan == 10
         assert s.daily_risk_pct == 0.02
@@ -505,13 +505,13 @@ class TestTradingPlanConfig:
         assert "SPX" in s.default_tickers
 
     def test_settings_on_main_config(self):
-        from market_analyzer.config import Settings
+        from income_desk.config import Settings
         s = Settings()
         assert hasattr(s, "trading_plan")
         assert s.trading_plan.max_trades_per_plan == 10
 
     def test_loads_from_yaml(self):
-        from market_analyzer.config import load_settings
+        from income_desk.config import load_settings
         s = load_settings(_force_reload=True)
         assert s.trading_plan.max_trades_per_plan == 10
         assert s.trading_plan.daily_risk_pct == 0.02
@@ -522,7 +522,7 @@ class TestTradingPlanConfig:
 
 class TestExpiryNoteForTrade:
     def test_tags_target_expiration(self):
-        from market_analyzer.service.trading_plan import _expiry_note_for_trade
+        from income_desk.service.trading_plan import _expiry_note_for_trade
         opex_date = date(2026, 3, 20)
         ts = _make_trade_spec(
             [_make_leg("short_put", LegAction.SELL_TO_OPEN, "put", 590.0)],
@@ -533,7 +533,7 @@ class TestExpiryNoteForTrade:
         assert note == "Mar Monthly OpEx"
 
     def test_tags_front_expiration(self):
-        from market_analyzer.service.trading_plan import _expiry_note_for_trade
+        from income_desk.service.trading_plan import _expiry_note_for_trade
         opex_date = date(2026, 3, 20)
         ts = _make_trade_spec(
             [_make_leg("short_put", LegAction.SELL_TO_OPEN, "put", 590.0)],
@@ -548,7 +548,7 @@ class TestExpiryNoteForTrade:
         assert "Mar Monthly OpEx" in note
 
     def test_no_match(self):
-        from market_analyzer.service.trading_plan import _expiry_note_for_trade
+        from income_desk.service.trading_plan import _expiry_note_for_trade
         ts = _make_trade_spec(
             [_make_leg("short_put", LegAction.SELL_TO_OPEN, "put", 590.0)],
         )
@@ -557,7 +557,7 @@ class TestExpiryNoteForTrade:
         assert note is None
 
     def test_none_trade_spec(self):
-        from market_analyzer.service.trading_plan import _expiry_note_for_trade
+        from income_desk.service.trading_plan import _expiry_note_for_trade
         assert _expiry_note_for_trade(None, []) is None
 
 
@@ -566,7 +566,7 @@ class TestExpiryNoteForTrade:
 
 class TestExports:
     def test_all_models_importable(self):
-        from market_analyzer import (
+        from income_desk import (
             DailyTradingPlan,
             DayVerdict,
             ExpiryEvent,
@@ -591,7 +591,7 @@ class TestExports:
 
 class TestStructureProfile:
     def test_iron_condor(self):
-        from market_analyzer.models.opportunity import (
+        from income_desk.models.opportunity import (
             RiskProfile, StructureType, get_structure_profile,
         )
         p = get_structure_profile(StructureType.IRON_CONDOR)
@@ -600,7 +600,7 @@ class TestStructureProfile:
         assert "/‾‾\\" in p.payoff_graph
 
     def test_iron_man(self):
-        from market_analyzer.models.opportunity import (
+        from income_desk.models.opportunity import (
             RiskProfile, StructureType, get_structure_profile,
         )
         p = get_structure_profile(StructureType.IRON_MAN)
@@ -609,7 +609,7 @@ class TestStructureProfile:
         assert "\\__/" in p.payoff_graph
 
     def test_iron_butterfly(self):
-        from market_analyzer.models.opportunity import (
+        from income_desk.models.opportunity import (
             RiskProfile, StructureType, get_structure_profile,
         )
         p = get_structure_profile(StructureType.IRON_BUTTERFLY)
@@ -617,7 +617,7 @@ class TestStructureProfile:
         assert p.risk_profile == RiskProfile.DEFINED
 
     def test_bull_credit_spread(self):
-        from market_analyzer.models.opportunity import (
+        from income_desk.models.opportunity import (
             RiskProfile, StructureType, OrderSide, get_structure_profile,
         )
         p = get_structure_profile(StructureType.CREDIT_SPREAD, OrderSide.CREDIT, "bullish")
@@ -626,7 +626,7 @@ class TestStructureProfile:
         assert "bull put" in p.label
 
     def test_bear_credit_spread(self):
-        from market_analyzer.models.opportunity import (
+        from income_desk.models.opportunity import (
             RiskProfile, StructureType, OrderSide, get_structure_profile,
         )
         p = get_structure_profile(StructureType.CREDIT_SPREAD, OrderSide.CREDIT, "bearish")
@@ -635,7 +635,7 @@ class TestStructureProfile:
         assert "bear call" in p.label
 
     def test_bull_debit_spread(self):
-        from market_analyzer.models.opportunity import (
+        from income_desk.models.opportunity import (
             RiskProfile, StructureType, OrderSide, get_structure_profile,
         )
         p = get_structure_profile(StructureType.DEBIT_SPREAD, OrderSide.DEBIT, "bullish")
@@ -643,7 +643,7 @@ class TestStructureProfile:
         assert p.risk_profile == RiskProfile.DEFINED
 
     def test_ratio_spread_undefined_risk(self):
-        from market_analyzer.models.opportunity import (
+        from income_desk.models.opportunity import (
             RiskProfile, StructureType, get_structure_profile,
         )
         p = get_structure_profile(StructureType.RATIO_SPREAD, direction="bullish")
@@ -651,7 +651,7 @@ class TestStructureProfile:
         assert "UNDEFINED" in p.label
 
     def test_short_straddle_undefined(self):
-        from market_analyzer.models.opportunity import (
+        from income_desk.models.opportunity import (
             RiskProfile, StructureType, OrderSide, get_structure_profile,
         )
         p = get_structure_profile(StructureType.STRADDLE, OrderSide.CREDIT)
@@ -659,7 +659,7 @@ class TestStructureProfile:
         assert p.bias == "neutral"
 
     def test_long_straddle_defined(self):
-        from market_analyzer.models.opportunity import (
+        from income_desk.models.opportunity import (
             RiskProfile, StructureType, OrderSide, get_structure_profile,
         )
         p = get_structure_profile(StructureType.STRADDLE, OrderSide.DEBIT)
@@ -667,14 +667,14 @@ class TestStructureProfile:
         assert p.bias == "neutral"
 
     def test_short_strangle_undefined(self):
-        from market_analyzer.models.opportunity import (
+        from income_desk.models.opportunity import (
             RiskProfile, StructureType, OrderSide, get_structure_profile,
         )
         p = get_structure_profile(StructureType.STRANGLE, OrderSide.CREDIT)
         assert p.risk_profile == RiskProfile.UNDEFINED
 
     def test_long_strangle_defined(self):
-        from market_analyzer.models.opportunity import (
+        from income_desk.models.opportunity import (
             RiskProfile, StructureType, OrderSide, get_structure_profile,
         )
         p = get_structure_profile(StructureType.STRANGLE, OrderSide.DEBIT)
@@ -682,7 +682,7 @@ class TestStructureProfile:
         assert "\\__/" in p.payoff_graph
 
     def test_long_call(self):
-        from market_analyzer.models.opportunity import (
+        from income_desk.models.opportunity import (
             RiskProfile, StructureType, get_structure_profile,
         )
         p = get_structure_profile(StructureType.LONG_OPTION, direction="bullish")
@@ -691,7 +691,7 @@ class TestStructureProfile:
         assert "__/" in p.payoff_graph
 
     def test_long_put(self):
-        from market_analyzer.models.opportunity import (
+        from income_desk.models.opportunity import (
             RiskProfile, StructureType, get_structure_profile,
         )
         p = get_structure_profile(StructureType.LONG_OPTION, direction="bearish")
@@ -700,7 +700,7 @@ class TestStructureProfile:
         assert "\\__" in p.payoff_graph
 
     def test_pmcc(self):
-        from market_analyzer.models.opportunity import (
+        from income_desk.models.opportunity import (
             RiskProfile, StructureType, get_structure_profile,
         )
         p = get_structure_profile(StructureType.PMCC)
@@ -708,7 +708,7 @@ class TestStructureProfile:
         assert p.risk_profile == RiskProfile.DEFINED
 
     def test_calendar(self):
-        from market_analyzer.models.opportunity import (
+        from income_desk.models.opportunity import (
             RiskProfile, StructureType, get_structure_profile,
         )
         p = get_structure_profile(StructureType.CALENDAR)
@@ -716,20 +716,20 @@ class TestStructureProfile:
         assert p.risk_profile == RiskProfile.DEFINED
 
     def test_diagonal(self):
-        from market_analyzer.models.opportunity import (
+        from income_desk.models.opportunity import (
             RiskProfile, StructureType, get_structure_profile,
         )
         p = get_structure_profile(StructureType.DIAGONAL)
         assert p.risk_profile == RiskProfile.DEFINED
 
     def test_fallback_unknown(self):
-        from market_analyzer.models.opportunity import get_structure_profile
+        from income_desk.models.opportunity import get_structure_profile
         p = get_structure_profile("some_unknown_type")
         assert p.payoff_graph == "???"
 
     def test_all_structure_types_have_profiles(self):
         """Every StructureType should return a profile (not the fallback '???')."""
-        from market_analyzer.models.opportunity import (
+        from income_desk.models.opportunity import (
             OrderSide, StructureType, get_structure_profile,
         )
         for st in StructureType:
@@ -739,7 +739,7 @@ class TestStructureProfile:
             assert p.payoff_graph != "???", f"No profile for {st}"
 
     def test_double_calendar(self):
-        from market_analyzer.models.opportunity import (
+        from income_desk.models.opportunity import (
             RiskProfile, StructureType, get_structure_profile,
         )
         p = get_structure_profile(StructureType.DOUBLE_CALENDAR)
@@ -748,7 +748,7 @@ class TestStructureProfile:
         assert "4-leg" in p.label
 
     def test_exports(self):
-        from market_analyzer import RiskProfile, StructureProfile, get_structure_profile
+        from income_desk import RiskProfile, StructureProfile, get_structure_profile
         assert RiskProfile.DEFINED == "defined"
         assert RiskProfile.UNDEFINED == "undefined"
 

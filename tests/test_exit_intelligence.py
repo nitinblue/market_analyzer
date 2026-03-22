@@ -1,7 +1,7 @@
 """Tests for exit intelligence models and functions."""
 
 import pytest
-from market_analyzer.models.exit import RegimeStop, TimeAdjustedTarget, ThetaDecayResult
+from income_desk.models.exit import RegimeStop, TimeAdjustedTarget, ThetaDecayResult
 
 
 class TestExitModels:
@@ -86,7 +86,7 @@ class TestExitModels:
         assert "profit_to_theta_ratio" in d
 
 
-from market_analyzer.features.exit_intelligence import (
+from income_desk.features.exit_intelligence import (
     compute_regime_stop,
     compute_remaining_theta_value,
     compute_time_adjusted_target,
@@ -304,7 +304,7 @@ class TestComputeRemainingThetaValue:
         assert result.recommendation == "hold"
 
 
-from market_analyzer.trade_lifecycle import monitor_exit_conditions
+from income_desk.trade_lifecycle import monitor_exit_conditions
 
 
 class TestMonitorExitWithRegimeStop:
@@ -400,21 +400,21 @@ class TestMonitorExitWithTimeAdjustedTarget:
 
 class TestReformExports:
     def test_exit_models_importable(self) -> None:
-        from market_analyzer import RegimeStop, TimeAdjustedTarget, ThetaDecayResult
+        from income_desk import RegimeStop, TimeAdjustedTarget, ThetaDecayResult
         assert RegimeStop is not None
 
     def test_exit_functions_importable(self) -> None:
-        from market_analyzer import (
+        from income_desk import (
             compute_regime_stop, compute_time_adjusted_target, compute_remaining_theta_value,
         )
         assert callable(compute_regime_stop)
 
     def test_dte_optimizer_importable(self) -> None:
-        from market_analyzer import DTERecommendation, select_optimal_dte
+        from income_desk import DTERecommendation, select_optimal_dte
         assert callable(select_optimal_dte)
 
     def test_sizing_extensions_importable(self) -> None:
-        from market_analyzer import (
+        from income_desk import (
             CorrelationAdjustment, RegimeMarginEstimate,
             compute_pairwise_correlation, adjust_kelly_for_correlation,
             compute_regime_adjusted_bp, compute_position_size,
@@ -423,9 +423,9 @@ class TestReformExports:
         assert callable(compute_position_size)
 
     def test_iv_rank_importable(self) -> None:
-        from market_analyzer import IVRankQuality, compute_iv_rank_quality
+        from income_desk import IVRankQuality, compute_iv_rank_quality
         assert callable(compute_iv_rank_quality)
 
     def test_adjustment_tracking_importable(self) -> None:
-        from market_analyzer import AdjustmentOutcome, AdjustmentEffectiveness
+        from income_desk import AdjustmentOutcome, AdjustmentEffectiveness
         assert AdjustmentOutcome is not None

@@ -4,10 +4,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from market_analyzer.features.pipeline import compute_features
-from market_analyzer.hmm.trainer import HMMTrainer
-from market_analyzer.models.features import FeatureConfig
-from market_analyzer.models.regime import RegimeConfig
+from income_desk.features.pipeline import compute_features
+from income_desk.hmm.trainer import HMMTrainer
+from income_desk.models.features import FeatureConfig
+from income_desk.models.regime import RegimeConfig
 
 
 def _make_ohlcv(

@@ -3,12 +3,12 @@
 import pytest
 from datetime import date
 
-from market_analyzer.broker.base import (
+from income_desk.broker.base import (
     BrokerSession,
     MarketDataProvider,
     MarketMetricsProvider,
 )
-from market_analyzer.models.quotes import MarketMetrics, OptionQuote
+from income_desk.models.quotes import MarketMetrics, OptionQuote
 
 
 # --- ABCs are truly abstract ---

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from market_analyzer.features.desk_management import (
+from income_desk.features.desk_management import (
     compute_desk_risk_limits,
     compute_instrument_risk,
     evaluate_desk_health,
@@ -11,7 +11,7 @@ from market_analyzer.features.desk_management import (
     recommend_desk_structure,
     suggest_desk_for_trade,
 )
-from market_analyzer.models.portfolio import (
+from income_desk.models.portfolio import (
     DeskHealth,
     PortfolioAllocation,
     PortfolioAssetAllocation,

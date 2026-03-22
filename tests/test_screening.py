@@ -5,14 +5,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from market_analyzer.features.screening import (
+from income_desk.features.screening import (
     screen_breakout,
     screen_income,
     screen_mean_reversion,
     screen_momentum,
 )
-from market_analyzer.models.regime import RegimeID, RegimeResult, TrendDirection
-from market_analyzer.service.screening import AVAILABLE_SCREENS, ScreeningResult, ScreeningService
+from income_desk.models.regime import RegimeID, RegimeResult, TrendDirection
+from income_desk.service.screening import AVAILABLE_SCREENS, ScreeningResult, ScreeningService
 
 
 def _make_regime(regime_id: RegimeID = RegimeID.R1_LOW_VOL_MR) -> RegimeResult:
@@ -29,7 +29,7 @@ def _make_regime(regime_id: RegimeID = RegimeID.R1_LOW_VOL_MR) -> RegimeResult:
 
 class TestScreeningFunctions:
     def test_screen_breakout_passes_r3(self, sample_ohlcv_trending):
-        from market_analyzer.features.technicals import compute_technicals
+        from income_desk.features.technicals import compute_technicals
 
         regime = _make_regime(RegimeID.R3_LOW_VOL_TREND)
         technicals = compute_technicals(sample_ohlcv_trending, "TEST")
@@ -39,7 +39,7 @@ class TestScreeningFunctions:
         assert isinstance(reason, str)
 
     def test_screen_momentum_basic(self, sample_ohlcv_trending):
-        from market_analyzer.features.technicals import compute_technicals
+        from income_desk.features.technicals import compute_technicals
 
         regime = _make_regime(RegimeID.R3_LOW_VOL_TREND)
         technicals = compute_technicals(sample_ohlcv_trending, "TEST")
@@ -48,7 +48,7 @@ class TestScreeningFunctions:
         assert 0.0 <= score <= 1.0
 
     def test_screen_mean_reversion_basic(self, sample_ohlcv_choppy):
-        from market_analyzer.features.technicals import compute_technicals
+        from income_desk.features.technicals import compute_technicals
 
         regime = _make_regime(RegimeID.R2_HIGH_VOL_MR)
         technicals = compute_technicals(sample_ohlcv_choppy, "TEST")
@@ -57,7 +57,7 @@ class TestScreeningFunctions:
         assert 0.0 <= score <= 1.0
 
     def test_screen_income_r1(self, sample_ohlcv_choppy):
-        from market_analyzer.features.technicals import compute_technicals
+        from income_desk.features.technicals import compute_technicals
 
         regime = _make_regime(RegimeID.R1_LOW_VOL_MR)
         technicals = compute_technicals(sample_ohlcv_choppy, "TEST")
@@ -75,8 +75,8 @@ class TestScreeningService:
             svc.scan(["TEST"])
 
     def test_scan_with_mock(self, sample_ohlcv_mixed, tmp_path):
-        from market_analyzer.service.regime import RegimeService
-        from market_analyzer.service.technical import TechnicalService
+        from income_desk.service.regime import RegimeService
+        from income_desk.service.technical import TechnicalService
 
         regime_svc = RegimeService(model_dir=tmp_path / "models")
         tech_svc = TechnicalService()

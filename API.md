@@ -1,4 +1,4 @@
-# market_analyzer API Reference
+# income_desk API Reference
 
 Complete API reference for cotrader, eTrading SaaS, and external consumers.
 
@@ -13,7 +13,7 @@ pip install -e ".[dev]"
 ## Quick Start
 
 ```python
-from market_analyzer import MarketAnalyzer, DataService
+from income_desk import MarketAnalyzer, DataService
 
 ma = MarketAnalyzer(data_service=DataService())
 
@@ -31,7 +31,7 @@ All services are accessible as attributes of `MarketAnalyzer`.
 ## Package Structure
 
 ```
-market_analyzer/
+income_desk/
 ├── models/              # Pydantic data models (no logic)
 │   ├── vol_surface.py       # VolatilitySurface, TermStructurePoint, SkewSlice
 │   └── opportunity.py       # Verdict, HardStop, OpportunitySignal, all opportunity models
@@ -146,7 +146,7 @@ Available screens: `breakout`, `momentum`, `mean_reversion`, `income`
 ### Q2: Is the Entry Confirmed? — `ma.entry`
 
 ```python
-from market_analyzer import EntryTriggerType
+from income_desk import EntryTriggerType
 
 result = ma.entry.confirm("SPY", EntryTriggerType.BREAKOUT_CONFIRMED)
 # Returns: EntryConfirmation
@@ -378,7 +378,7 @@ All option play assessors return a consistent structure: `verdict` (GO/CAUTION/N
 ```python
 bo = ma.opportunity.assess_breakout("SPY")       # BreakoutOpportunity
 mo = ma.opportunity.assess_momentum("SPY")       # MomentumOpportunity
-# Mean reversion: from market_analyzer import assess_mean_reversion
+# Mean reversion: from income_desk import assess_mean_reversion
 ```
 
 #### ORB Setup — `ma.opportunity.assess_orb()` / `assess_orb()`
@@ -393,7 +393,7 @@ regime alignment, RSI, and VWAP to determine if the ORB presents a tradeable set
 orb = ma.opportunity.assess_orb("SPY", intraday=intraday_df)
 
 # Via pure function (direct call with pre-computed data):
-from market_analyzer import assess_orb
+from income_desk import assess_orb
 orb = assess_orb("SPY", regime, technicals, orb=orb_data, phase=phase)
 
 # Returns: ORBSetupOpportunity
@@ -429,7 +429,7 @@ orb.summary               # str
 Consolidated price structure pattern detection (extracted from technicals.py):
 
 ```python
-from market_analyzer.features.patterns import (
+from income_desk.features.patterns import (
     compute_vcp,           # Volatility Contraction Pattern
     compute_order_blocks,  # Order Blocks (smart money demand/supply zones)
     compute_fair_value_gaps, # Fair Value Gaps (3-candle imbalances)
@@ -597,7 +597,7 @@ zd = ma.opportunity.assess_zero_dte("SPY", intraday=intraday_df)  # with ORB dat
 lo = ma.opportunity.assess_leap("SPY")            # LEAPOpportunity
 
 # Earnings play (direct import):
-from market_analyzer import assess_earnings_play
+from income_desk import assess_earnings_play
 ```
 
 #### Common Output Pattern
@@ -628,7 +628,7 @@ sig.description           # str
 Every assessor (option plays, setups, 0DTE, LEAP, earnings) includes a `trade_spec` when verdict is GO or CAUTION. `None` for NO_GO.
 
 ```python
-from market_analyzer import LegAction  # BTO, STO
+from income_desk import LegAction  # BTO, STO
 
 ic = ma.opportunity.assess_iron_condor("SPY")
 if ic.trade_spec:
@@ -693,7 +693,7 @@ if ic.trade_spec:
 All assessors are also available as pure functions (no service dependency):
 
 ```python
-from market_analyzer import (
+from income_desk import (
     assess_iron_condor,
     assess_iron_butterfly,
     assess_calendar,
@@ -852,7 +852,7 @@ q.theta                  # float | None
 q.vega                   # float | None
 
 # Specific leg quotes (broker only — returns [] without broker)
-from market_analyzer import LegSpec
+from income_desk import LegSpec
 quotes = ma.quotes.get_leg_quotes(legs, ticker="SPY")
 # Returns: list[OptionQuote]
 
@@ -919,7 +919,7 @@ m.earnings_date          # date | None
 All DXLink subscriptions use streamer symbols: `.{TICKER}{YYMMDD}{C|P}{STRIKE}`
 
 ```python
-from market_analyzer.broker.tastytrade.symbols import (
+from income_desk.broker.tastytrade.symbols import (
     build_streamer_symbol,     # ("SPY", date(2026,3,20), "put", 580) → ".SPY260320P580"
     parse_streamer_symbol,     # ".SPY260320P580" → ParsedSymbol(ticker, exp, type, strike)
     leg_to_streamer_symbol,    # (ticker, LegSpec) → ".SPY260320P580"
@@ -933,7 +933,7 @@ from market_analyzer.broker.tastytrade.symbols import (
 Low-level async functions for direct DXLink access (used by TastyTradeMarketData internally):
 
 ```python
-from market_analyzer.broker.tastytrade.dxlink import (
+from income_desk.broker.tastytrade.dxlink import (
     fetch_quotes,              # bid/ask for list of streamer symbols
     fetch_greeks,              # delta/gamma/theta/vega/iv for streamer symbols
     fetch_underlying_price,    # equity mid price for ticker
@@ -942,7 +942,7 @@ from market_analyzer.broker.tastytrade.dxlink import (
     classify_error,            # Exception → DXLinkError enum
     DXLinkError,               # GRANT_REVOKED, TIMEOUT, CONNECTION_FAILED, NO_DATA, UNKNOWN
 )
-from market_analyzer.broker.tastytrade._async import run_sync
+from income_desk.broker.tastytrade._async import run_sync
 
 # Example: fetch quotes for specific symbols
 quotes = run_sync(fetch_quotes(data_session, [".SPY260320P580", ".SPY260320C600"]))
@@ -1045,15 +1045,15 @@ signal = ma.intraday.check_entry_window("SPY")
 Two connection modes: standalone (CLI) and embedded (SaaS). Both return a 3-tuple.
 
 ```python
-# Mode 1: Standalone — market_analyzer authenticates
-from market_analyzer.broker.tastytrade import connect_tastytrade
+# Mode 1: Standalone — income_desk authenticates
+from income_desk.broker.tastytrade import connect_tastytrade
 market_data, metrics, account = connect_tastytrade(is_paper=True)
 ma = MarketAnalyzer(data_service=DataService(),
                     market_data=market_data, market_metrics=metrics,
                     account_provider=account)
 
 # Mode 2: SaaS — caller passes pre-authenticated sessions (eTrading pattern)
-from market_analyzer.broker.tastytrade import connect_from_sessions
+from income_desk.broker.tastytrade import connect_from_sessions
 market_data, metrics, account = connect_from_sessions(sdk_session, data_session)
 ma = MarketAnalyzer(data_service=DataService(),
                     market_data=market_data, market_metrics=metrics,
@@ -1079,7 +1079,7 @@ All DXLink calls are async. `run_sync()` bridges to sync callers:
 - **No event loop poisoning**: Reuses loop (unlike `asyncio.run()` which closes it)
 
 ```python
-from market_analyzer.broker.tastytrade._async import run_sync
+from income_desk.broker.tastytrade._async import run_sync
 
 # Works in both sync CLI and async FastAPI contexts
 result = run_sync(some_async_coroutine(), timeout=15)
@@ -1088,7 +1088,7 @@ result = run_sync(some_async_coroutine(), timeout=15)
 ### Data Service — `ma.data`
 
 ```python
-from market_analyzer import DataService
+from income_desk import DataService
 ds = DataService()
 
 df = ds.get_ohlcv("SPY")              # pd.DataFrame (OHLCV)
@@ -1139,7 +1139,7 @@ analyzer-cli                    # US market (default)
 analyzer-cli --market india     # India market
 
 # Or run without installing:
-.venv_312/Scripts/python -m market_analyzer.cli.interactive
+.venv_312/Scripts/python -m income_desk.cli.interactive
 ```
 
 ### Commands
@@ -1200,7 +1200,7 @@ Aliases: `ic` = iron_condor, `ifly` = iron_butterfly, `cal` = calendar, `diag` =
 
 ## Configuration
 
-Override defaults via `~/.market_analyzer/config.yaml`:
+Override defaults via `~/.income_desk/config.yaml`:
 
 ```yaml
 strategy:

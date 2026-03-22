@@ -1,12 +1,12 @@
 """Tests for data trust framework."""
 import pytest
-from market_analyzer.models.transparency import (
+from income_desk.models.transparency import (
     DataSource,
     DataTrust,
     DegradedField,
     TrustLevel,
 )
-from market_analyzer.features.data_trust import compute_data_trust
+from income_desk.features.data_trust import compute_data_trust
 
 
 class TestDataTrustModel:
@@ -149,7 +149,7 @@ class TestComputeDataTrust:
 
     def test_data_gaps_reduce_trust(self):
         """Each data gap subtracts from trust."""
-        from market_analyzer.models.transparency import DataGap
+        from income_desk.models.transparency import DataGap
         gaps = [DataGap(field="x", reason="missing", impact="high") for _ in range(3)]
         no_gaps = compute_data_trust(has_broker=True, regime_confidence=0.90)
         with_gaps = compute_data_trust(has_broker=True, regime_confidence=0.90, data_gaps=gaps)
@@ -177,7 +177,7 @@ class TestComputeDataTrust:
 
     def test_max_gap_penalty_capped_at_015(self):
         """Gap penalty is capped at 0.15 regardless of gap count."""
-        from market_analyzer.models.transparency import DataGap
+        from income_desk.models.transparency import DataGap
         many_gaps = [DataGap(field=f"g{i}", reason="r", impact="h") for i in range(10)]
         few_gaps = [DataGap(field=f"g{i}", reason="r", impact="h") for i in range(3)]
         t_many = compute_data_trust(has_broker=True, regime_confidence=0.90, data_gaps=many_gaps)
@@ -248,8 +248,8 @@ class TestComputeDataTrust:
             assert 0.0 <= t.trust_score <= 1.0
 
 
-from market_analyzer.models.transparency import ContextGap, TrustReport
-from market_analyzer.features.data_trust import compute_context_quality, compute_trust_report
+from income_desk.models.transparency import ContextGap, TrustReport
+from income_desk.features.data_trust import compute_context_quality, compute_trust_report
 
 
 class TestContextQuality:
@@ -365,7 +365,7 @@ class TestTrustReport:
         assert "context_gaps" in d
 
 
-from market_analyzer.models.transparency import CalculationMode
+from income_desk.models.transparency import CalculationMode
 
 
 class TestCalculationModes:
@@ -472,7 +472,7 @@ class TestCalculationModes:
         assert standalone.context_score > full.context_score
 
 
-from market_analyzer.models.transparency import FitnessCategory
+from income_desk.models.transparency import FitnessCategory
 
 
 class TestFitnessForPurpose:

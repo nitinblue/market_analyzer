@@ -62,15 +62,15 @@ all = [
 
 [project.scripts]
 # Primary CLI
-income-desk = "market_analyzer.cli.interactive:main"
+income-desk = "income_desk.cli.interactive:main"
 # Legacy aliases (backward compat)
-analyzer-cli = "market_analyzer.cli.interactive:main"
-analyzer-explore = "market_analyzer.cli.explore:main"
-analyzer-plot = "market_analyzer.cli.plot:main"
-analyzer-rank = "market_analyzer.cli.rank:main"
+analyzer-cli = "income_desk.cli.interactive:main"
+analyzer-explore = "income_desk.cli.explore:main"
+analyzer-plot = "income_desk.cli.plot:main"
+analyzer-rank = "income_desk.cli.rank:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["market_analyzer"]
+packages = ["income_desk"]
 
 [tool.pytest.ini_options]
 markers = [

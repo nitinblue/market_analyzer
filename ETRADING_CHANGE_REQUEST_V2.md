@@ -1,4 +1,4 @@
-# eTrading Change Request V2 for market_analyzer
+# eTrading Change Request V2 for income_desk
 # Date: 2026-03-14 | From: eTrading (Session 41)
 # Status: OPEN — Review and implement
 
@@ -22,7 +22,7 @@ MA currently has broker implementations only for TastyTrade. eTrading needs to o
 ### Ask
 Implement the 4 ABCs for each new broker. eTrading will pass pre-authenticated sessions (same pattern as TastyTrade's `connect_from_sessions()`).
 
-#### Dhan (`market_analyzer/broker/dhan/`)
+#### Dhan (`income_desk/broker/dhan/`)
 
 ```python
 def connect_dhan(api_key: str, access_token: str) -> tuple[
@@ -42,7 +42,7 @@ def connect_dhan_from_session(session) -> tuple[...]:
 | AccountProvider | Funds API (`/v2/fundlimit`) | Returns INR. Margin = SEBI peak margin rules. |
 | WatchlistProvider | Dhan watchlists / portfolio holdings | Map to ticker list. |
 
-#### Zerodha (`market_analyzer/broker/zerodha/`)
+#### Zerodha (`income_desk/broker/zerodha/`)
 
 ```python
 def connect_zerodha(api_key: str, access_token: str) -> tuple[
@@ -244,7 +244,7 @@ eTrading needs richer analytics from MA for the Desk Performance page and daily 
 
 #### Sharpe Ratio from outcomes:
 ```python
-from market_analyzer import compute_sharpe
+from income_desk import compute_sharpe
 
 sharpe = compute_sharpe(outcomes: list[TradeOutcome], risk_free_rate: float = 0.05)
 # Returns: SharpeResult(sharpe_ratio, annualized_return, annualized_vol, sortino_ratio)
@@ -252,7 +252,7 @@ sharpe = compute_sharpe(outcomes: list[TradeOutcome], risk_free_rate: float = 0.
 
 #### Profit Factor:
 ```python
-from market_analyzer import compute_profit_factor
+from income_desk import compute_profit_factor
 
 pf = compute_profit_factor(outcomes)
 # Returns: ProfitFactor(gross_wins, gross_losses, profit_factor, avg_win, avg_loss)
@@ -260,7 +260,7 @@ pf = compute_profit_factor(outcomes)
 
 #### Drawdown Analysis:
 ```python
-from market_analyzer import compute_drawdown
+from income_desk import compute_drawdown
 
 dd = compute_drawdown(outcomes)
 # Returns: DrawdownResult(max_drawdown_pct, max_drawdown_dollars, drawdown_duration_days, current_drawdown)
@@ -268,7 +268,7 @@ dd = compute_drawdown(outcomes)
 
 #### Win Rate by Regime:
 ```python
-from market_analyzer import compute_regime_performance
+from income_desk import compute_regime_performance
 
 rp = compute_regime_performance(outcomes)
 # Returns: dict[int, RegimePerf] with win_rate, avg_pnl, trade_count per R1-R4
@@ -322,7 +322,7 @@ Build a `MarketRegistry` or `StaticDataService` in MA that provides market/excha
 See `MARKETS.md` in MA repo for the full reference data that needs to be codified.
 
 ```python
-from market_analyzer import MarketRegistry
+from income_desk import MarketRegistry
 
 registry = MarketRegistry()
 
@@ -489,7 +489,7 @@ eTrading has a new "Board Member" agent (Vidura) that needs to benchmark desk P&
 
 ### Ask
 ```python
-from market_analyzer import compute_benchmark_returns
+from income_desk import compute_benchmark_returns
 
 benchmarks = compute_benchmark_returns(
     tickers=['SPY', 'QQQ', '^NSEI', '^TNX'],
@@ -499,7 +499,7 @@ benchmarks = compute_benchmark_returns(
 # BenchmarkReturn: ticker, label, return_pct, start_price, end_price, period_days
 
 # Alpha calculation:
-from market_analyzer import compute_alpha
+from income_desk import compute_alpha
 alpha = compute_alpha(
     portfolio_return_pct=5.2,
     benchmark_return_pct=3.1,  # SPY
@@ -534,7 +534,7 @@ Vidura needs to proactively identify opportunities the system is NOT currently t
 A **proactive opportunity scanner** that combines MR1-MR4 signals into actionable recommendations:
 
 ```python
-from market_analyzer import scan_vidura_opportunities
+from income_desk import scan_vidura_opportunities
 
 opps = scan_vidura_opportunities(
     scorecards=scorecards,

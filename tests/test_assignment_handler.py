@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import pytest
 
-from market_analyzer.features.assignment_handler import handle_assignment
-from market_analyzer.models.assignment import AssignmentAction, AssignmentType
+from income_desk.features.assignment_handler import handle_assignment
+from income_desk.models.assignment import AssignmentAction, AssignmentType
 
 
 class TestPutAssignment:

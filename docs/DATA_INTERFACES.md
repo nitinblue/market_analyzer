@@ -1,6 +1,6 @@
-# Data Interfaces — How market_analyzer Gets Its Data
+# Data Interfaces — How income_desk Gets Its Data
 
-> When you install market_analyzer, it works out of the box with free data (yfinance). Connect a broker for real-time quotes. Or plug in your own data source.
+> When you install income_desk, it works out of the box with free data (yfinance). Connect a broker for real-time quotes. Or plug in your own data source.
 
 ---
 
@@ -11,7 +11,7 @@ pip install market-analyzer
 ```
 
 ```python
-from market_analyzer import MarketAnalyzer, DataService
+from income_desk import MarketAnalyzer, DataService
 
 ma = MarketAnalyzer(data_service=DataService())
 regime = ma.regime.detect("SPY")      # Downloads 2yr OHLCV from yfinance, trains HMM
@@ -24,7 +24,7 @@ tech = ma.technicals.snapshot("SPY")  # RSI, ATR, Bollinger, MACD, support/resis
 
 ## Data Tiers
 
-market_analyzer has three tiers of data, each adding more capability:
+income_desk has three tiers of data, each adding more capability:
 
 | Tier | Source | Setup | What You Get | Trust Level |
 |------|--------|-------|--------------|-------------|
@@ -63,8 +63,8 @@ DataService.get_ohlcv("SPY")
 ### DataService API
 
 ```python
-from market_analyzer.data.service import DataService
-from market_analyzer.models.data import DataRequest, DataType
+from income_desk.data.service import DataService
+from income_desk.models.data import DataRequest, DataType
 
 ds = DataService()
 
@@ -128,7 +128,7 @@ Tickers prefixed with `$` (DXLink style — `$SPX`) are also resolved correctly.
 
 ### Cache behavior
 
-- **Location:** `~/.market_analyzer/cache/` (legacy: `~/.market_regime/cache/`)
+- **Location:** `~/.income_desk/cache/` (legacy: `~/.market_regime/cache/`)
 - **OHLCV staleness:** 18 hours (configurable via `settings.yaml`)
 - **Options chain staleness:** 4 hours (snapshot, always full refresh — no delta-fetch)
 - **Weekend awareness:** If today is Saturday or Sunday and last cached date is the most recent Friday, OHLCV data is considered fresh. (Options chain does not apply weekend logic.)
@@ -174,12 +174,12 @@ broker:
 
 Credential files are searched in order:
 1. `./tastytrade_broker.yaml`
-2. `~/.market_analyzer/tastytrade_broker.yaml`
+2. `~/.income_desk/tastytrade_broker.yaml`
 3. Relative to the broker package directory
 
 ```python
-from market_analyzer.broker.tastytrade import connect_tastytrade
-from market_analyzer import MarketAnalyzer, DataService
+from income_desk.broker.tastytrade import connect_tastytrade
+from income_desk import MarketAnalyzer, DataService
 
 md, mm, acct, wl = connect_tastytrade(is_paper=False)
 ma = MarketAnalyzer(
@@ -194,7 +194,7 @@ ma = MarketAnalyzer(
 **Option B — SaaS / eTrading (pre-authenticated sessions):**
 
 ```python
-from market_analyzer.broker.tastytrade import connect_from_sessions
+from income_desk.broker.tastytrade import connect_from_sessions
 
 # sdk_session: authenticated tastytrade.Session (REST API)
 # data_session: authenticated tastytrade.Session (DXLink streaming)
@@ -213,7 +213,7 @@ pip install "market-analyzer[zerodha]"
 **Option A — Standalone:**
 
 ```python
-from market_analyzer.broker.zerodha import connect_zerodha
+from income_desk.broker.zerodha import connect_zerodha
 md, mm, acct, wl = connect_zerodha(api_key="...", access_token="...")
 ma = MarketAnalyzer(
     data_service=DataService(),
@@ -230,7 +230,7 @@ Access tokens expire daily. See `zerodha_credentials.yaml.template` for the OAut
 **Option B — SaaS / eTrading:**
 
 ```python
-from market_analyzer.broker.zerodha import connect_zerodha_from_session
+from income_desk.broker.zerodha import connect_zerodha_from_session
 
 # session: pre-authenticated KiteConnect instance
 md, mm, acct, wl = connect_zerodha_from_session(session)
@@ -288,7 +288,7 @@ Without it, those specific checks are skipped — all other analysis still runs.
 
 ## The 5 Broker Interfaces (ABCs)
 
-Every broker implements up to 5 abstract classes, all in `market_analyzer/broker/base.py`. You only need to implement what you intend to use — the others can be omitted.
+Every broker implements up to 5 abstract classes, all in `income_desk/broker/base.py`. You only need to implement what you intend to use — the others can be omitted.
 
 ### 1. `MarketDataProvider` — Live Quotes, Greeks, Intraday
 
@@ -488,7 +488,7 @@ class BrokerSession(ABC):
 The data layer raises typed exceptions so callers can handle failures explicitly.
 
 ```python
-from market_analyzer.data.exceptions import (
+from income_desk.data.exceptions import (
     DataFetchError,      # Provider network/API failure
     InvalidTickerError,  # Ticker not recognized by provider
     CacheError,          # Cache read/write failure
@@ -517,8 +517,8 @@ except DataFetchError as e:
 Use this for Polygon, Alpha Vantage, local files, or any source that returns historical time-series data.
 
 ```python
-from market_analyzer.data.providers.base import DataProvider
-from market_analyzer.models.data import DataRequest, DataType, ProviderType
+from income_desk.data.providers.base import DataProvider
+from income_desk.models.data import DataRequest, DataType, ProviderType
 import pandas as pd
 
 class PolygonProvider(DataProvider):
@@ -544,9 +544,9 @@ class PolygonProvider(DataProvider):
 
 
 # Register alongside default providers
-from market_analyzer import DataService
-from market_analyzer.data.registry import ProviderRegistry
-from market_analyzer.data.cache.parquet_cache import ParquetCache
+from income_desk import DataService
+from income_desk.data.registry import ProviderRegistry
+from income_desk.data.cache.parquet_cache import ParquetCache
 
 registry = ProviderRegistry()
 registry.register(PolygonProvider())
@@ -561,8 +561,8 @@ ma = MarketAnalyzer(data_service=ds)
 For adding Schwab, IBKR, Webull, or any other broker:
 
 ```python
-from market_analyzer.broker.base import MarketDataProvider
-from market_analyzer.models.quotes import OptionQuote
+from income_desk.broker.base import MarketDataProvider
+from income_desk.models.quotes import OptionQuote
 from datetime import date
 import pandas as pd
 
@@ -609,9 +609,9 @@ For research, backtesting, or replaying saved data:
 
 ```python
 from pathlib import Path
-from market_analyzer.data.providers.base import DataProvider
-from market_analyzer.models.data import DataRequest, DataType, ProviderType
-from market_analyzer.data.exceptions import DataFetchError, InvalidTickerError
+from income_desk.data.providers.base import DataProvider
+from income_desk.models.data import DataRequest, DataType, ProviderType
+from income_desk.data.exceptions import DataFetchError, InvalidTickerError
 import pandas as pd
 
 class LocalCSVProvider(DataProvider):
@@ -695,30 +695,30 @@ ds = DataService(registry=registry)
 
 ## Configuration
 
-Settings are loaded from `~/.market_analyzer/settings.yaml` (optional). All defaults work without a config file.
+Settings are loaded from `~/.income_desk/settings.yaml` (optional). All defaults work without a config file.
 
 ```yaml
-# ~/.market_analyzer/settings.yaml
+# ~/.income_desk/settings.yaml
 
 cache:
   staleness_hours: 18.0        # OHLCV cache max age before re-fetch
-  cache_dir: null              # Default: ~/.market_analyzer/cache/
-  model_dir: null              # Default: ~/.market_analyzer/models/
+  cache_dir: null              # Default: ~/.income_desk/cache/
+  model_dir: null              # Default: ~/.income_desk/models/
 ```
 
-The `CacheSettings` class (from `market_analyzer.config`):
+The `CacheSettings` class (from `income_desk.config`):
 
 ```python
 class CacheSettings(BaseModel):
     staleness_hours: float = 18.0
-    cache_dir: str | None = None   # None → ~/.market_analyzer/cache/
-    model_dir: str | None = None   # None → ~/.market_analyzer/models/
+    cache_dir: str | None = None   # None → ~/.income_desk/cache/
+    model_dir: str | None = None   # None → ~/.income_desk/models/
 ```
 
 You can also pass a custom `ParquetCache` directly to `DataService`:
 
 ```python
-from market_analyzer.data.cache.parquet_cache import ParquetCache
+from income_desk.data.cache.parquet_cache import ParquetCache
 
 cache = ParquetCache(
     cache_dir=Path("/custom/cache/path"),
@@ -731,7 +731,7 @@ ds = DataService(cache=cache)
 
 ## Available Data Types
 
-`DataType` (from `market_analyzer.models.data`):
+`DataType` (from `income_desk.models.data`):
 
 | Value | Description | Provider | Cache strategy |
 |-------|-------------|----------|----------------|

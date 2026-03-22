@@ -1,5 +1,5 @@
 """Tests for validation result models."""
-from market_analyzer.validation.models import (
+from income_desk.validation.models import (
     CheckResult, Severity, Suite, ValidationReport,
 )
 from datetime import date

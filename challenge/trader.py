@@ -36,14 +36,14 @@ import io
 if sys.stdout.encoding != "utf-8":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-from market_analyzer import (
+from income_desk import (
     DataService,
     MarketAnalyzer,
     validate_execution_quality,
 )
-from market_analyzer.cli._broker import _styled, connect_broker
-from market_analyzer.models.universe import PRESETS
-from market_analyzer.trade_lifecycle import (
+from income_desk.cli._broker import _styled, connect_broker
+from income_desk.models.universe import PRESETS
+from income_desk.trade_lifecycle import (
     assess_overnight_risk,
     check_income_entry,
     check_trade_health,

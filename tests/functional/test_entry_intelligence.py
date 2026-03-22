@@ -4,36 +4,36 @@ from datetime import date
 
 import pytest
 
-from market_analyzer.features.entry_levels import (
+from income_desk.features.entry_levels import (
     compute_limit_entry_price,
     compute_pullback_levels,
     compute_strike_support_proximity,
     score_entry_level,
     select_skew_optimal_strike,
 )
-from market_analyzer.models.entry import (
+from income_desk.models.entry import (
     ConditionalEntry,
     EntryLevelScore,
     PullbackAlert,
     SkewOptimalStrike,
     StrikeProximityResult,
 )
-from market_analyzer.models.levels import (
+from income_desk.models.levels import (
     LevelRole,
     LevelSource,
     LevelsAnalysis,
     PriceLevel,
     TradeDirection,
 )
-from market_analyzer.models.opportunity import Verdict
-from market_analyzer.opportunity.option_plays.iron_condor import assess_iron_condor
-from market_analyzer.validation.daily_readiness import run_daily_checks
-from market_analyzer.validation.models import Severity
+from income_desk.models.opportunity import Verdict
+from income_desk.opportunity.option_plays.iron_condor import assess_iron_condor
+from income_desk.validation.daily_readiness import run_daily_checks
+from income_desk.validation.models import Severity
 
 
 class TestFullEntryPipeline:
     def test_r1_ic_with_strong_levels_passes_all(self, r1_regime, normal_vol_surface) -> None:
-        from market_analyzer.models.technicals import (
+        from income_desk.models.technicals import (
             BollingerBands, MACDData, MovingAverages, RSIData,
             StochasticData, SupportResistance, TechnicalSnapshot,
             MarketPhase, PhaseIndicator,
@@ -119,7 +119,7 @@ class TestSkewOptimalWithRealVolSurface:
 
 class TestEntryScoreWithExtremes:
     def test_oversold_bounce_entry(self) -> None:
-        from market_analyzer.models.technicals import (
+        from income_desk.models.technicals import (
             BollingerBands, MACDData, MovingAverages, RSIData,
             StochasticData, SupportResistance, TechnicalSnapshot,
             MarketPhase, PhaseIndicator,

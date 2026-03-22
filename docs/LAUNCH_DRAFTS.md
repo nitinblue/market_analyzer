@@ -132,7 +132,7 @@ MIT licensed. Works with 6 brokers. 2300+ tests. Built by a retail theta gang tr
 ```python
 pip install income-desk
 
-from market_analyzer import MarketAnalyzer, DataService
+from income_desk import MarketAnalyzer, DataService
 ma = MarketAnalyzer(data_service=DataService())
 regime = ma.regime.detect("SPY")  # R1/R2/R3/R4
 ```

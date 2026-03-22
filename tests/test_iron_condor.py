@@ -4,17 +4,17 @@ from datetime import date, timedelta
 
 import pytest
 
-from market_analyzer.models.regime import RegimeID, RegimeResult
-from market_analyzer.models.technicals import (
+from income_desk.models.regime import RegimeID, RegimeResult
+from income_desk.models.technicals import (
     BollingerBands, MACDData, MovingAverages, RSIData,
     StochasticData, SupportResistance, TechnicalSnapshot,
     MarketPhase, PhaseIndicator,
 )
-from market_analyzer.models.vol_surface import (
+from income_desk.models.vol_surface import (
     SkewSlice, TermStructurePoint, VolatilitySurface,
 )
-from market_analyzer.models.opportunity import Verdict
-from market_analyzer.opportunity.option_plays.iron_condor import (
+from income_desk.models.opportunity import Verdict
+from income_desk.opportunity.option_plays.iron_condor import (
     IronCondorOpportunity, IronCondorStrategy, assess_iron_condor,
 )
 

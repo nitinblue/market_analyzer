@@ -1,7 +1,7 @@
 """Tests for Kelly criterion position sizing."""
 
 import pytest
-from market_analyzer.features.position_sizing import (
+from income_desk.features.position_sizing import (
     KellyResult,
     PortfolioExposure,
     compute_kelly_fraction,
@@ -171,7 +171,7 @@ class TestKellyPositionSize:
 
 class TestExports:
     def test_kelly_importable_from_top_level(self) -> None:
-        from market_analyzer import (
+        from income_desk import (
             KellyResult,
             KellyPortfolioExposure,
             compute_kelly_fraction,
@@ -185,7 +185,7 @@ class TestExports:
 # Task 4: Correlation + Margin-Regime Sizing
 # ---------------------------------------------------------------------------
 
-from market_analyzer.features.position_sizing import (  # noqa: E402
+from income_desk.features.position_sizing import (  # noqa: E402
     CorrelationAdjustment,
     RegimeMarginEstimate,
     compute_pairwise_correlation,
@@ -357,7 +357,7 @@ class TestRegimeAdjustedBP:
 # Task 5: Unified Position Sizing
 # ---------------------------------------------------------------------------
 
-from market_analyzer.features.position_sizing import compute_position_size  # noqa: E402
+from income_desk.features.position_sizing import compute_position_size  # noqa: E402
 
 
 class TestUnifiedPositionSize:
@@ -440,8 +440,8 @@ class TestUnifiedPositionSize:
 
 
 from datetime import date as dt_date  # noqa: E402
-from market_analyzer.models.adjustment import AdjustmentOutcome, AdjustmentEffectiveness  # noqa: E402
-from market_analyzer.features.position_sizing import analyze_adjustment_effectiveness  # noqa: E402
+from income_desk.models.adjustment import AdjustmentOutcome, AdjustmentEffectiveness  # noqa: E402
+from income_desk.features.position_sizing import analyze_adjustment_effectiveness  # noqa: E402
 
 
 class TestAdjustmentEffectiveness:
@@ -534,8 +534,8 @@ class TestAdjustmentEffectiveness:
 
 from datetime import date, timedelta
 
-from market_analyzer.features.position_sizing import MarginAnalysis, compute_margin_analysis
-from market_analyzer.models.opportunity import LegAction, LegSpec, OrderSide, StructureType, TradeSpec
+from income_desk.features.position_sizing import MarginAnalysis, compute_margin_analysis
+from income_desk.models.opportunity import LegAction, LegSpec, OrderSide, StructureType, TradeSpec
 
 
 def _make_ic_trade_spec(

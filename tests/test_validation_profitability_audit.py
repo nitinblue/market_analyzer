@@ -2,14 +2,14 @@
 from datetime import date, timedelta
 import pytest
 
-from market_analyzer.trade_spec_factory import build_iron_condor
-from market_analyzer.validation.models import Severity
-from market_analyzer.validation.profitability_audit import (
+from income_desk.trade_spec_factory import build_iron_condor
+from income_desk.validation.models import Severity
+from income_desk.validation.profitability_audit import (
     check_commission_drag,
     check_fill_quality,
     check_margin_efficiency,
 )
-from market_analyzer.trade_lifecycle import compute_income_yield
+from income_desk.trade_lifecycle import compute_income_yield
 
 
 def _ic_spec():

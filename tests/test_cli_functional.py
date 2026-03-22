@@ -4,7 +4,7 @@ import pytest
 
 def test_do_validate_no_args_prints_usage(capsys) -> None:
     """do_validate with no args prints usage without crashing."""
-    from market_analyzer.cli.interactive import AnalyzerCLI
+    from income_desk.cli.interactive import AnalyzerCLI
     shell = AnalyzerCLI.__new__(AnalyzerCLI)
     shell.do_validate("")
     out = capsys.readouterr().out
@@ -13,7 +13,7 @@ def test_do_validate_no_args_prints_usage(capsys) -> None:
 
 def test_do_validate_invalid_suite_prints_error(capsys) -> None:
     """--suite with unknown value prints error without crashing."""
-    from market_analyzer.cli.interactive import AnalyzerCLI
+    from income_desk.cli.interactive import AnalyzerCLI
     shell = AnalyzerCLI.__new__(AnalyzerCLI)
     shell.do_validate("SPY --suite bad_value")
     out = capsys.readouterr().out

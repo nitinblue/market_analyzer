@@ -4,13 +4,13 @@ from __future__ import annotations
 import pytest
 from datetime import date
 
-from market_analyzer.features.assignment_handler import (
+from income_desk.features.assignment_handler import (
     analyze_cash_secured_put,
     analyze_covered_call,
 )
-from market_analyzer.features.position_sizing import compute_margin_buffer
-from market_analyzer.models.assignment import CSPIntent
-from market_analyzer.models.opportunity import LegAction, LegSpec, OrderSide, StructureType, TradeSpec
+from income_desk.features.position_sizing import compute_margin_buffer
+from income_desk.models.assignment import CSPIntent
+from income_desk.models.opportunity import LegAction, LegSpec, OrderSide, StructureType, TradeSpec
 
 
 # ---------------------------------------------------------------------------
@@ -483,9 +483,9 @@ class TestMarginBuffer:
     def test_unknown_structure_falls_back_to_defined(self):
         ts = _make_ts(structure_type="iron_condor")
         # Manually override structure_type via dict trick to test fallback
-        from market_analyzer.features.position_sizing import _MARGIN_BUFFERS
+        from income_desk.features.position_sizing import _MARGIN_BUFFERS
         # "iron_condor" is known, so use an unknown key via direct call
-        from market_analyzer.features.position_sizing import MarginBuffer, _REGIME_BUFFER_MULT
+        from income_desk.features.position_sizing import MarginBuffer, _REGIME_BUFFER_MULT
         # Test the fallback: unknown structure should use default (defined, 10%)
         risk_cat, base_pct = _MARGIN_BUFFERS.get("nonexistent_structure_xyz", ("defined", 0.10))
         assert risk_cat == "defined"

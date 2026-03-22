@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 from datetime import date, timedelta
 
-from market_analyzer.adapters.simulated import (
+from income_desk.adapters.simulated import (
     SimulatedMarketData,
     SimulatedMetrics,
     create_ideal_income,
@@ -22,7 +22,7 @@ from market_analyzer.adapters.simulated import (
     _get_strike_step,
     _round_to_step,
 )
-from market_analyzer.models.opportunity import (
+from income_desk.models.opportunity import (
     LegAction,
     LegSpec,
     StructureType,
@@ -276,7 +276,7 @@ class TestPresetCreditLevels:
 
     def test_income_higher_credits_than_calm(self):
         """Elevated-IV income preset should produce richer credits than low-IV calm."""
-        from market_analyzer.adapters.simulated import create_calm_market
+        from income_desk.adapters.simulated import create_calm_market
         calm = create_calm_market()
         income = create_ideal_income()
 
@@ -311,8 +311,8 @@ class TestValidationGates:
 
     def test_ideal_income_minimum_credit_gate_passes(self):
         """The minimum_credit pre-check must pass for income preset."""
-        from market_analyzer.validation.daily_readiness import run_daily_checks
-        from market_analyzer.validation.models import Severity
+        from income_desk.validation.daily_readiness import run_daily_checks
+        from income_desk.validation.models import Severity
 
         sim = create_ideal_income()
         price = sim.get_underlying_price("SPY")
@@ -346,8 +346,8 @@ class TestValidationGates:
 
     def test_recovery_minimum_credit_gate_passes(self):
         """Post-crash recovery should also pass the minimum credit gate."""
-        from market_analyzer.validation.daily_readiness import run_daily_checks
-        from market_analyzer.validation.models import Severity
+        from income_desk.validation.daily_readiness import run_daily_checks
+        from income_desk.validation.models import Severity
 
         sim = create_post_crash_recovery()
         price = sim.get_underlying_price("SPY")
@@ -380,7 +380,7 @@ class TestValidationGates:
 
     def test_pop_computable_for_income_preset(self):
         """POP estimate must be computable (not None) for income preset."""
-        from market_analyzer.trade_lifecycle import estimate_pop
+        from income_desk.trade_lifecycle import estimate_pop
 
         sim = create_ideal_income()
         price = sim.get_underlying_price("SPY")
@@ -403,7 +403,7 @@ class TestValidationGates:
 
     def test_pop_improves_regime_r1_vs_r4(self):
         """R1 regime should produce higher POP than R4 for same IC structure."""
-        from market_analyzer.trade_lifecycle import estimate_pop
+        from income_desk.trade_lifecycle import estimate_pop
 
         price = 560.0
         trade_spec = _build_ic_trade_spec("SPY", price)

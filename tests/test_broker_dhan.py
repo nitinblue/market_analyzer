@@ -9,7 +9,7 @@ from datetime import date
 
 import pytest
 
-from market_analyzer.models.quotes import AccountBalance, MarketMetrics, OptionQuote
+from income_desk.models.quotes import AccountBalance, MarketMetrics, OptionQuote
 
 
 # ---------------------------------------------------------------------------
@@ -19,18 +19,18 @@ from market_analyzer.models.quotes import AccountBalance, MarketMetrics, OptionQ
 class TestDhanImport:
     def test_module_importable(self) -> None:
         """The broker module imports cleanly without dhanhq SDK present."""
-        import market_analyzer.broker.dhan  # Should not raise
+        import income_desk.broker.dhan  # Should not raise
 
     def test_submodules_importable(self) -> None:
         """All four submodules import without errors."""
-        import market_analyzer.broker.dhan.account
-        import market_analyzer.broker.dhan.market_data
-        import market_analyzer.broker.dhan.metrics
-        import market_analyzer.broker.dhan.watchlist
+        import income_desk.broker.dhan.account
+        import income_desk.broker.dhan.market_data
+        import income_desk.broker.dhan.metrics
+        import income_desk.broker.dhan.watchlist
 
     def test_missing_sdk_raises_helpful_error(self) -> None:
         """connect_dhan raises ImportError with pip command when SDK absent."""
-        from market_analyzer.broker.dhan import connect_dhan
+        from income_desk.broker.dhan import connect_dhan
         try:
             connect_dhan("fake_id", "fake_token")
         except ImportError as e:
@@ -45,7 +45,7 @@ class TestDhanImport:
         try:
             from dhanhq import DhanContext  # noqa: F401
             # SDK is installed — test credential validation
-            from market_analyzer.broker.dhan import connect_dhan
+            from income_desk.broker.dhan import connect_dhan
             with pytest.raises(ValueError, match="DHAN_CLIENT_ID"):
                 connect_dhan("", "")
         except ImportError:
@@ -59,7 +59,7 @@ class TestDhanImport:
 class TestDhanConstants:
     def test_scrip_codes_defined(self) -> None:
         """Known index scrip codes match DhanHQ documentation."""
-        from market_analyzer.broker.dhan.market_data import _SCRIP_CODES
+        from income_desk.broker.dhan.market_data import _SCRIP_CODES
         assert _SCRIP_CODES["NIFTY"] == 13
         assert _SCRIP_CODES["BANKNIFTY"] == 25
         assert _SCRIP_CODES["FINNIFTY"] == 27
@@ -67,7 +67,7 @@ class TestDhanConstants:
 
     def test_lot_sizes_defined(self) -> None:
         """India NSE index lot sizes match exchange specifications."""
-        from market_analyzer.broker.dhan.market_data import _LOT_SIZES
+        from income_desk.broker.dhan.market_data import _LOT_SIZES
         assert _LOT_SIZES["NIFTY"] == 25
         assert _LOT_SIZES["BANKNIFTY"] == 15
         assert _LOT_SIZES["FINNIFTY"] == 25
@@ -75,7 +75,7 @@ class TestDhanConstants:
 
     def test_european_exercise_lot_sizes(self) -> None:
         """All India index options are European — lot sizes must be defined."""
-        from market_analyzer.broker.dhan.market_data import _LOT_SIZES, _SCRIP_CODES
+        from income_desk.broker.dhan.market_data import _LOT_SIZES, _SCRIP_CODES
         # Every scrip code must have a corresponding lot size
         for ticker in _SCRIP_CODES:
             assert ticker in _LOT_SIZES, f"{ticker} missing from _LOT_SIZES"
@@ -92,28 +92,28 @@ class _MockClient:
 
 class TestDhanProviderProperties:
     def test_provider_name(self) -> None:
-        from market_analyzer.broker.dhan.market_data import DhanMarketData
+        from income_desk.broker.dhan.market_data import DhanMarketData
         md = DhanMarketData(_MockClient())
         assert md.provider_name == "dhan"
 
     def test_currency_inr(self) -> None:
-        from market_analyzer.broker.dhan.market_data import DhanMarketData
+        from income_desk.broker.dhan.market_data import DhanMarketData
         md = DhanMarketData(_MockClient())
         assert md.currency == "INR"
 
     def test_timezone_india(self) -> None:
-        from market_analyzer.broker.dhan.market_data import DhanMarketData
+        from income_desk.broker.dhan.market_data import DhanMarketData
         md = DhanMarketData(_MockClient())
         assert md.timezone == "Asia/Kolkata"
 
     def test_lot_size_default_nifty(self) -> None:
-        from market_analyzer.broker.dhan.market_data import DhanMarketData
+        from income_desk.broker.dhan.market_data import DhanMarketData
         md = DhanMarketData(_MockClient())
         assert md.lot_size_default == 25
 
     def test_market_hours_india(self) -> None:
         from datetime import time
-        from market_analyzer.broker.dhan.market_data import DhanMarketData
+        from income_desk.broker.dhan.market_data import DhanMarketData
         md = DhanMarketData(_MockClient())
         open_t, close_t = md.market_hours
         assert open_t == time(9, 15)
@@ -121,7 +121,7 @@ class TestDhanProviderProperties:
 
     def test_rate_limit_conservative(self) -> None:
         """Rate limit should be conservative (1/s) for option chain calls."""
-        from market_analyzer.broker.dhan.market_data import DhanMarketData
+        from income_desk.broker.dhan.market_data import DhanMarketData
         md = DhanMarketData(_MockClient())
         assert md.rate_limit_per_second >= 1
 
@@ -139,14 +139,14 @@ class TestDhanOptionChainParsing:
 
     def test_empty_chain_for_unknown_ticker(self) -> None:
         """Unknown non-numeric ticker returns empty list."""
-        from market_analyzer.broker.dhan.market_data import DhanMarketData
+        from income_desk.broker.dhan.market_data import DhanMarketData
         md = DhanMarketData(self._make_chain_client([]))
         result = md.get_option_chain("UNKNOWN_TICKER_XYZ")
         assert result == []
 
     def test_numeric_ticker_as_scrip_code(self) -> None:
         """Numeric ticker string is treated as scrip code."""
-        from market_analyzer.broker.dhan.market_data import DhanMarketData
+        from income_desk.broker.dhan.market_data import DhanMarketData
         md = DhanMarketData(self._make_chain_client([]))
         # Should not raise — numeric ticker resolves to int scrip code
         result = md.get_option_chain("12345")
@@ -154,7 +154,7 @@ class TestDhanOptionChainParsing:
 
     def test_iv_conversion_from_percentage(self) -> None:
         """Dhan returns IV as percentage (25.5) — MA stores decimal (0.255)."""
-        from market_analyzer.broker.dhan.market_data import DhanMarketData
+        from income_desk.broker.dhan.market_data import DhanMarketData
         entry = {
             "strikePrice": 26000,
             "expiryDate": "2026-04-24",
@@ -174,7 +174,7 @@ class TestDhanOptionChainParsing:
 
     def test_greeks_populated(self) -> None:
         """Delta/gamma/theta/vega are populated from chain response."""
-        from market_analyzer.broker.dhan.market_data import DhanMarketData
+        from income_desk.broker.dhan.market_data import DhanMarketData
         entry = {
             "strikePrice": 26000,
             "expiryDate": "2026-04-24",
@@ -197,7 +197,7 @@ class TestDhanOptionChainParsing:
 
     def test_lot_size_set_correctly(self) -> None:
         """Lot size matches _LOT_SIZES for the given ticker."""
-        from market_analyzer.broker.dhan.market_data import DhanMarketData
+        from income_desk.broker.dhan.market_data import DhanMarketData
         entry = {
             "strikePrice": 26000,
             "expiryDate": "2026-04-24",
@@ -216,7 +216,7 @@ class TestDhanOptionChainParsing:
 
     def test_both_call_and_put_parsed(self) -> None:
         """Both CE and PE sides are returned for each strike."""
-        from market_analyzer.broker.dhan.market_data import DhanMarketData
+        from income_desk.broker.dhan.market_data import DhanMarketData
         entry = {
             "strikePrice": 26000,
             "expiryDate": "2026-04-24",
@@ -235,7 +235,7 @@ class TestDhanOptionChainParsing:
 
     def test_mid_price_calculation(self) -> None:
         """Mid is (bid + ask) / 2 when both are available."""
-        from market_analyzer.broker.dhan.market_data import DhanMarketData
+        from income_desk.broker.dhan.market_data import DhanMarketData
         entry = {
             "strikePrice": 26000,
             "expiryDate": "2026-04-24",
@@ -250,7 +250,7 @@ class TestDhanOptionChainParsing:
 
     def test_expiration_filter(self) -> None:
         """Only entries matching the requested expiration are returned."""
-        from market_analyzer.broker.dhan.market_data import DhanMarketData
+        from income_desk.broker.dhan.market_data import DhanMarketData
         entries = [
             {"strikePrice": 26000, "expiryDate": "2026-04-24",
              "ce": {"bid_price": 100, "ask_price": 110, "ltp": 105,
@@ -268,7 +268,7 @@ class TestDhanOptionChainParsing:
 
     def test_iv_zero_returns_none(self) -> None:
         """IV of 0 in response maps to None (not 0.0) in OptionQuote."""
-        from market_analyzer.broker.dhan.market_data import DhanMarketData
+        from income_desk.broker.dhan.market_data import DhanMarketData
         entry = {
             "strikePrice": 26000,
             "expiryDate": "2026-04-24",
@@ -283,7 +283,7 @@ class TestDhanOptionChainParsing:
 
     def test_missing_side_data_skipped(self) -> None:
         """Empty or missing CE/PE data does not produce a quote."""
-        from market_analyzer.broker.dhan.market_data import DhanMarketData
+        from income_desk.broker.dhan.market_data import DhanMarketData
         entry = {
             "strikePrice": 26000,
             "expiryDate": "2026-04-24",
@@ -299,7 +299,7 @@ class TestDhanOptionChainParsing:
 
     def test_api_error_returns_empty_list(self) -> None:
         """If the Dhan API raises an exception, get_option_chain returns []."""
-        from market_analyzer.broker.dhan.market_data import DhanMarketData
+        from income_desk.broker.dhan.market_data import DhanMarketData
 
         class FailingClient:
             def option_chain(self, **kwargs):
@@ -317,7 +317,7 @@ class TestDhanOptionChainParsing:
 class TestDhanAccountBalance:
     def test_balance_mapping_happy_path(self) -> None:
         """get_balance() correctly maps Dhan API response fields."""
-        from market_analyzer.broker.dhan.account import DhanAccount
+        from income_desk.broker.dhan.account import DhanAccount
 
         class MockClient:
             def get_fund_limits(self):
@@ -340,7 +340,7 @@ class TestDhanAccountBalance:
 
     def test_balance_typo_resilience(self) -> None:
         """Both 'availabelBalance' (typo) and 'availableBalance' (correct) work."""
-        from market_analyzer.broker.dhan.account import DhanAccount
+        from income_desk.broker.dhan.account import DhanAccount
 
         class MockClientCorrectSpelling:
             def get_fund_limits(self):
@@ -356,7 +356,7 @@ class TestDhanAccountBalance:
 
     def test_balance_raises_on_empty_response(self) -> None:
         """ConnectionError raised when Dhan returns empty response."""
-        from market_analyzer.broker.dhan.account import DhanAccount
+        from income_desk.broker.dhan.account import DhanAccount
 
         class EmptyClient:
             def get_fund_limits(self):
@@ -368,7 +368,7 @@ class TestDhanAccountBalance:
 
     def test_balance_raises_on_api_error(self) -> None:
         """ConnectionError raised when Dhan API call fails."""
-        from market_analyzer.broker.dhan.account import DhanAccount
+        from income_desk.broker.dhan.account import DhanAccount
 
         class FailingClient:
             def get_fund_limits(self):
@@ -403,7 +403,7 @@ class TestDhanAccountBalance:
 class TestDhanMetrics:
     def test_metrics_iv_from_real_data(self) -> None:
         """ATM IV is correctly extracted from option chain and converted from %."""
-        from market_analyzer.broker.dhan.metrics import DhanMetrics
+        from income_desk.broker.dhan.metrics import DhanMetrics
 
         class MockClient:
             def option_chain(self, under_scrip_code, under_exchange_segment):
@@ -441,7 +441,7 @@ class TestDhanMetrics:
 
     def test_metrics_empty_on_api_error(self) -> None:
         """Metrics returns empty dict when API fails — no exception propagated."""
-        from market_analyzer.broker.dhan.metrics import DhanMetrics
+        from income_desk.broker.dhan.metrics import DhanMetrics
 
         class FailingClient:
             def option_chain(self, **kwargs):
@@ -453,7 +453,7 @@ class TestDhanMetrics:
 
     def test_metrics_liquidity_rating_high_oi(self) -> None:
         """Liquidity rating of 5 assigned for very high OI (> 10M)."""
-        from market_analyzer.broker.dhan.metrics import DhanMetrics
+        from income_desk.broker.dhan.metrics import DhanMetrics
 
         class HighOIClient:
             def option_chain(self, **kwargs):
@@ -485,21 +485,21 @@ class TestDhanMetrics:
 class TestDhanWatchlist:
     def test_create_watchlist_returns_false(self) -> None:
         """create_watchlist always returns False (Dhan has no watchlist API)."""
-        from market_analyzer.broker.dhan.watchlist import DhanWatchlist
+        from income_desk.broker.dhan.watchlist import DhanWatchlist
         wl = DhanWatchlist()
         result = wl.create_watchlist("my_list", ["NIFTY", "BANKNIFTY"])
         assert result is False
 
     def test_list_watchlists_returns_list(self) -> None:
         """list_watchlists returns a non-empty list (at minimum preset names)."""
-        from market_analyzer.broker.dhan.watchlist import DhanWatchlist
+        from income_desk.broker.dhan.watchlist import DhanWatchlist
         wl = DhanWatchlist()
         result = wl.list_watchlists()
         assert isinstance(result, list)
 
     def test_unknown_watchlist_returns_empty(self) -> None:
         """Unknown watchlist name returns empty list without raising."""
-        from market_analyzer.broker.dhan.watchlist import DhanWatchlist
+        from income_desk.broker.dhan.watchlist import DhanWatchlist
         wl = DhanWatchlist()
         result = wl.get_watchlist("nonexistent_watchlist_xyz_123")
         assert result == []
@@ -513,7 +513,7 @@ class TestDhanBrokerDetection:
     def test_has_dhan_creds_env_vars(self) -> None:
         """_has_dhan_creds returns True when DHAN env vars are set."""
         import os
-        from market_analyzer.cli._broker import _has_dhan_creds
+        from income_desk.cli._broker import _has_dhan_creds
 
         # Simulate env vars set
         original_id = os.environ.get("DHAN_CLIENT_ID")
@@ -535,7 +535,7 @@ class TestDhanBrokerDetection:
     def test_has_dhan_creds_yaml_config(self) -> None:
         """_has_dhan_creds returns True when cfg has dhan section."""
         import os
-        from market_analyzer.cli._broker import _has_dhan_creds
+        from income_desk.cli._broker import _has_dhan_creds
 
         # Ensure env vars are clear
         original_id = os.environ.pop("DHAN_CLIENT_ID", None)
@@ -552,7 +552,7 @@ class TestDhanBrokerDetection:
     def test_has_dhan_creds_false_when_empty(self) -> None:
         """_has_dhan_creds returns False when no creds anywhere."""
         import os
-        from market_analyzer.cli._broker import _has_dhan_creds
+        from income_desk.cli._broker import _has_dhan_creds
 
         original_id = os.environ.pop("DHAN_CLIENT_ID", None)
         original_token = os.environ.pop("DHAN_ACCESS_TOKEN", None)
@@ -567,7 +567,7 @@ class TestDhanBrokerDetection:
     def test_dhan_in_broker_type_choices(self) -> None:
         """'dhan' is a valid --broker-type choice in the CLI."""
         import argparse
-        from market_analyzer.cli._broker import add_broker_args
+        from income_desk.cli._broker import add_broker_args
 
         parser = argparse.ArgumentParser()
         add_broker_args(parser)
@@ -584,7 +584,7 @@ class TestDhanBrokerDetection:
 class TestDhanFromSession:
     def test_from_session_returns_tuple(self) -> None:
         """connect_dhan_from_session accepts any object and returns 4-tuple."""
-        from market_analyzer.broker.dhan import connect_dhan_from_session
+        from income_desk.broker.dhan import connect_dhan_from_session
         result = connect_dhan_from_session(_MockClient())
         assert len(result) == 4
         md, mm, acct, wl = result
@@ -592,10 +592,10 @@ class TestDhanFromSession:
 
     def test_from_session_types(self) -> None:
         """Returned providers have correct types."""
-        from market_analyzer.broker.dhan import connect_dhan_from_session
-        from market_analyzer.broker.dhan.account import DhanAccount
-        from market_analyzer.broker.dhan.market_data import DhanMarketData
-        from market_analyzer.broker.dhan.metrics import DhanMetrics
+        from income_desk.broker.dhan import connect_dhan_from_session
+        from income_desk.broker.dhan.account import DhanAccount
+        from income_desk.broker.dhan.market_data import DhanMarketData
+        from income_desk.broker.dhan.metrics import DhanMetrics
 
         md, mm, acct, wl = connect_dhan_from_session(_MockClient())
         assert isinstance(md, DhanMarketData)

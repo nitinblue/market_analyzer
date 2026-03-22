@@ -3,7 +3,7 @@
 import argparse
 from unittest.mock import MagicMock, patch
 
-from market_analyzer.cli._broker import (
+from income_desk.cli._broker import (
     add_broker_args,
     connect_broker,
 )
@@ -13,7 +13,7 @@ class TestConnectBroker:
     def test_returns_none_tuple_when_tastytrade_not_installed(self):
         with patch.dict("sys.modules", {"tastytrade": None}):
             with patch(
-                "market_analyzer.cli._broker.connect_broker",
+                "income_desk.cli._broker.connect_broker",
                 wraps=connect_broker,
             ):
                 md, mm, acct, wl = connect_broker()
@@ -26,7 +26,7 @@ class TestConnectBroker:
         mock_session.connect.return_value = False
 
         with patch(
-            "market_analyzer.broker.tastytrade.session.TastyTradeBrokerSession",
+            "income_desk.broker.tastytrade.session.TastyTradeBrokerSession",
             return_value=mock_session,
         ):
             md, mm, acct, wl = connect_broker()
@@ -41,16 +41,16 @@ class TestConnectBroker:
         mock_session.account.account_number = "TEST123"
 
         with patch(
-            "market_analyzer.broker.tastytrade.session.TastyTradeBrokerSession",
+            "income_desk.broker.tastytrade.session.TastyTradeBrokerSession",
             return_value=mock_session,
         ), patch(
-            "market_analyzer.broker.tastytrade.market_data.TastyTradeMarketData",
+            "income_desk.broker.tastytrade.market_data.TastyTradeMarketData",
         ) as MockMD, patch(
-            "market_analyzer.broker.tastytrade.metrics.TastyTradeMetrics",
+            "income_desk.broker.tastytrade.metrics.TastyTradeMetrics",
         ) as MockMM, patch(
-            "market_analyzer.broker.tastytrade.account.TastyTradeAccount",
+            "income_desk.broker.tastytrade.account.TastyTradeAccount",
         ) as MockAcct, patch(
-            "market_analyzer.broker.tastytrade.watchlist.TastyTradeWatchlist",
+            "income_desk.broker.tastytrade.watchlist.TastyTradeWatchlist",
         ) as MockWL:
             md, mm, acct, wl = connect_broker()
             assert md is not None
@@ -82,14 +82,14 @@ class TestBrokerPricingInPlan:
 
     def test_no_broker_returns_none_max_price(self):
         """Without broker, max_entry_price must be None — never computed."""
-        from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
+        from income_desk.opportunity.option_plays._trade_spec_helpers import (
             compute_max_entry_price_from_quotes,
         )
         # Zero net price → None
         assert compute_max_entry_price_from_quotes(0.0, "credit") is None
 
     def test_credit_slippage_from_broker_mid(self):
-        from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
+        from income_desk.opportunity.option_plays._trade_spec_helpers import (
             compute_max_entry_price_from_quotes,
         )
         # Broker says net credit is 1.80, slippage 20% → min accept 1.44
@@ -97,7 +97,7 @@ class TestBrokerPricingInPlan:
         assert result == 1.44
 
     def test_debit_slippage_from_broker_mid(self):
-        from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
+        from income_desk.opportunity.option_plays._trade_spec_helpers import (
             compute_max_entry_price_from_quotes,
         )
         # Broker says net debit is -2.50, slippage 20% → max pay 3.00
@@ -109,28 +109,28 @@ class TestNoBSPricingAnywhere:
     """Verify BS pricing functions are completely removed."""
 
     def test_no_bs_price_function(self):
-        import market_analyzer.opportunity.option_plays._trade_spec_helpers as helpers
+        import income_desk.opportunity.option_plays._trade_spec_helpers as helpers
         assert not hasattr(helpers, "_bs_price"), "_bs_price must be removed"
 
     def test_no_estimate_trade_price(self):
-        import market_analyzer.opportunity.option_plays._trade_spec_helpers as helpers
+        import income_desk.opportunity.option_plays._trade_spec_helpers as helpers
         assert not hasattr(helpers, "estimate_trade_price"), "estimate_trade_price must be removed"
 
     def test_no_old_compute_max_entry_price(self):
         """Old compute_max_entry_price (BS-based) must not exist."""
-        import market_analyzer.opportunity.option_plays._trade_spec_helpers as helpers
+        import income_desk.opportunity.option_plays._trade_spec_helpers as helpers
         assert not hasattr(helpers, "compute_max_entry_price"), (
             "Old BS-based compute_max_entry_price must be removed"
         )
 
     def test_no_norm_cdf(self):
-        import market_analyzer.opportunity.option_plays._trade_spec_helpers as helpers
+        import income_desk.opportunity.option_plays._trade_spec_helpers as helpers
         assert not hasattr(helpers, "_norm_cdf"), "_norm_cdf must be removed"
 
     def test_no_math_import(self):
         """math module should no longer be imported (was only used for BS)."""
         import importlib
-        import market_analyzer.opportunity.option_plays._trade_spec_helpers as helpers
+        import income_desk.opportunity.option_plays._trade_spec_helpers as helpers
         importlib.reload(helpers)
         # Check the module doesn't have math in its namespace for BS
         source = open(helpers.__file__).read()
@@ -141,7 +141,7 @@ class TestAccountBalance:
     """Test account balance integration."""
 
     def test_account_balance_model(self):
-        from market_analyzer.models.quotes import AccountBalance
+        from income_desk.models.quotes import AccountBalance
         bal = AccountBalance(
             account_number="TEST123",
             net_liquidating_value=50000.0,
@@ -155,7 +155,7 @@ class TestAccountBalance:
         assert bal.derivative_buying_power == 40000.0
 
     def test_risk_budget_has_account_fields(self):
-        from market_analyzer.models.trading_plan import RiskBudget
+        from income_desk.models.trading_plan import RiskBudget
         rb = RiskBudget(
             account_size=50000.0,
             account_source="broker",
@@ -167,7 +167,7 @@ class TestAccountBalance:
         assert rb.account_source == "broker"
 
     def test_risk_budget_defaults_to_config(self):
-        from market_analyzer.models.trading_plan import RiskBudget
+        from income_desk.models.trading_plan import RiskBudget
         rb = RiskBudget(
             max_new_positions=3,
             max_daily_risk_dollars=1000.0,
@@ -176,6 +176,6 @@ class TestAccountBalance:
         assert rb.account_source == "config"
 
     def test_account_provider_abc(self):
-        from market_analyzer.broker.base import AccountProvider
+        from income_desk.broker.base import AccountProvider
         import abc
         assert abc.ABC in AccountProvider.__mro__

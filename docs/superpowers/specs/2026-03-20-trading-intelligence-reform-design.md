@@ -1,6 +1,6 @@
 # Trading Intelligence Reform — Design Spec
 
-> Transforms market_analyzer from "signal generator" to "complete trading intelligence system" by closing 10 gaps across exit discipline, position sizing, trade construction, and signal quality.
+> Transforms income_desk from "signal generator" to "complete trading intelligence system" by closing 10 gaps across exit discipline, position sizing, trade construction, and signal quality.
 
 **Date:** 2026-03-20
 **Status:** Approved for implementation
@@ -22,8 +22,8 @@ Target after reform:
 
 ## Sub-system A: Exit Intelligence
 
-### New file: `market_analyzer/features/exit_intelligence.py`
-### New file: `market_analyzer/models/exit.py`
+### New file: `income_desk/features/exit_intelligence.py`
+### New file: `income_desk/models/exit.py`
 
 #### Feature 1: Regime-Contingent Stops
 
@@ -125,7 +125,7 @@ class ThetaDecayResult(BaseModel):
 
 ## Sub-system B: Sizing Intelligence
 
-### Extend: `market_analyzer/features/position_sizing.py`
+### Extend: `income_desk/features/position_sizing.py`
 
 #### Feature 4: Pairwise Correlation from OHLCV
 
@@ -215,7 +215,7 @@ This is the "master" sizing function that chains:
 
 ## Sub-system C: Trade Construction Intelligence
 
-### New file: `market_analyzer/features/dte_optimizer.py`
+### New file: `income_desk/features/dte_optimizer.py`
 
 #### Feature 8: DTE Optimization from Vol Surface
 
@@ -251,7 +251,7 @@ class DTERecommendation(BaseModel):
     rationale: str
 ```
 
-### Extend: `market_analyzer/service/adjustment.py`
+### Extend: `income_desk/service/adjustment.py`
 
 #### Feature 9: Strategy Switching on Regime Change
 
@@ -284,7 +284,7 @@ If one side of IC profitable (short call at 80%+ profit) + other side neutral:
 
 ## Sub-system D: Signal Quality
 
-### Extend: `market_analyzer/features/entry_levels.py`
+### Extend: `income_desk/features/entry_levels.py`
 
 #### Feature 10: IV Rank Entry Threshold by Ticker Type
 
@@ -309,7 +309,7 @@ class IVRankQuality(BaseModel):
     rationale: str
 ```
 
-### Extend: `market_analyzer/models/adjustment.py`
+### Extend: `income_desk/models/adjustment.py`
 
 #### Feature 11: Adjustment P&L Tracking
 
@@ -342,22 +342,22 @@ class AdjustmentEffectiveness(BaseModel):
 
 ```
 NEW files (create):
-  market_analyzer/models/exit.py                    # RegimeStop, TimeAdjustedTarget, ThetaDecayResult
-  market_analyzer/features/exit_intelligence.py     # 3 exit functions
-  market_analyzer/features/dte_optimizer.py         # DTE selection from vol surface
+  income_desk/models/exit.py                    # RegimeStop, TimeAdjustedTarget, ThetaDecayResult
+  income_desk/features/exit_intelligence.py     # 3 exit functions
+  income_desk/features/dte_optimizer.py         # DTE selection from vol surface
   tests/test_exit_intelligence.py                   # Exit function tests
   tests/test_dte_optimizer.py                       # DTE optimizer tests
   tests/functional/test_reform.py                   # End-to-end reform tests
 
 EXTEND files (modify):
-  market_analyzer/features/position_sizing.py       # +correlation, +margin-regime, +unified sizing
-  market_analyzer/features/entry_levels.py          # +IV rank quality
-  market_analyzer/models/adjustment.py              # +AdjustmentOutcome, +CONVERT types
-  market_analyzer/service/adjustment.py             # +strategy switching logic
-  market_analyzer/trade_lifecycle.py                # Wire regime stops + trailing targets
-  market_analyzer/validation/daily_readiness.py     # Wire IV rank quality check (#10)
-  market_analyzer/__init__.py                       # Wire all new exports
-  market_analyzer/cli/interactive.py                # CLI commands
+  income_desk/features/position_sizing.py       # +correlation, +margin-regime, +unified sizing
+  income_desk/features/entry_levels.py          # +IV rank quality
+  income_desk/models/adjustment.py              # +AdjustmentOutcome, +CONVERT types
+  income_desk/service/adjustment.py             # +strategy switching logic
+  income_desk/trade_lifecycle.py                # Wire regime stops + trailing targets
+  income_desk/validation/daily_readiness.py     # Wire IV rank quality check (#10)
+  income_desk/__init__.py                       # Wire all new exports
+  income_desk/cli/interactive.py                # CLI commands
   tests/test_position_sizing.py                     # +correlation, +margin tests
   tests/test_entry_levels.py                        # +IV rank quality tests
 ```

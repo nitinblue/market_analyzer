@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
-from market_analyzer.fundamentals.fetch import (
+from income_desk.fundamentals.fetch import (
     _safe_get,
     _build_52week,
     _get_asset_type,
@@ -17,7 +17,7 @@ from market_analyzer.fundamentals.fetch import (
     invalidate_fundamentals_cache,
     _cache,
 )
-from market_analyzer.models.fundamentals import FundamentalsSnapshot
+from income_desk.models.fundamentals import FundamentalsSnapshot
 
 
 class TestSafeGet:
@@ -139,7 +139,7 @@ class TestFetchFundamentals:
         """Clear cache before each test."""
         _cache.clear()
 
-    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
+    @patch("income_desk.fundamentals.fetch.yf.Ticker")
     def test_returns_snapshot(self, mock_ticker_cls):
         mock_ticker_cls.return_value = _mock_ticker()
         result = fetch_fundamentals("AAPL", ttl_minutes=60)
@@ -150,7 +150,7 @@ class TestFetchFundamentals:
         assert result.valuation.trailing_pe == 25.0
         assert result.earnings.trailing_eps == 6.0
 
-    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
+    @patch("income_desk.fundamentals.fetch.yf.Ticker")
     def test_cache_hit(self, mock_ticker_cls):
         mock_ticker_cls.return_value = _mock_ticker()
 
@@ -162,7 +162,7 @@ class TestFetchFundamentals:
         # yf.Ticker should only be called once
         assert mock_ticker_cls.call_count == 1
 
-    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
+    @patch("income_desk.fundamentals.fetch.yf.Ticker")
     def test_cache_invalidation(self, mock_ticker_cls):
         mock_ticker_cls.return_value = _mock_ticker()
 
@@ -172,7 +172,7 @@ class TestFetchFundamentals:
 
         assert mock_ticker_cls.call_count == 2
 
-    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
+    @patch("income_desk.fundamentals.fetch.yf.Ticker")
     def test_invalidate_all(self, mock_ticker_cls):
         mock_ticker_cls.return_value = _mock_ticker()
 
@@ -183,7 +183,7 @@ class TestFetchFundamentals:
 
         assert mock_ticker_cls.call_count == 3
 
-    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
+    @patch("income_desk.fundamentals.fetch.yf.Ticker")
     def test_52week_calculations(self, mock_ticker_cls):
         mock_ticker_cls.return_value = _mock_ticker()
         result = fetch_fundamentals("AAPL", ttl_minutes=60)
@@ -195,7 +195,7 @@ class TestFetchFundamentals:
         assert result.fifty_two_week.pct_from_low is not None
         assert result.fifty_two_week.pct_from_low > 0  # above 52w low
 
-    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
+    @patch("income_desk.fundamentals.fetch.yf.Ticker")
     def test_handles_missing_fields(self, mock_ticker_cls):
         """Sparse info dict should still produce a valid snapshot."""
         sparse_info = {"regularMarketPrice": 100.0}
@@ -207,26 +207,26 @@ class TestFetchFundamentals:
         assert result.business.long_name is None
         assert result.fifty_two_week.high is None
 
-    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
+    @patch("income_desk.fundamentals.fetch.yf.Ticker")
     def test_invalid_ticker_raises(self, mock_ticker_cls):
         mock_ticker_cls.return_value = _mock_ticker({"regularMarketPrice": None})
         with pytest.raises(ValueError, match="No data"):
             fetch_fundamentals("INVALID", ttl_minutes=60)
 
-    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
+    @patch("income_desk.fundamentals.fetch.yf.Ticker")
     def test_case_normalization(self, mock_ticker_cls):
         mock_ticker_cls.return_value = _mock_ticker()
         result = fetch_fundamentals("aapl", ttl_minutes=60)
         assert result.ticker == "AAPL"
 
-    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
+    @patch("income_desk.fundamentals.fetch.yf.Ticker")
     def test_recent_earnings_parsed(self, mock_ticker_cls):
         mock_ticker_cls.return_value = _mock_ticker()
         result = fetch_fundamentals("AAPL", ttl_minutes=60)
         assert len(result.recent_earnings) == 2
         assert result.recent_earnings[0].eps_actual == 1.55
 
-    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
+    @patch("income_desk.fundamentals.fetch.yf.Ticker")
     def test_upcoming_events_parsed(self, mock_ticker_cls):
         mock_ticker_cls.return_value = _mock_ticker()
         result = fetch_fundamentals("AAPL", ttl_minutes=60)
@@ -296,7 +296,7 @@ class TestETFBoundary:
     def setup_method(self):
         _cache.clear()
 
-    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
+    @patch("income_desk.fundamentals.fetch.yf.Ticker")
     def test_etf_skips_earnings_calls(self, mock_ticker_cls):
         """ETF should never call get_earnings_dates() or .calendar."""
         mock = _mock_etf_ticker()
@@ -310,7 +310,7 @@ class TestETFBoundary:
         # get_earnings_dates should not have been called
         mock.get_earnings_dates.assert_not_called()
 
-    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
+    @patch("income_desk.fundamentals.fetch.yf.Ticker")
     def test_etf_has_basic_fields(self, mock_ticker_cls):
         """ETF returns 52-week, beta, dividends — no P/E or EPS."""
         mock_ticker_cls.return_value = _mock_etf_ticker()
@@ -322,21 +322,21 @@ class TestETFBoundary:
         assert result.valuation.trailing_pe is None
         assert result.earnings.trailing_eps is None
 
-    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
+    @patch("income_desk.fundamentals.fetch.yf.Ticker")
     def test_etf_is_equity_false(self, mock_ticker_cls):
         mock_ticker_cls.return_value = _mock_etf_ticker()
         result = fetch_fundamentals("GLD", ttl_minutes=60)
         assert not result.is_equity
         assert not result.has_earnings
 
-    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
+    @patch("income_desk.fundamentals.fetch.yf.Ticker")
     def test_equity_is_equity_true(self, mock_ticker_cls):
         mock_ticker_cls.return_value = _mock_ticker()
         result = fetch_fundamentals("AAPL", ttl_minutes=60)
         assert result.is_equity
         assert result.asset_type == "EQUITY"
 
-    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
+    @patch("income_desk.fundamentals.fetch.yf.Ticker")
     def test_index_skips_earnings(self, mock_ticker_cls):
         """Index tickers skip earnings calls."""
         mock = MagicMock()
@@ -353,7 +353,7 @@ class TestETFBoundary:
         assert result.recent_earnings == []
         mock.get_earnings_dates.assert_not_called()
 
-    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
+    @patch("income_desk.fundamentals.fetch.yf.Ticker")
     def test_mutualfund_skips_earnings(self, mock_ticker_cls):
         mock = MagicMock()
         mock.info = {
@@ -368,7 +368,7 @@ class TestETFBoundary:
         assert result.asset_type == "MUTUALFUND"
         mock.get_earnings_dates.assert_not_called()
 
-    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
+    @patch("income_desk.fundamentals.fetch.yf.Ticker")
     def test_no_market_price_raises(self, mock_ticker_cls):
         """Tickers with no price at all should raise ValueError."""
         mock = MagicMock()
@@ -378,7 +378,7 @@ class TestETFBoundary:
         with pytest.raises(ValueError, match="No data"):
             fetch_fundamentals("FAKE", ttl_minutes=60)
 
-    @patch("market_analyzer.fundamentals.fetch.yf.Ticker")
+    @patch("income_desk.fundamentals.fetch.yf.Ticker")
     def test_info_fetch_failure_raises(self, mock_ticker_cls):
         """Network error on ticker.info raises ValueError."""
         mock = MagicMock()

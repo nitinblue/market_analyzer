@@ -1,11 +1,11 @@
 # Black Swan / Market Crash Playbook
-## For a $30-40K Income Trader Using market_analyzer
+## For a $30-40K Income Trader Using income_desk
 
 > Written from the perspective of a systematic income trader who has lived through 2008, 2018 (Volmageddon), 2020 (COVID), and 2022 (rate shock). The biggest money in income trading is made in the 6 months AFTER a crash — not during it.
 
 **Account:** $30-40K taxable + $200K IRA
 **Philosophy:** Capital preservation during the storm, aggressive income deployment during the rebuild
-**System:** market_analyzer (MA) with full broker connectivity
+**System:** income_desk (MA) with full broker connectivity
 
 ---
 
@@ -316,7 +316,7 @@ ATR: 0.8-1.2% on SPY
 
 ```python
 # After the crash, feed ALL your outcomes into calibration
-from market_analyzer import calibrate_weights, analyze_adjustment_effectiveness
+from income_desk import calibrate_weights, analyze_adjustment_effectiveness
 
 # What did you learn?
 # - Which R2 IC entries had the best POP accuracy?

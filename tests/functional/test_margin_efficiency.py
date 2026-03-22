@@ -2,10 +2,10 @@
 import pytest
 from datetime import date, timedelta
 
-from market_analyzer.trade_spec_factory import build_iron_condor
-from market_analyzer.trade_lifecycle import compute_income_yield
-from market_analyzer.validation.models import Severity
-from market_analyzer.validation.profitability_audit import check_margin_efficiency
+from income_desk.trade_spec_factory import build_iron_condor
+from income_desk.trade_lifecycle import compute_income_yield
+from income_desk.validation.models import Severity
+from income_desk.validation.profitability_audit import check_margin_efficiency
 
 
 def _ic(wing_width=5.0, underlying=580.0):

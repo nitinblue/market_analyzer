@@ -5,7 +5,7 @@ from datetime import date
 
 import pytest
 
-from market_analyzer.models.quotes import AccountBalance, OptionQuote
+from income_desk.models.quotes import AccountBalance, OptionQuote
 
 
 # ---------------------------------------------------------------------------
@@ -15,17 +15,17 @@ from market_analyzer.models.quotes import AccountBalance, OptionQuote
 class TestAlpacaImport:
     def test_module_importable(self) -> None:
         """The broker module itself imports cleanly (lazy SDK import)."""
-        import market_analyzer.broker.alpaca  # Should not raise
+        import income_desk.broker.alpaca  # Should not raise
 
     def test_submodules_importable(self) -> None:
         """All submodules import without errors."""
-        import market_analyzer.broker.alpaca.account
-        import market_analyzer.broker.alpaca.market_data
-        import market_analyzer.broker.alpaca.metrics
+        import income_desk.broker.alpaca.account
+        import income_desk.broker.alpaca.market_data
+        import income_desk.broker.alpaca.metrics
 
     def test_missing_sdk_raises_helpful_error(self) -> None:
         """If alpaca-py not installed, connect_alpaca raises ImportError with pip command."""
-        from market_analyzer.broker.alpaca import connect_alpaca
+        from income_desk.broker.alpaca import connect_alpaca
         try:
             connect_alpaca("fake_key", "fake_secret")
         except ImportError as e:
@@ -40,7 +40,7 @@ class TestAlpacaImport:
         try:
             from alpaca.trading.client import TradingClient  # noqa: F401
             # SDK installed — test empty credentials
-            from market_analyzer.broker.alpaca import connect_alpaca
+            from income_desk.broker.alpaca import connect_alpaca
             with pytest.raises(ValueError, match="API key"):
                 connect_alpaca("", "")
         except ImportError:
@@ -54,7 +54,7 @@ class TestAlpacaImport:
 class TestOCCParsing:
     def test_parse_standard_occ(self) -> None:
         """Parse a well-formed OCC symbol."""
-        from market_analyzer.broker.alpaca.market_data import _parse_occ
+        from income_desk.broker.alpaca.market_data import _parse_occ
         result = _parse_occ("SPY   260424C00580000")
         assert result is not None
         ticker, exp, option_type, strike = result
@@ -65,7 +65,7 @@ class TestOCCParsing:
 
     def test_parse_put_occ(self) -> None:
         """Parse a put OCC symbol."""
-        from market_analyzer.broker.alpaca.market_data import _parse_occ
+        from income_desk.broker.alpaca.market_data import _parse_occ
         result = _parse_occ("QQQ   260620P00480000")
         assert result is not None
         _, _, option_type, strike = result
@@ -74,7 +74,7 @@ class TestOCCParsing:
 
     def test_parse_fractional_strike(self) -> None:
         """Parse OCC symbol with fractional strike (e.g. 580.50)."""
-        from market_analyzer.broker.alpaca.market_data import _parse_occ
+        from income_desk.broker.alpaca.market_data import _parse_occ
         result = _parse_occ("SPY   260424C00580500")
         assert result is not None
         _, _, _, strike = result
@@ -82,14 +82,14 @@ class TestOCCParsing:
 
     def test_parse_invalid_returns_none(self) -> None:
         """Invalid symbol returns None without raising."""
-        from market_analyzer.broker.alpaca.market_data import _parse_occ
+        from income_desk.broker.alpaca.market_data import _parse_occ
         assert _parse_occ("not_a_symbol") is None
         assert _parse_occ("") is None
 
     def test_build_occ_roundtrip(self) -> None:
         """Build OCC symbol and parse it back."""
-        from market_analyzer.broker.alpaca.market_data import _build_occ, _parse_occ
-        from market_analyzer.models.opportunity import LegSpec, LegAction
+        from income_desk.broker.alpaca.market_data import _build_occ, _parse_occ
+        from income_desk.models.opportunity import LegSpec, LegAction
 
         leg = LegSpec(
             role="short_put",
@@ -220,18 +220,18 @@ class TestAlpacaOptionQuoteMapping:
 
 class TestAlpacaMarketDataProperties:
     def test_provider_name(self) -> None:
-        from market_analyzer.broker.alpaca.market_data import AlpacaMarketData
+        from income_desk.broker.alpaca.market_data import AlpacaMarketData
         # Use __new__ to bypass __init__ (avoids needing SDK clients)
         md = AlpacaMarketData.__new__(AlpacaMarketData)
         assert md.provider_name == "alpaca"
 
     def test_currency(self) -> None:
-        from market_analyzer.broker.alpaca.market_data import AlpacaMarketData
+        from income_desk.broker.alpaca.market_data import AlpacaMarketData
         md = AlpacaMarketData.__new__(AlpacaMarketData)
         assert md.currency == "USD"
 
     def test_timezone(self) -> None:
-        from market_analyzer.broker.alpaca.market_data import AlpacaMarketData
+        from income_desk.broker.alpaca.market_data import AlpacaMarketData
         md = AlpacaMarketData.__new__(AlpacaMarketData)
         assert md.timezone == "US/Eastern"
 
@@ -242,13 +242,13 @@ class TestAlpacaMarketDataProperties:
 
 class TestAlpacaCredentialResolution:
     def test_explicit_credentials_returned(self) -> None:
-        from market_analyzer.broker.alpaca import _resolve_credentials
+        from income_desk.broker.alpaca import _resolve_credentials
         key, secret = _resolve_credentials("my_key", "my_secret")
         assert key == "my_key"
         assert secret == "my_secret"
 
     def test_env_var_credentials(self, monkeypatch) -> None:
-        from market_analyzer.broker.alpaca import _resolve_credentials
+        from income_desk.broker.alpaca import _resolve_credentials
         monkeypatch.setenv("ALPACA_API_KEY", "env_key")
         monkeypatch.setenv("ALPACA_API_SECRET", "env_secret")
         key, secret = _resolve_credentials(None, None)
@@ -256,7 +256,7 @@ class TestAlpacaCredentialResolution:
         assert secret == "env_secret"
 
     def test_empty_credentials_returned_as_empty_strings(self, monkeypatch) -> None:
-        from market_analyzer.broker.alpaca import _resolve_credentials
+        from income_desk.broker.alpaca import _resolve_credentials
         monkeypatch.delenv("ALPACA_API_KEY", raising=False)
         monkeypatch.delenv("ALPACA_API_SECRET", raising=False)
         key, secret = _resolve_credentials(None, None)

@@ -1,5 +1,5 @@
 # MA Change Request for eTrading Platform
-# Date: 2026-03-15 | From: market_analyzer
+# Date: 2026-03-15 | From: income_desk
 # Status: OPEN — eTrading must implement
 
 ## Context

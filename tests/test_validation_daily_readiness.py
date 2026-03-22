@@ -3,9 +3,9 @@ from datetime import date, timedelta, time
 
 import pytest
 
-from market_analyzer.trade_spec_factory import build_iron_condor
-from market_analyzer.validation.models import Severity, Suite
-from market_analyzer.validation.daily_readiness import (
+from income_desk.trade_spec_factory import build_iron_condor
+from income_desk.validation.models import Severity, Suite
+from income_desk.validation.daily_readiness import (
     run_daily_checks,
     run_adversarial_checks,
 )
@@ -135,7 +135,7 @@ class TestIVRankQualityCheck:
 
     def _run_with_iv_rank(self, iv_rank, ticker_type="etf"):
         """Run daily checks with IV rank and return the iv_rank_quality check."""
-        from market_analyzer.models.opportunity import LegAction, LegSpec, TradeSpec
+        from income_desk.models.opportunity import LegAction, LegSpec, TradeSpec
         legs = [
             LegSpec(role="short_put", action=LegAction.SELL_TO_OPEN, option_type="put",
                     strike=570.0, strike_label="test", expiration=date(2026, 4, 17),
@@ -202,7 +202,7 @@ class TestIVRankQualityCheck:
 
     def test_10_checks_total(self) -> None:
         """Daily suite now has 10 checks."""
-        from market_analyzer.models.opportunity import LegAction, LegSpec, TradeSpec
+        from income_desk.models.opportunity import LegAction, LegSpec, TradeSpec
         legs = [
             LegSpec(role="short_put", action=LegAction.SELL_TO_OPEN, option_type="put",
                     strike=570.0, strike_label="test", expiration=date(2026, 4, 17),

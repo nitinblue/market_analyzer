@@ -2,7 +2,7 @@
 from datetime import date
 import pytest
 
-from market_analyzer.models.decision_audit import (
+from income_desk.models.decision_audit import (
     DecisionReport,
     GradedCheck,
     LegAudit,
@@ -10,7 +10,7 @@ from market_analyzer.models.decision_audit import (
     PortfolioAudit,
     RiskAudit,
 )
-from market_analyzer.features.decision_audit import (
+from income_desk.features.decision_audit import (
     audit_decision,
     audit_legs,
     audit_trade,
@@ -18,7 +18,7 @@ from market_analyzer.features.decision_audit import (
     audit_risk,
     _score_to_grade,
 )
-from market_analyzer.models.opportunity import LegAction, LegSpec, TradeSpec
+from income_desk.models.opportunity import LegAction, LegSpec, TradeSpec
 
 
 # ---------------------------------------------------------------------------
@@ -508,7 +508,7 @@ class TestDecisionReport:
         legs = [_leg("short_put", LegAction.SELL_TO_OPEN, "put", 570)]
         ts = _ts(legs)
         report = audit_decision(ticker="SPY", trade_spec=ts, capital=50000, contracts=1)
-        from market_analyzer.features.decision_audit import _score_to_grade
+        from income_desk.features.decision_audit import _score_to_grade
         assert report.overall_grade == _score_to_grade(report.overall_score)
 
     def test_approved_boundary_70(self):

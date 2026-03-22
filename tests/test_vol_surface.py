@@ -5,13 +5,13 @@ from datetime import date, timedelta
 import pandas as pd
 import pytest
 
-from market_analyzer.features.vol_surface import (
+from income_desk.features.vol_surface import (
     _assess_data_quality,
     _find_atm_strike,
     _score_calendar_edge,
     compute_vol_surface,
 )
-from market_analyzer.models.vol_surface import TermStructurePoint, VolatilitySurface
+from income_desk.models.vol_surface import TermStructurePoint, VolatilitySurface
 
 
 def _make_chain(

@@ -6,7 +6,7 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import MagicMock, patch, mock_open
 
-from market_analyzer.broker.tastytrade.session import TastyTradeBrokerSession, _resolve_env
+from income_desk.broker.tastytrade.session import TastyTradeBrokerSession, _resolve_env
 
 
 # --- Credential resolution ---
@@ -178,8 +178,8 @@ class TestSessionConnect:
 class TestStreamerSymbolConversion:
     def test_leg_to_streamer_symbol(self):
         """LegSpec → .SPY260320P580"""
-        from market_analyzer.broker.tastytrade.market_data import TastyTradeMarketData
-        from market_analyzer.models.opportunity import LegAction, LegSpec
+        from income_desk.broker.tastytrade.market_data import TastyTradeMarketData
+        from income_desk.models.opportunity import LegAction, LegSpec
 
         # Create a mock session
         mock_session = MagicMock()
@@ -197,8 +197,8 @@ class TestStreamerSymbolConversion:
         assert sym == ".SPY260320P580"
 
     def test_call_symbol(self):
-        from market_analyzer.broker.tastytrade.market_data import TastyTradeMarketData
-        from market_analyzer.models.opportunity import LegAction, LegSpec
+        from income_desk.broker.tastytrade.market_data import TastyTradeMarketData
+        from income_desk.models.opportunity import LegAction, LegSpec
 
         mock_session = MagicMock()
         md = TastyTradeMarketData(mock_session)

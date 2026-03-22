@@ -9,8 +9,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from market_analyzer.config import BlackSwanSettings
-from market_analyzer.features.black_swan import (
+from income_desk.config import BlackSwanSettings
+from income_desk.features.black_swan import (
     check_circuit_breakers,
     compute_black_swan_alert,
     score_credit_stress,
@@ -23,7 +23,7 @@ from market_analyzer.features.black_swan import (
     score_vix_term_structure,
     score_yield_curve,
 )
-from market_analyzer.models.black_swan import (
+from income_desk.models.black_swan import (
     AlertLevel,
     IndicatorStatus,
 )
@@ -294,14 +294,14 @@ class TestFREDFetcher:
     """FRED fetcher availability and graceful degradation."""
 
     def test_unavailable_without_api_key(self) -> None:
-        from market_analyzer.data.providers.fred import FREDFetcher
+        from income_desk.data.providers.fred import FREDFetcher
 
         with patch.dict("os.environ", {}, clear=True):
             f = FREDFetcher()
             assert f.available is False
 
     def test_unavailable_without_fredapi(self) -> None:
-        from market_analyzer.data.providers.fred import FREDFetcher
+        from income_desk.data.providers.fred import FREDFetcher
 
         with patch.dict("os.environ", {"FRED_API_KEY": "fake"}):
             with patch("builtins.__import__", side_effect=ImportError("no fredapi")):
@@ -309,7 +309,7 @@ class TestFREDFetcher:
                 assert f.available is False
 
     def test_get_series_returns_none_when_unavailable(self) -> None:
-        from market_analyzer.data.providers.fred import FREDFetcher
+        from income_desk.data.providers.fred import FREDFetcher
 
         with patch.dict("os.environ", {}, clear=True):
             f = FREDFetcher()
@@ -345,7 +345,7 @@ class TestService:
     """End-to-end with mocked DataService."""
 
     def test_alert_with_mocked_data(self) -> None:
-        from market_analyzer.service.black_swan import BlackSwanService
+        from income_desk.service.black_swan import BlackSwanService
 
         ds = MagicMock()
         ds.get_ohlcv.side_effect = lambda t: _make_ohlcv(
@@ -358,7 +358,7 @@ class TestService:
         assert 0.0 <= alert.composite_score <= 1.0
 
     def test_missing_data_graceful(self) -> None:
-        from market_analyzer.service.black_swan import BlackSwanService
+        from income_desk.service.black_swan import BlackSwanService
 
         ds = MagicMock()
         ds.get_ohlcv.side_effect = Exception("network error")
@@ -369,15 +369,15 @@ class TestService:
         assert alert.composite_score == 0.0
 
     def test_no_data_service_raises(self) -> None:
-        from market_analyzer.service.black_swan import BlackSwanService
+        from income_desk.service.black_swan import BlackSwanService
 
         svc = BlackSwanService()
         with pytest.raises(ValueError, match="requires a DataService"):
             svc.alert()
 
     def test_facade_wiring(self) -> None:
-        from market_analyzer.service.analyzer import MarketAnalyzer
-        from market_analyzer.service.black_swan import BlackSwanService as BSS
+        from income_desk.service.analyzer import MarketAnalyzer
+        from income_desk.service.black_swan import BlackSwanService as BSS
 
         ds = MagicMock()
         ma = MarketAnalyzer(data_service=ds)

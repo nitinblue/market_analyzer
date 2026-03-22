@@ -7,8 +7,8 @@ from __future__ import annotations
 import pytest
 from datetime import datetime
 
-from market_analyzer.features.crash_sentinel import assess_crash_sentinel
-from market_analyzer.models.sentinel import SentinelReport, SentinelSignal, SentinelTicker
+from income_desk.features.crash_sentinel import assess_crash_sentinel
+from income_desk.models.sentinel import SentinelReport, SentinelSignal, SentinelTicker
 
 
 # ---------------------------------------------------------------------------

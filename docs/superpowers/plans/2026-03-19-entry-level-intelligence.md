@@ -4,9 +4,9 @@
 
 **Goal:** Transform entry logic from "enter now at market" to "enter at the right price, at the right strike, backed by support/resistance" — 6 capabilities that answer "at what level should I enter?"
 
-**Architecture:** Pure functions in `market_analyzer/features/entry_levels.py` that consume existing models (TechnicalSnapshot, LevelsAnalysis, VolatilitySurface, TradeSpec) and return entry intelligence. No broker required. Modifications to `_trade_spec_helpers.py` wire skew into IC strike selection. New validation check adds strike-proximity gate to daily readiness.
+**Architecture:** Pure functions in `income_desk/features/entry_levels.py` that consume existing models (TechnicalSnapshot, LevelsAnalysis, VolatilitySurface, TradeSpec) and return entry intelligence. No broker required. Modifications to `_trade_spec_helpers.py` wire skew into IC strike selection. New validation check adds strike-proximity gate to daily readiness.
 
-**Tech Stack:** Python 3.12, Pydantic BaseModel, existing market_analyzer models. No new dependencies.
+**Tech Stack:** Python 3.12, Pydantic BaseModel, existing income_desk models. No new dependencies.
 
 **Venv / test command:** `.venv_312/Scripts/python.exe -m pytest tests/ -v`
 
@@ -15,7 +15,7 @@
 ## File Structure
 
 ```
-market_analyzer/
+income_desk/
   models/entry.py                    # NEW: 6 result models
   features/entry_levels.py           # NEW: 6 pure functions (core logic)
   models/opportunity.py              # MODIFY: add 4 new TradeSpec fields
@@ -67,7 +67,7 @@ tests/
 ## Task 1: Entry-Level Models
 
 **Files:**
-- Create: `market_analyzer/models/entry.py`
+- Create: `income_desk/models/entry.py`
 - Test: `tests/test_entry_levels.py`
 
 These models are the return types for the 6 functions in Task 2-6.
@@ -79,7 +79,7 @@ These models are the return types for the 6 functions in Task 2-6.
 """Tests for entry-level intelligence models and functions."""
 
 import pytest
-from market_analyzer.models.entry import (
+from income_desk.models.entry import (
     StrikeProximityLeg,
     StrikeProximityResult,
     SkewOptimalStrike,
@@ -196,7 +196,7 @@ Expected: FAIL (ImportError — models/entry.py doesn't exist)
 - [ ] **Step 3: Write minimal implementation**
 
 ```python
-# market_analyzer/models/entry.py
+# income_desk/models/entry.py
 """Models for entry-level intelligence — strike proximity, skew selection, entry scoring."""
 
 from __future__ import annotations
@@ -278,7 +278,7 @@ Expected: PASS (7 tests)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add market_analyzer/models/entry.py tests/test_entry_levels.py
+git add income_desk/models/entry.py tests/test_entry_levels.py
 git commit -m "feat: add entry-level intelligence models"
 ```
 
@@ -287,7 +287,7 @@ git commit -m "feat: add entry-level intelligence models"
 ## Task 2: Strike-to-Support Proximity Gate
 
 **Files:**
-- Create: `market_analyzer/features/entry_levels.py`
+- Create: `income_desk/features/entry_levels.py`
 - Test: `tests/test_entry_levels.py` (append)
 
 **Context:** This function answers: "Is my short put backed by a real support level, or floating in thin air?" It takes a TradeSpec + LevelsAnalysis and checks each short leg's distance to the nearest high-conviction S/R level.
@@ -299,11 +299,11 @@ Append to `tests/test_entry_levels.py`:
 ```python
 from datetime import date, timedelta
 
-from market_analyzer.models.levels import (
+from income_desk.models.levels import (
     LevelRole, LevelSource, LevelsAnalysis, PriceLevel, TradeDirection,
 )
-from market_analyzer.models.opportunity import LegAction, LegSpec, TradeSpec
-from market_analyzer.features.entry_levels import compute_strike_support_proximity
+from income_desk.models.opportunity import LegAction, LegSpec, TradeSpec
+from income_desk.features.entry_levels import compute_strike_support_proximity
 
 
 def _make_leg(role: str, action: LegAction, opt_type: str, strike: float) -> LegSpec:
@@ -466,7 +466,7 @@ Expected: FAIL (ImportError — features/entry_levels.py doesn't exist)
 - [ ] **Step 3: Write minimal implementation**
 
 ```python
-# market_analyzer/features/entry_levels.py
+# income_desk/features/entry_levels.py
 """Entry-level intelligence: strike proximity, skew selection, entry scoring.
 
 Pure functions — no data fetching, no broker required.
@@ -476,14 +476,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from market_analyzer.models.entry import (
+from income_desk.models.entry import (
     StrikeProximityLeg,
     StrikeProximityResult,
 )
 
 if TYPE_CHECKING:
-    from market_analyzer.models.levels import LevelsAnalysis
-    from market_analyzer.models.opportunity import TradeSpec
+    from income_desk.models.levels import LevelsAnalysis
+    from income_desk.models.opportunity import TradeSpec
 
 
 def compute_strike_support_proximity(
@@ -505,7 +505,7 @@ def compute_strike_support_proximity(
     Returns:
         StrikeProximityResult with per-leg analysis and overall score.
     """
-    from market_analyzer.models.opportunity import LegAction
+    from income_desk.models.opportunity import LegAction
 
     leg_results: list[StrikeProximityLeg] = []
 
@@ -591,7 +591,7 @@ Expected: PASS (7 tests)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add market_analyzer/features/entry_levels.py tests/test_entry_levels.py
+git add income_desk/features/entry_levels.py tests/test_entry_levels.py
 git commit -m "feat: add strike-to-support proximity gate"
 ```
 
@@ -600,7 +600,7 @@ git commit -m "feat: add strike-to-support proximity gate"
 ## Task 3: Skew-Optimal Strike Selection
 
 **Files:**
-- Modify: `market_analyzer/features/entry_levels.py` (add function)
+- Modify: `income_desk/features/entry_levels.py` (add function)
 - Test: `tests/test_entry_levels.py` (append)
 
 **Context:** Instead of placing short strikes at a fixed ATR multiple, search for the strike where IV is most elevated vs ATM within the valid range. Uses `SkewSlice` data from vol surface. The function doesn't replace `build_iron_condor_legs` — it advises WHERE to shift the short strike for maximum premium.
@@ -612,8 +612,8 @@ git commit -m "feat: add strike-to-support proximity gate"
 Append to `tests/test_entry_levels.py`:
 
 ```python
-from market_analyzer.models.vol_surface import SkewSlice
-from market_analyzer.features.entry_levels import select_skew_optimal_strike
+from income_desk.models.vol_surface import SkewSlice
+from income_desk.features.entry_levels import select_skew_optimal_strike
 
 
 def _make_skew(
@@ -687,14 +687,14 @@ Expected: FAIL (ImportError)
 
 - [ ] **Step 3: Write implementation**
 
-Add to `market_analyzer/features/entry_levels.py`:
+Add to `income_desk/features/entry_levels.py`:
 
 ```python
-from market_analyzer.models.entry import SkewOptimalStrike
+from income_desk.models.entry import SkewOptimalStrike
 
 # Add to imports at top if not already there:
-# from market_analyzer.models.vol_surface import SkewSlice
-# from market_analyzer.opportunity.option_plays._trade_spec_helpers import snap_strike, compute_otm_strike
+# from income_desk.models.vol_surface import SkewSlice
+# from income_desk.opportunity.option_plays._trade_spec_helpers import snap_strike, compute_otm_strike
 
 
 def select_skew_optimal_strike(
@@ -724,7 +724,7 @@ def select_skew_optimal_strike(
     Returns:
         SkewOptimalStrike with baseline vs optimal comparison.
     """
-    from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
+    from income_desk.opportunity.option_plays._trade_spec_helpers import (
         snap_strike,
     )
 
@@ -799,7 +799,7 @@ Expected: PASS (5 tests)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add market_analyzer/features/entry_levels.py tests/test_entry_levels.py
+git add income_desk/features/entry_levels.py tests/test_entry_levels.py
 git commit -m "feat: add skew-optimal strike selection"
 ```
 
@@ -808,7 +808,7 @@ git commit -m "feat: add skew-optimal strike selection"
 ## Task 4: Multi-Factor Entry Score
 
 **Files:**
-- Modify: `market_analyzer/features/entry_levels.py` (add function)
+- Modify: `income_desk/features/entry_levels.py` (add function)
 - Test: `tests/test_entry_levels.py` (append)
 
 **Context:** This answers "should I enter NOW or WAIT for a better level?" by scoring 5 factors that measure how extended price is from mean/levels. High score = price is at an extreme and near a level → enter now. Low score = price is mid-range with no level backing → wait for pullback.
@@ -825,12 +825,12 @@ git commit -m "feat: add skew-optimal strike selection"
 Append to `tests/test_entry_levels.py`:
 
 ```python
-from market_analyzer.models.technicals import (
+from income_desk.models.technicals import (
     BollingerBands, MACDData, MovingAverages, RSIData,
     StochasticData, SupportResistance, TechnicalSnapshot,
     MarketPhase, PhaseIndicator,
 )
-from market_analyzer.features.entry_levels import score_entry_level
+from income_desk.features.entry_levels import score_entry_level
 
 
 def _make_technicals(
@@ -946,13 +946,13 @@ Expected: FAIL (ImportError)
 
 - [ ] **Step 3: Write implementation**
 
-Add to `market_analyzer/features/entry_levels.py`:
+Add to `income_desk/features/entry_levels.py`:
 
 ```python
-from market_analyzer.models.entry import EntryLevelScore
+from income_desk.models.entry import EntryLevelScore
 
 # TYPE_CHECKING imports already present from Task 2; add if needed:
-# from market_analyzer.models.technicals import TechnicalSnapshot
+# from income_desk.models.technicals import TechnicalSnapshot
 
 
 def score_entry_level(
@@ -1080,7 +1080,7 @@ Expected: PASS (6 tests)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add market_analyzer/features/entry_levels.py tests/test_entry_levels.py
+git add income_desk/features/entry_levels.py tests/test_entry_levels.py
 git commit -m "feat: add multi-factor entry level score"
 ```
 
@@ -1089,7 +1089,7 @@ git commit -m "feat: add multi-factor entry level score"
 ## Task 5: Conditional Entry / Limit Order Price
 
 **Files:**
-- Modify: `market_analyzer/features/entry_levels.py` (add function)
+- Modify: `income_desk/features/entry_levels.py` (add function)
 - Test: `tests/test_entry_levels.py` (append)
 
 **Context:** Current TradeSpec has `max_entry_price` (ceiling) but no target limit price. This function computes what price to place a limit order at, based on fill urgency (patient in R1, aggressive in R3 trending).
@@ -1099,7 +1099,7 @@ git commit -m "feat: add multi-factor entry level score"
 Append to `tests/test_entry_levels.py`:
 
 ```python
-from market_analyzer.features.entry_levels import compute_limit_entry_price
+from income_desk.features.entry_levels import compute_limit_entry_price
 
 
 class TestLimitEntryPrice:
@@ -1180,10 +1180,10 @@ Expected: FAIL
 
 - [ ] **Step 3: Write implementation**
 
-Add to `market_analyzer/features/entry_levels.py`:
+Add to `income_desk/features/entry_levels.py`:
 
 ```python
-from market_analyzer.models.entry import ConditionalEntry
+from income_desk.models.entry import ConditionalEntry
 
 
 def compute_limit_entry_price(
@@ -1268,7 +1268,7 @@ Expected: PASS (7 tests)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add market_analyzer/features/entry_levels.py tests/test_entry_levels.py
+git add income_desk/features/entry_levels.py tests/test_entry_levels.py
 git commit -m "feat: add conditional entry / limit order price computation"
 ```
 
@@ -1277,7 +1277,7 @@ git commit -m "feat: add conditional entry / limit order price computation"
 ## Task 6: Pullback Alert Levels
 
 **Files:**
-- Modify: `market_analyzer/features/entry_levels.py` (add function)
+- Modify: `income_desk/features/entry_levels.py` (add function)
 - Test: `tests/test_entry_levels.py` (append)
 
 **Context:** Given an IC at current price, compute price levels where the trade gets BETTER. If SPY is at 580 and SMA-20 is at 576, a pullback to 576 means the short put can be placed 4 pts further OTM — improving ROC. This gives the trader "wait for 576" alerts instead of blindly entering at 580.
@@ -1287,7 +1287,7 @@ git commit -m "feat: add conditional entry / limit order price computation"
 Append to `tests/test_entry_levels.py`:
 
 ```python
-from market_analyzer.features.entry_levels import compute_pullback_levels
+from income_desk.features.entry_levels import compute_pullback_levels
 
 
 class TestPullbackLevels:
@@ -1356,10 +1356,10 @@ Expected: FAIL
 
 - [ ] **Step 3: Write implementation**
 
-Add to `market_analyzer/features/entry_levels.py`:
+Add to `income_desk/features/entry_levels.py`:
 
 ```python
-from market_analyzer.models.entry import PullbackAlert
+from income_desk.models.entry import PullbackAlert
 
 
 def compute_pullback_levels(
@@ -1444,7 +1444,7 @@ Expected: PASS (6 tests)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add market_analyzer/features/entry_levels.py tests/test_entry_levels.py
+git add income_desk/features/entry_levels.py tests/test_entry_levels.py
 git commit -m "feat: add pullback alert levels for patient entry"
 ```
 
@@ -1453,8 +1453,8 @@ git commit -m "feat: add pullback alert levels for patient entry"
 ## Task 7: Wire Skew into build_iron_condor_legs + TradeSpec Fields
 
 **Files:**
-- Modify: `market_analyzer/opportunity/option_plays/_trade_spec_helpers.py`
-- Modify: `market_analyzer/models/opportunity.py`
+- Modify: `income_desk/opportunity/option_plays/_trade_spec_helpers.py`
+- Modify: `income_desk/models/opportunity.py`
 - Test: `tests/test_entry_levels.py` (append)
 
 **Context:** Modify `build_iron_condor_legs` to accept optional `SkewSlice`. When provided, use `select_skew_optimal_strike` to shift short strikes toward richest premium. Add 4 new fields to TradeSpec for entry intelligence.
@@ -1464,7 +1464,7 @@ git commit -m "feat: add pullback alert levels for patient entry"
 Append to `tests/test_entry_levels.py`:
 
 ```python
-from market_analyzer.opportunity.option_plays._trade_spec_helpers import (
+from income_desk.opportunity.option_plays._trade_spec_helpers import (
     build_iron_condor_legs,
 )
 
@@ -1539,7 +1539,7 @@ Expected: FAIL (skew parameter not accepted)
 
 - [ ] **Step 3: Modify build_iron_condor_legs**
 
-Edit `market_analyzer/opportunity/option_plays/_trade_spec_helpers.py`:
+Edit `income_desk/opportunity/option_plays/_trade_spec_helpers.py`:
 
 Change the `build_iron_condor_legs` signature from:
 ```python
@@ -1568,7 +1568,7 @@ def build_iron_condor_legs(
 Add the import at the top of the file. Since `_trade_spec_helpers.py` already has `from __future__ import annotations`, the annotation `SkewSlice | None` is string-evaluated at runtime and the import can go in the TYPE_CHECKING block:
 ```python
 if TYPE_CHECKING:
-    from market_analyzer.models.vol_surface import SkewSlice
+    from income_desk.models.vol_surface import SkewSlice
 ```
 Verify `from __future__ import annotations` exists at the top of the file. If not, add it AND use a runtime import instead.
 
@@ -1576,7 +1576,7 @@ Inside `build_iron_condor_legs`, after computing `short_put` and `short_call`, a
 ```python
     # Skew adjustment: shift short strikes toward richest IV premium
     if skew is not None:
-        from market_analyzer.features.entry_levels import select_skew_optimal_strike
+        from income_desk.features.entry_levels import select_skew_optimal_strike
         put_optimal = select_skew_optimal_strike(price, atr, regime_id, skew, "put")
         if put_optimal.iv_advantage_pct >= 5.0:  # Only shift if meaningful advantage
             short_put = put_optimal.optimal_strike
@@ -1594,7 +1594,7 @@ Then recompute long strikes from the (possibly adjusted) short strikes:
 
 - [ ] **Step 4: Add TradeSpec fields**
 
-Edit `market_analyzer/models/opportunity.py`. Add after line ~497 (after `entry_window_timezone`):
+Edit `income_desk/models/opportunity.py`. Add after line ~497 (after `entry_window_timezone`):
 ```python
     entry_mode: str | None = None  # "limit" or "market"
     limit_price: float | None = None  # Target limit order price
@@ -1615,7 +1615,7 @@ Expected: All ~1408 tests pass (existing IC tests should pass since skew=None pr
 - [ ] **Step 7: Commit**
 
 ```bash
-git add market_analyzer/opportunity/option_plays/_trade_spec_helpers.py market_analyzer/models/opportunity.py tests/test_entry_levels.py
+git add income_desk/opportunity/option_plays/_trade_spec_helpers.py income_desk/models/opportunity.py tests/test_entry_levels.py
 git commit -m "feat: wire skew into IC strike selection + add TradeSpec entry fields"
 ```
 
@@ -1624,7 +1624,7 @@ git commit -m "feat: wire skew into IC strike selection + add TradeSpec entry fi
 ## Task 8: Wire Proximity Check into Validation
 
 **Files:**
-- Modify: `market_analyzer/validation/daily_readiness.py`
+- Modify: `income_desk/validation/daily_readiness.py`
 - Test: `tests/test_entry_levels.py` (append)
 
 **Context:** Add `strike_proximity` as check #8 in `run_daily_checks`. This requires adding `levels: LevelsAnalysis | None` and `atr: float` as optional parameters. When levels are provided, check that short strikes are backed by S/R levels. When not provided, emit a WARN (data gap).
@@ -1634,8 +1634,8 @@ git commit -m "feat: wire skew into IC strike selection + add TradeSpec entry fi
 Append to `tests/test_entry_levels.py`:
 
 ```python
-from market_analyzer.validation.daily_readiness import run_daily_checks
-from market_analyzer.validation.models import Severity
+from income_desk.validation.daily_readiness import run_daily_checks
+from income_desk.validation.models import Severity
 
 
 class TestStrikeProximityInDailyChecks:
@@ -1710,13 +1710,13 @@ Expected: FAIL (levels parameter not accepted by run_daily_checks)
 
 - [ ] **Step 3: Modify run_daily_checks**
 
-Edit `market_analyzer/validation/daily_readiness.py`:
+Edit `income_desk/validation/daily_readiness.py`:
 
 Add `levels: LevelsAnalysis | None = None` parameter to `run_daily_checks` signature.
 
 Add the import at the top (in TYPE_CHECKING block):
 ```python
-from market_analyzer.models.levels import LevelsAnalysis
+from income_desk.models.levels import LevelsAnalysis
 ```
 
 After check #7 (exit_discipline), add check #8:
@@ -1724,7 +1724,7 @@ After check #7 (exit_discipline), add check #8:
 ```python
     # ── Check 8: Strike proximity to S/R levels ──
     if levels is not None:
-        from market_analyzer.features.entry_levels import compute_strike_support_proximity
+        from income_desk.features.entry_levels import compute_strike_support_proximity
         atr_value = current_price * atr_pct / 100
         proximity = compute_strike_support_proximity(trade_spec, levels, atr=atr_value)
         if proximity.all_backed:
@@ -1768,7 +1768,7 @@ Existing tests that assert check count == 7 will need updating to 8. The impleme
 - [ ] **Step 6: Commit**
 
 ```bash
-git add market_analyzer/validation/daily_readiness.py tests/test_entry_levels.py
+git add income_desk/validation/daily_readiness.py tests/test_entry_levels.py
 git commit -m "feat: add strike_proximity check (#8) to daily validation suite"
 ```
 
@@ -1777,18 +1777,18 @@ git commit -m "feat: add strike_proximity check (#8) to daily validation suite"
 ## Task 9: Package Exports + CLI do_entry_analysis
 
 **Files:**
-- Modify: `market_analyzer/__init__.py`
-- Modify: `market_analyzer/cli/interactive.py`
+- Modify: `income_desk/__init__.py`
+- Modify: `income_desk/cli/interactive.py`
 - Test: `tests/test_entry_levels.py` (append)
 
 **Context:** Wire all 6 functions into the public API + add a `do_entry_analysis` CLI command that runs the full entry-level intelligence pipeline for a given ticker.
 
 - [ ] **Step 1: Add exports to `__init__.py`**
 
-Add to `market_analyzer/__init__.py` exports:
+Add to `income_desk/__init__.py` exports:
 
 ```python
-from market_analyzer.models.entry import (
+from income_desk.models.entry import (
     ConditionalEntry,
     EntryLevelScore,
     PullbackAlert,
@@ -1796,7 +1796,7 @@ from market_analyzer.models.entry import (
     StrikeProximityLeg,
     StrikeProximityResult,
 )
-from market_analyzer.features.entry_levels import (
+from income_desk.features.entry_levels import (
     compute_limit_entry_price,
     compute_pullback_levels,
     compute_strike_support_proximity,
@@ -1809,7 +1809,7 @@ Add all 11 names to `__all__`.
 
 - [ ] **Step 2: Add CLI command**
 
-Add to `market_analyzer/cli/interactive.py` (after `do_validate`):
+Add to `income_desk/cli/interactive.py` (after `do_validate`):
 
 ```python
     def do_entry_analysis(self, arg: str) -> None:
@@ -1831,14 +1831,14 @@ Add to `market_analyzer/cli/interactive.py` (after `do_validate`):
             levels = self.ma.levels.analyze(ticker)
             vol = self.ma.vol_surface.compute(ticker)
 
-            from market_analyzer.opportunity.option_plays.iron_condor import assess_iron_condor
+            from income_desk.opportunity.option_plays.iron_condor import assess_iron_condor
             ic = assess_iron_condor(ticker, regime, tech, vol)
 
             if ic.trade_spec is None:
                 print(f"No trade spec for {ticker} (verdict: {ic.verdict})")
                 return
 
-            from market_analyzer.features.entry_levels import (
+            from income_desk.features.entry_levels import (
                 compute_strike_support_proximity,
                 select_skew_optimal_strike,
                 score_entry_level,
@@ -1915,7 +1915,7 @@ Append to `tests/test_entry_levels.py`:
 class TestCLIEntryAnalysis:
     def test_do_entry_analysis_import(self) -> None:
         """Verify all entry_levels functions are importable from top-level."""
-        from market_analyzer import (
+        from income_desk import (
             compute_strike_support_proximity,
             select_skew_optimal_strike,
             score_entry_level,
@@ -1942,7 +1942,7 @@ Expected: All tests pass
 - [ ] **Step 5: Commit**
 
 ```bash
-git add market_analyzer/__init__.py market_analyzer/cli/interactive.py tests/test_entry_levels.py
+git add income_desk/__init__.py income_desk/cli/interactive.py tests/test_entry_levels.py
 git commit -m "feat: add entry_analysis CLI command + wire package exports"
 ```
 
@@ -1965,31 +1965,31 @@ from datetime import date
 
 import pytest
 
-from market_analyzer.features.entry_levels import (
+from income_desk.features.entry_levels import (
     compute_limit_entry_price,
     compute_pullback_levels,
     compute_strike_support_proximity,
     score_entry_level,
     select_skew_optimal_strike,
 )
-from market_analyzer.models.entry import (
+from income_desk.models.entry import (
     ConditionalEntry,
     EntryLevelScore,
     PullbackAlert,
     SkewOptimalStrike,
     StrikeProximityResult,
 )
-from market_analyzer.models.levels import (
+from income_desk.models.levels import (
     LevelRole,
     LevelSource,
     LevelsAnalysis,
     PriceLevel,
     TradeDirection,
 )
-from market_analyzer.models.opportunity import Verdict
-from market_analyzer.opportunity.option_plays.iron_condor import assess_iron_condor
-from market_analyzer.validation.daily_readiness import run_daily_checks
-from market_analyzer.validation.models import Severity
+from income_desk.models.opportunity import Verdict
+from income_desk.opportunity.option_plays.iron_condor import assess_iron_condor
+from income_desk.validation.daily_readiness import run_daily_checks
+from income_desk.validation.models import Severity
 
 
 class TestFullEntryPipeline:
@@ -1999,7 +1999,7 @@ class TestFullEntryPipeline:
         self, r1_regime, normal_vol_surface,
     ) -> None:
         """R1 IC with strong S/R backing passes proximity and daily checks."""
-        from market_analyzer.models.technicals import (
+        from income_desk.models.technicals import (
             BollingerBands, MACDData, MovingAverages, RSIData,
             StochasticData, SupportResistance, TechnicalSnapshot,
             MarketPhase, PhaseIndicator,
@@ -2112,7 +2112,7 @@ class TestEntryScoreWithExtremes:
 
     def test_oversold_bounce_entry(self) -> None:
         """RSI 22, %B -0.1 (below lower band) → strong enter_now."""
-        from market_analyzer.models.technicals import (
+        from income_desk.models.technicals import (
             BollingerBands, MACDData, MovingAverages, RSIData,
             StochasticData, SupportResistance, TechnicalSnapshot,
             MarketPhase, PhaseIndicator,
@@ -2227,13 +2227,13 @@ git commit -m "feat: add functional tests for entry-level intelligence pipeline"
 After all 10 tasks are complete:
 
 - [ ] All tests pass: `.venv_312/Scripts/python.exe -m pytest tests/ -v`
-- [ ] All 6 functions importable from `market_analyzer`:
+- [ ] All 6 functions importable from `income_desk`:
   - `compute_strike_support_proximity`
   - `select_skew_optimal_strike`
   - `score_entry_level`
   - `compute_limit_entry_price`
   - `compute_pullback_levels`
-- [ ] All 6 models importable from `market_analyzer`:
+- [ ] All 6 models importable from `income_desk`:
   - `StrikeProximityResult`, `StrikeProximityLeg`
   - `SkewOptimalStrike`
   - `EntryLevelScore`

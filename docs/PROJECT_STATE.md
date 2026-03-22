@@ -1,4 +1,4 @@
-# market_analyzer — Project State
+# income_desk — Project State
 
 > Current implementation state as of 2026-03-21.
 > Update this file when major features are completed.
@@ -70,7 +70,7 @@ Commits in reverse chronological order since 2026-03-01:
 
 A complete pre-trade profitability validation framework implemented as pure functions (no broker required).
 
-**Package:** `market_analyzer/validation/`
+**Package:** `income_desk/validation/`
 - `models.py` — `CheckResult`, `Severity` (PASS/WARN/FAIL), `Suite` (DAILY/ADVERSARIAL), `ValidationReport` (Pydantic with `summary`, `passed`, `failed`, `warned` computed fields)
 - `profitability_audit.py` — 3 profitability audit checks
 - `stress_scenarios.py` — 3 adversarial stress checks

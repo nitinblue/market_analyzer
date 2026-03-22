@@ -4,7 +4,7 @@ from datetime import date, datetime
 
 import pytest
 
-from market_analyzer.models.fundamentals import (
+from income_desk.models.fundamentals import (
     BusinessInfo,
     CashMetrics,
     DebtMetrics,
@@ -19,9 +19,9 @@ from market_analyzer.models.fundamentals import (
     UpcomingEvents,
     ValuationMetrics,
 )
-from market_analyzer.models.opportunity import Verdict
-from market_analyzer.models.regime import RegimeID, RegimeResult, TrendDirection
-from market_analyzer.opportunity.option_plays.earnings import (
+from income_desk.models.opportunity import Verdict
+from income_desk.models.regime import RegimeID, RegimeResult, TrendDirection
+from income_desk.opportunity.option_plays.earnings import (
     EarningsOpportunity,
     assess_earnings_play,
 )
@@ -71,7 +71,7 @@ def _make_fundamentals(days_to_earnings: int | None = 7) -> FundamentalsSnapshot
 
 class TestEarningsPlayAssessment:
     def test_no_earnings_date_is_no_go(self, sample_ohlcv_trending):
-        from market_analyzer.features.technicals import compute_technicals
+        from income_desk.features.technicals import compute_technicals
 
         regime = _make_regime()
         technicals = compute_technicals(sample_ohlcv_trending, "TEST")
@@ -85,7 +85,7 @@ class TestEarningsPlayAssessment:
         assert result.verdict == Verdict.NO_GO
 
     def test_earnings_in_window(self, sample_ohlcv_trending):
-        from market_analyzer.features.technicals import compute_technicals
+        from income_desk.features.technicals import compute_technicals
 
         regime = _make_regime()
         technicals = compute_technicals(sample_ohlcv_trending, "TEST")
@@ -101,7 +101,7 @@ class TestEarningsPlayAssessment:
         assert result.verdict in (Verdict.GO, Verdict.CAUTION, Verdict.NO_GO)
 
     def test_earnings_too_far(self, sample_ohlcv_trending):
-        from market_analyzer.features.technicals import compute_technicals
+        from income_desk.features.technicals import compute_technicals
 
         regime = _make_regime()
         technicals = compute_technicals(sample_ohlcv_trending, "TEST")
@@ -116,7 +116,7 @@ class TestEarningsPlayAssessment:
         assert result.days_to_earnings == 60
 
     def test_summary_present(self, sample_ohlcv_trending):
-        from market_analyzer.features.technicals import compute_technicals
+        from income_desk.features.technicals import compute_technicals
 
         regime = _make_regime()
         technicals = compute_technicals(sample_ohlcv_trending, "TEST")

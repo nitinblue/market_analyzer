@@ -11,7 +11,7 @@ import datetime
 import pytest
 from datetime import date
 
-from market_analyzer.adapters.simulated import (
+from income_desk.adapters.simulated import (
     SimulatedMarketData,
     SimulatedMetrics,
     SimulatedAccount,
@@ -22,7 +22,7 @@ from market_analyzer.adapters.simulated import (
     _generate_option_quote,
     _get_strike_step,
 )
-from market_analyzer.models.opportunity import LegAction, LegSpec
+from income_desk.models.opportunity import LegAction, LegSpec
 
 
 class TestSimulatedMarketData:
@@ -326,7 +326,7 @@ class TestPresetScenarios:
 class TestIntegrationWithMA:
     def test_full_pipeline_with_simulated_data(self):
         """Simulated data should wire through the entire MA service layer."""
-        from market_analyzer import MarketAnalyzer, DataService
+        from income_desk import MarketAnalyzer, DataService
 
         sim = create_calm_market()
         ma = MarketAnalyzer(
@@ -339,7 +339,7 @@ class TestIntegrationWithMA:
         assert ma.quotes.source == "simulated"
 
     def test_get_chain_via_quote_service(self):
-        from market_analyzer import MarketAnalyzer, DataService
+        from income_desk import MarketAnalyzer, DataService
 
         sim = create_calm_market()
         ma = MarketAnalyzer(
@@ -354,7 +354,7 @@ class TestIntegrationWithMA:
 
     def test_regime_plus_simulated_quotes(self):
         """Regime detection (yfinance) + simulated quotes should coexist."""
-        from market_analyzer import MarketAnalyzer, DataService
+        from income_desk import MarketAnalyzer, DataService
 
         sim = create_calm_market()
         ma = MarketAnalyzer(
@@ -428,7 +428,7 @@ class TestRefreshAndSnapshot:
     def test_refresh_saves_to_disk(self, tmp_path, monkeypatch):
         """refresh_simulation_data saves JSON to disk."""
         monkeypatch.setattr(
-            "market_analyzer.adapters.simulated.SIM_SNAPSHOT_FILE",
+            "income_desk.adapters.simulated.SIM_SNAPSHOT_FILE",
             tmp_path / "snapshot.json",
         )
 
@@ -473,7 +473,7 @@ class TestRefreshAndSnapshot:
                 def detect(t):
                     return MockRegime()
 
-        from market_analyzer.adapters.simulated import refresh_simulation_data
+        from income_desk.adapters.simulated import refresh_simulation_data
 
         result = refresh_simulation_data(MockMA(), ["SPY"])
         assert "SPY" in result["tickers"]
@@ -486,7 +486,7 @@ class TestRefreshAndSnapshot:
 
         snapshot_file = tmp_path / "snapshot.json"
         monkeypatch.setattr(
-            "market_analyzer.adapters.simulated.SIM_SNAPSHOT_FILE", snapshot_file
+            "income_desk.adapters.simulated.SIM_SNAPSHOT_FILE", snapshot_file
         )
 
         snapshot_file.write_text(
@@ -502,7 +502,7 @@ class TestRefreshAndSnapshot:
             )
         )
 
-        from market_analyzer.adapters.simulated import create_from_snapshot
+        from income_desk.adapters.simulated import create_from_snapshot
 
         sim = create_from_snapshot()
         assert sim is not None
@@ -514,11 +514,11 @@ class TestRefreshAndSnapshot:
 
     def test_no_snapshot_returns_none(self, tmp_path, monkeypatch):
         monkeypatch.setattr(
-            "market_analyzer.adapters.simulated.SIM_SNAPSHOT_FILE",
+            "income_desk.adapters.simulated.SIM_SNAPSHOT_FILE",
             tmp_path / "nonexistent.json",
         )
 
-        from market_analyzer.adapters.simulated import create_from_snapshot
+        from income_desk.adapters.simulated import create_from_snapshot
 
         assert create_from_snapshot() is None
 
@@ -528,7 +528,7 @@ class TestRefreshAndSnapshot:
 
         snapshot_file = tmp_path / "snapshot.json"
         monkeypatch.setattr(
-            "market_analyzer.adapters.simulated.SIM_SNAPSHOT_FILE", snapshot_file
+            "income_desk.adapters.simulated.SIM_SNAPSHOT_FILE", snapshot_file
         )
 
         snapshot_file.write_text(
@@ -544,7 +544,7 @@ class TestRefreshAndSnapshot:
             )
         )
 
-        from market_analyzer.adapters.simulated import get_snapshot_info
+        from income_desk.adapters.simulated import get_snapshot_info
 
         info = get_snapshot_info()
         assert info is not None
@@ -557,7 +557,7 @@ class TestRefreshAndSnapshot:
 
         snapshot_file = tmp_path / "snapshot.json"
         monkeypatch.setattr(
-            "market_analyzer.adapters.simulated.SIM_SNAPSHOT_FILE", snapshot_file
+            "income_desk.adapters.simulated.SIM_SNAPSHOT_FILE", snapshot_file
         )
 
         snapshot_file.write_text(
@@ -573,7 +573,7 @@ class TestRefreshAndSnapshot:
             )
         )
 
-        from market_analyzer.adapters.simulated import create_from_snapshot
+        from income_desk.adapters.simulated import create_from_snapshot
 
         sim = create_from_snapshot()
         assert sim is not None

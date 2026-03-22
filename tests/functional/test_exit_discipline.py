@@ -2,8 +2,8 @@
 import pytest
 from datetime import date, timedelta
 
-from market_analyzer.trade_spec_factory import build_iron_condor
-from market_analyzer.trade_lifecycle import monitor_exit_conditions
+from income_desk.trade_spec_factory import build_iron_condor
+from income_desk.trade_lifecycle import monitor_exit_conditions
 
 
 def _ic():

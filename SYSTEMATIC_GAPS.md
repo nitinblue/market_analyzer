@@ -367,7 +367,7 @@ MA exposes all APIs. Platform provides infrastructure (DB, scheduling, UI). All 
 Platform builds `TradeOutcome` from its own DB when a trade closes:
 
 ```python
-from market_analyzer import TradeOutcome, TradeExitReason
+from income_desk import TradeOutcome, TradeExitReason
 
 outcome = TradeOutcome(
     trade_id=trade_orm.id,
@@ -403,7 +403,7 @@ outcome = TradeOutcome(
 ### Bandit Flow: Strategy Selection
 
 ```python
-from market_analyzer import build_bandits, update_bandit, select_strategies
+from income_desk import build_bandits, update_bandit, select_strategies
 
 # STARTUP: build from historical outcomes
 outcomes = load_all_outcomes_from_db()
@@ -427,7 +427,7 @@ save_bandit(updated)
 ### Drift Flow: Strategy Suspension
 
 ```python
-from market_analyzer import detect_drift
+from income_desk import detect_drift
 
 # DAILY PRE-MARKET
 outcomes = load_recent_outcomes(days=180)
@@ -445,7 +445,7 @@ for alert in alerts:
 ### Threshold Flow: Config Override
 
 ```python
-from market_analyzer import optimize_thresholds, ThresholdConfig
+from income_desk import optimize_thresholds, ThresholdConfig
 
 # MONTHLY
 outcomes = load_all_outcomes_from_db()

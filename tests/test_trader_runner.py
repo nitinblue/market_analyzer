@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from market_analyzer.demo.trader import (
+from income_desk.demo.trader import (
     TraderReport,
     run_india_trader,
     run_us_trader,

@@ -6,9 +6,9 @@ from unittest.mock import MagicMock, PropertyMock, patch
 import pandas as pd
 import pytest
 
-from market_analyzer.data.exceptions import DataFetchError
-from market_analyzer.data.providers.yfinance import YFinanceProvider
-from market_analyzer.models.data import DataRequest, DataType
+from income_desk.data.exceptions import DataFetchError
+from income_desk.data.providers.yfinance import YFinanceProvider
+from income_desk.models.data import DataRequest, DataType
 
 
 @pytest.fixture
@@ -57,7 +57,7 @@ class TestOptionsChainFetch:
         chain.puts = mock_puts_df
         mock_ticker.option_chain.return_value = chain
 
-        with patch("market_analyzer.data.providers.yfinance.yf.Ticker", return_value=mock_ticker):
+        with patch("income_desk.data.providers.yfinance.yf.Ticker", return_value=mock_ticker):
             result = provider.fetch(request)
 
         expected_cols = [
@@ -80,7 +80,7 @@ class TestOptionsChainFetch:
         chain.puts = mock_puts_df
         mock_ticker.option_chain.return_value = chain
 
-        with patch("market_analyzer.data.providers.yfinance.yf.Ticker", return_value=mock_ticker):
+        with patch("income_desk.data.providers.yfinance.yf.Ticker", return_value=mock_ticker):
             result = provider.fetch(request)
 
         assert set(result["option_type"].unique()) == {"call", "put"}
@@ -99,7 +99,7 @@ class TestOptionsChainFetch:
         chain.puts = mock_puts_df
         mock_ticker.option_chain.return_value = chain
 
-        with patch("market_analyzer.data.providers.yfinance.yf.Ticker", return_value=mock_ticker):
+        with patch("income_desk.data.providers.yfinance.yf.Ticker", return_value=mock_ticker):
             result = provider.fetch(request)
 
         # 2 expirations × (3 calls + 3 puts) = 12 rows
@@ -112,14 +112,14 @@ class TestOptionsChainFetch:
         mock_ticker = MagicMock()
         mock_ticker.options = ()
 
-        with patch("market_analyzer.data.providers.yfinance.yf.Ticker", return_value=mock_ticker):
+        with patch("income_desk.data.providers.yfinance.yf.Ticker", return_value=mock_ticker):
             with pytest.raises(DataFetchError, match="No options expirations"):
                 provider.fetch(request)
 
     def test_fetch_exception_raises(self, provider: YFinanceProvider) -> None:
         request = DataRequest(ticker="SPY", data_type=DataType.OPTIONS_CHAIN)
 
-        with patch("market_analyzer.data.providers.yfinance.yf.Ticker", side_effect=Exception("network")):
+        with patch("income_desk.data.providers.yfinance.yf.Ticker", side_effect=Exception("network")):
             with pytest.raises(DataFetchError, match="Failed to get options expirations"):
                 provider.fetch(request)
 
@@ -145,7 +145,7 @@ class TestOptionsChainFetch:
         chain.puts = pd.DataFrame()  # Empty puts
         mock_ticker.option_chain.return_value = chain
 
-        with patch("market_analyzer.data.providers.yfinance.yf.Ticker", return_value=mock_ticker):
+        with patch("income_desk.data.providers.yfinance.yf.Ticker", return_value=mock_ticker):
             result = provider.fetch(request)
 
         assert result["volume"].iloc[0] == 0
@@ -175,7 +175,7 @@ class TestOptionsChainFetch:
 
         mock_ticker.option_chain.side_effect = side_effect
 
-        with patch("market_analyzer.data.providers.yfinance.yf.Ticker", return_value=mock_ticker):
+        with patch("income_desk.data.providers.yfinance.yf.Ticker", return_value=mock_ticker):
             result = provider.fetch(request)
 
         # Only second expiration succeeded: 3 calls + 3 puts
@@ -196,7 +196,7 @@ class TestOptionsChainFetch:
         )
 
         request = DataRequest(ticker="SPY", data_type=DataType.OHLCV)
-        with patch("market_analyzer.data.providers.yfinance.yf.download", return_value=df):
+        with patch("income_desk.data.providers.yfinance.yf.download", return_value=df):
             result = provider.fetch(request)
 
         assert list(result.columns) == ["Open", "High", "Low", "Close", "Volume"]

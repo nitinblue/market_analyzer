@@ -1,6 +1,6 @@
-# The Trust Framework — Why market_analyzer Never Lies to You
+# The Trust Framework — Why income_desk Never Lies to You
 
-> Most trading tools give you a number and expect you to trust it. market_analyzer tells you **how much to trust the number** — and what you can safely do with it.
+> Most trading tools give you a number and expect you to trust it. income_desk tells you **how much to trust the number** — and what you can safely do with it.
 
 ---
 
@@ -12,13 +12,13 @@ Was the POP estimate wrong? Was it based on stale data? Was it using a Black-Sch
 
 **You'll never know.** Because the tool didn't tell you how confident it was, where the data came from, what was estimated vs real, or what the output was actually suitable for.
 
-market_analyzer does.
+income_desk does.
 
 ---
 
 ## Three Dimensions of Trust
 
-Every output from market_analyzer carries a `TrustReport` with three dimensions:
+Every output from income_desk carries a `TrustReport` with three dimensions:
 
 ### Dimension 1: Data Quality — Is the data accurate and fresh?
 
@@ -88,7 +88,7 @@ TRUST: 42% LOW
 ### Scenario 1: New User, No Broker
 
 ```python
-from market_analyzer import MarketAnalyzer, DataService, compute_trust_report
+from income_desk import MarketAnalyzer, DataService, compute_trust_report
 
 ma = MarketAnalyzer(data_service=DataService())
 regime = ma.regime.detect("SPY")
@@ -167,7 +167,7 @@ Recommendation: SELL
 
 No source attribution. No quality indicator. No context check. No fitness classification.
 
-### market_analyzer: "Here's a number. Here's exactly how much to trust it, and what you can do with it."
+### income_desk: "Here's a number. Here's exactly how much to trust it, and what you can do with it."
 
 ```
 POP: 72% (regime_historical, R1 calibrated, IV rank adjusted)
@@ -225,7 +225,7 @@ trust = compute_trust_report(mode="standalone", ...)
 ## For Developers: Adding Trust to Your Integration
 
 ```python
-from market_analyzer import compute_trust_report, FitnessCategory
+from income_desk import compute_trust_report, FitnessCategory
 
 # After running any analysis, compute trust:
 trust = compute_trust_report(

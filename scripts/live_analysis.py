@@ -8,21 +8,21 @@ warnings.filterwarnings("ignore")
 import logging
 logging.disable(logging.WARNING)
 
-from market_analyzer.cli._broker import connect_broker
-from market_analyzer import MarketAnalyzer, DataService
-from market_analyzer.opportunity.option_plays.iron_condor import assess_iron_condor
-from market_analyzer.validation.daily_readiness import run_daily_checks, run_adversarial_checks
-from market_analyzer.features.position_sizing import (
+from income_desk.cli._broker import connect_broker
+from income_desk import MarketAnalyzer, DataService
+from income_desk.opportunity.option_plays.iron_condor import assess_iron_condor
+from income_desk.validation.daily_readiness import run_daily_checks, run_adversarial_checks
+from income_desk.features.position_sizing import (
     compute_position_size, PortfolioExposure, compute_kelly_fraction,
 )
-from market_analyzer.features.exit_intelligence import compute_regime_stop
-from market_analyzer.features.entry_levels import (
+from income_desk.features.exit_intelligence import compute_regime_stop
+from income_desk.features.entry_levels import (
     score_entry_level, compute_pullback_levels, compute_iv_rank_quality,
 )
-from market_analyzer.features.dte_optimizer import select_optimal_dte
-from market_analyzer.features.decision_audit import audit_decision
-from market_analyzer.validation.stress_scenarios import check_gamma_stress, check_vega_shock
-from market_analyzer.trade_lifecycle import estimate_pop
+from income_desk.features.dte_optimizer import select_optimal_dte
+from income_desk.features.decision_audit import audit_decision
+from income_desk.validation.stress_scenarios import check_gamma_stress, check_vega_shock
+from income_desk.trade_lifecycle import estimate_pop
 
 
 def main():

@@ -1,4 +1,4 @@
-# market_analyzer --- User Manual
+# income_desk --- User Manual
 
 > Every trade suggestion is bespoke to YOUR portfolio, YOUR risk profile, YOUR capital. This is not a signal service --- it is a personal trading intelligence system.
 
@@ -115,7 +115,7 @@ analyzer-cli --broker
 
 ### 1.4 Understanding Trust Levels
 
-Every output from market_analyzer tells you how much to trust it. Three dimensions are evaluated:
+Every output from income_desk tells you how much to trust it. Three dimensions are evaluated:
 
 **Dimension 1: Data Quality** --- Is the data accurate and fresh?
 
@@ -140,7 +140,7 @@ The same function with the same market data produces different trust levels depe
 | **UNRELIABLE (<20%)** | Read documentation | Anything involving money |
 
 ```python
-from market_analyzer import compute_trust_report
+from income_desk import compute_trust_report
 
 trust = compute_trust_report(
     has_broker=True, has_iv_rank=True, has_vol_surface=True,
@@ -176,7 +176,7 @@ For full details on data interfaces, see `docs/DATA_INTERFACES.md`.
 
 ### 1.6 The Forward Testing Philosophy
 
-market_analyzer does not have a backtesting engine. This is deliberate.
+income_desk does not have a backtesting engine. This is deliberate.
 
 Backtesting gives false confidence --- it overfits to the past, assumes perfect fills, ignores commissions, and teaches traders to trust historical patterns that may never repeat. MA takes a different approach:
 
@@ -357,7 +357,7 @@ The most comprehensive pre-entry intelligence. Five independent analyses in one 
 | **Pullback alerts** | Where does the entry get better if you wait? | "SPY pullback to 572 = 15% better entry on IC" |
 
 ```python
-from market_analyzer import (
+from income_desk import (
     compute_strike_support_proximity, select_skew_optimal_strike,
     score_entry_level, compute_limit_entry_price, compute_pullback_levels,
 )
@@ -422,7 +422,7 @@ RESULT: READY TO TRADE (6/7 passed, 1 warning)
 **Decision rule:** `is_ready = True` when there are zero FAIL checks. Warnings are tradeable. A FAIL on `commission_drag` means the math does not work --- do not trade regardless of how good the setup looks.
 
 ```python
-from market_analyzer import run_daily_checks, run_adversarial_checks
+from income_desk import run_daily_checks, run_adversarial_checks
 
 report = run_daily_checks(
     ticker="SPY", trade_spec=trade_spec, entry_credit=1.80,
@@ -446,7 +446,7 @@ Quick check whether conditions favor income (theta) entries right now.
 ```
 
 ```python
-from market_analyzer import check_income_entry
+from income_desk import check_income_entry
 entry = check_income_entry(
     iv_rank=45, iv_percentile=50, dte=35, rsi=50, atr_pct=1.2,
     regime_id=1, has_earnings_within_dte=False, has_macro_event_today=False,
@@ -475,7 +475,7 @@ The primary sizing method. Accounts for win probability, payoff ratio, correlati
 ```
 
 ```python
-from market_analyzer import compute_kelly_fraction, compute_position_size
+from income_desk import compute_kelly_fraction, compute_position_size
 
 kelly = compute_kelly_fraction(win_prob=0.70, win_amount=80, loss_amount=420)
 contracts = compute_position_size(
@@ -514,7 +514,7 @@ Cash versus margin comparison for the position.
 ```
 
 ```python
-from market_analyzer import compute_margin_analysis
+from income_desk import compute_margin_analysis
 analysis = compute_margin_analysis(trade_spec, account_nlv=35000, regime_id=1)
 ```
 
@@ -527,7 +527,7 @@ Structure-based margin buffer calculation. How much cushion exists before a marg
 ```
 
 ```python
-from market_analyzer import compute_margin_buffer
+from income_desk import compute_margin_buffer
 buffer = compute_margin_buffer(trade_spec, account_nlv=35000, buying_power=24000)
 ```
 
@@ -550,7 +550,7 @@ Check all 4 exit rules on an open position.
 ```
 
 ```python
-from market_analyzer import monitor_exit_conditions
+from income_desk import monitor_exit_conditions
 result = monitor_exit_conditions(
     trade_id="SPY-IC-001", ticker="SPY",
     structure_type="iron_condor", order_side="credit",
@@ -591,7 +591,7 @@ Regime-contingent stops, trailing profit targets, and theta decay curves combine
 | R4 | 1.5x credit | Explosive --- tightest stops |
 
 ```python
-from market_analyzer import compute_regime_stop, compute_time_adjusted_target, compute_remaining_theta_value
+from income_desk import compute_regime_stop, compute_time_adjusted_target, compute_remaining_theta_value
 stop = compute_regime_stop(regime_id=2)  # 3.0x
 target = compute_time_adjusted_target(dte_remaining=25, profit_target_pct=0.50)
 theta = compute_remaining_theta_value(dte_remaining=25, entry_credit=1.80)
@@ -606,7 +606,7 @@ Comprehensive health assessment combining exit monitoring, position stress, and 
 ```
 
 ```python
-from market_analyzer import check_trade_health
+from income_desk import check_trade_health
 health = check_trade_health(
     trade_id="SPY-IC-001", trade_spec=spec,
     entry_price=0.80, contracts=1, current_mid_price=0.55,
@@ -675,7 +675,7 @@ The single most important pre-market check. Aggregates VIX, regime probabilities
 ```
 
 ```python
-from market_analyzer import assess_crash_sentinel
+from income_desk import assess_crash_sentinel
 signal = assess_crash_sentinel(regimes, vix_level, breadth_data, macro_regime)
 ```
 
@@ -696,7 +696,7 @@ signal = assess_crash_sentinel(regimes, vix_level, breadth_data, macro_regime)
 ```
 
 ```python
-from market_analyzer import audit_decision
+from income_desk import audit_decision
 audit = audit_decision(
     ticker="SPY", trade_spec=spec, regime=regime, technicals=tech,
     levels=levels, portfolio_exposure=exposure, account_nlv=35000,
@@ -722,7 +722,7 @@ Full 7-dimension risk picture. Check before placing ANY new trade.
 ```
 
 ```python
-from market_analyzer import compute_risk_dashboard, PortfolioPosition
+from income_desk import compute_risk_dashboard, PortfolioPosition
 
 dashboard = compute_risk_dashboard(
     positions=portfolio_positions,
@@ -754,7 +754,7 @@ dashboard = compute_risk_dashboard(
 ```
 
 ```python
-from market_analyzer import run_stress_suite, run_stress_test, get_predefined_scenario
+from income_desk import run_stress_suite, run_stress_test, get_predefined_scenario
 
 suite = run_stress_suite(positions, account_nlv=50000)
 print(suite.summary)
@@ -792,7 +792,7 @@ When you get assigned on a short option, MA tells you exactly what to do next.
 ```
 
 ```python
-from market_analyzer import handle_assignment
+from income_desk import handle_assignment
 result = handle_assignment(ticker="SPY", strike=570.0, option_type="put",
                             current_price=565.0, regime_id=1)
 ```
@@ -806,7 +806,7 @@ Pre-assignment warning for open positions. Especially important for US American-
 ```
 
 ```python
-from market_analyzer import assess_assignment_risk
+from income_desk import assess_assignment_risk
 risk = assess_assignment_risk(ticker="SPY", trade_spec=spec, current_price=580.0,
                                days_to_expiry=5, days_to_dividend=3)
 ```
@@ -820,7 +820,7 @@ Analyze a CSP before selling it. Shows yield, assignment probability, and effect
 ```
 
 ```python
-from market_analyzer import analyze_cash_secured_put
+from income_desk import analyze_cash_secured_put
 csp = analyze_cash_secured_put("IWM", strike=240, premium=2.50, dte=30, regime_id=1)
 ```
 
@@ -833,7 +833,7 @@ After getting assigned shares, analyze the best covered call to sell.
 ```
 
 ```python
-from market_analyzer import analyze_covered_call
+from income_desk import analyze_covered_call
 cc = analyze_covered_call("IWM", cost_basis=240.0, current_price=238.0, regime_id=1)
 ```
 
@@ -846,7 +846,7 @@ The full wheel: sell put -> get assigned -> sell covered call -> called away -> 
 ```
 
 ```python
-from market_analyzer import analyze_wheel_strategy, decide_wheel_action, WheelPosition
+from income_desk import analyze_wheel_strategy, decide_wheel_action, WheelPosition
 
 wheel = analyze_wheel_strategy("AAPL", current_price=227.0, iv=0.25, regime_id=1)
 # -> put yield 37%/yr, call yield 36%/yr, effective basis 7% below market
@@ -866,7 +866,7 @@ Interest rate sensitivity analysis for rate-sensitive tickers.
 ```
 
 ```python
-from market_analyzer import assess_rate_risk, assess_portfolio_rate_risk
+from income_desk import assess_rate_risk, assess_portfolio_rate_risk
 risk = assess_rate_risk("TLT", ohlcv, tnx_ohlcv, regime_id=1)
 portfolio_risk = assess_portfolio_rate_risk(positions, tnx_ohlcv)
 ```
@@ -967,7 +967,7 @@ US closes at 4:00 PM ET = 1:30 AM IST. India opens at 9:15 AM IST. US closing be
 ```
 
 ```python
-from market_analyzer import analyze_cross_market
+from income_desk import analyze_cross_market
 cm = analyze_cross_market("SPY", "NIFTY", us_ohlcv, india_ohlcv,
                            us_regime_id, india_regime_id)
 ```
@@ -994,7 +994,7 @@ For traders in both US and India markets.
 ```
 
 ```python
-from market_analyzer import compute_currency_pnl
+from income_desk import compute_currency_pnl
 pnl = compute_currency_pnl(
     ticker="NIFTY", trading_pnl_local=5000,
     position_value_local=500000,
@@ -1015,7 +1015,7 @@ The most comprehensive pre-market analysis --- covers 22 assets across equities,
 ```
 
 ```python
-from market_analyzer import generate_research_report, RESEARCH_ASSETS
+from income_desk import generate_research_report, RESEARCH_ASSETS
 data = {ticker: ds.get_ohlcv(ticker) for ticker in RESEARCH_ASSETS}
 report = generate_research_report(data, "daily", fred_api_key=None, spy_pe=26.3)
 ```
@@ -1081,7 +1081,7 @@ analyzer-cli --broker --paper
 Record outcomes and feed them back into the system:
 
 ```python
-from market_analyzer import calibrate_weights, TradeOutcome
+from income_desk import calibrate_weights, TradeOutcome
 
 outcomes = [
     TradeOutcome(ticker="SPY", strategy="iron_condor",
@@ -1225,8 +1225,8 @@ MA tracks 13 futures instruments and provides analysis of basis, term structure,
 | FINNIFTY_FUT | Fin NIFTY | Rs40/point | India |
 
 ```python
-from market_analyzer import analyze_futures_basis, analyze_term_structure, decide_futures_roll
-from market_analyzer import analyze_futures_options, estimate_futures_margin, generate_futures_report
+from income_desk import analyze_futures_basis, analyze_term_structure, decide_futures_roll
+from income_desk import analyze_futures_options, estimate_futures_margin, generate_futures_report
 ```
 
 **Always use defined risk on futures** (iron condors, not naked strangles) unless you have significant experience and capital. A 5% overnight gap in ES = $13,000 P&L per contract.
@@ -1339,8 +1339,8 @@ Expiry day dynamics: ATM options have extreme gamma, OTM options decay 3x faster
 ```
 
 ```python
-from market_analyzer import calibrate_weights, calibrate_pop_factors
-from market_analyzer import build_bandits, optimize_thresholds, detect_drift
+from income_desk import calibrate_weights, calibrate_pop_factors
+from income_desk import build_bandits, optimize_thresholds, detect_drift
 
 # Step 1: Calibrate ranking weights from real outcomes
 new_weights = calibrate_weights(outcomes)
@@ -1518,13 +1518,13 @@ optimized = optimize_thresholds(outcomes, current=ThresholdConfig())
 ### Core Setup
 
 ```python
-from market_analyzer import MarketAnalyzer, DataService
+from income_desk import MarketAnalyzer, DataService
 
 # Without broker (research mode)
 ma = MarketAnalyzer(data_service=DataService())
 
 # With TastyTrade broker
-from market_analyzer.broker.tastytrade import connect_tastytrade
+from income_desk.broker.tastytrade import connect_tastytrade
 md, mm, acct, wl = connect_tastytrade(is_paper=True)
 ma = MarketAnalyzer(
     data_service=DataService(),
@@ -1533,7 +1533,7 @@ ma = MarketAnalyzer(
 )
 
 # With Zerodha broker (India)
-from market_analyzer.broker.zerodha import connect_zerodha
+from income_desk.broker.zerodha import connect_zerodha
 md, mm, acct, wl = connect_zerodha(api_key="...", access_token="...")
 ma = MarketAnalyzer(
     data_service=DataService(), market="India",
@@ -1581,7 +1581,7 @@ metrics = ma.quotes.get_metrics("SPY")
 ### Pure Function APIs
 
 ```python
-from market_analyzer import (
+from income_desk import (
     # Validation
     run_daily_checks,              # 7-check profitability gate
     run_adversarial_checks,        # 3-check stress gate
@@ -1723,7 +1723,7 @@ spec.leg_codes           # ["STO 1x SPY P570 3/27/26", ...]
 Not all gates should block trades. The framework classifies every check:
 
 ```python
-from market_analyzer import evaluate_trade_gates
+from income_desk import evaluate_trade_gates
 
 report = evaluate_trade_gates(
     ticker="SPY", strategy="iron_condor",
@@ -1919,7 +1919,7 @@ DXLink-style tickers prefixed with `$` (e.g., `$SPX`) are also resolved correctl
 
 ## Quant's Cookbook --- Creative API Combinations
 
-> Think of market_analyzer as a set of building blocks. Each individual API tells you one thing. The real edge comes from **combining them** --- stacking regime detection with vol surface with profitability gates to make decisions no single metric could make alone.
+> Think of income_desk as a set of building blocks. Each individual API tells you one thing. The real edge comes from **combining them** --- stacking regime detection with vol surface with profitability gates to make decisions no single metric could make alone.
 
 ### Recipe 1: The Full Entry Decision Stack
 
@@ -2046,7 +2046,7 @@ for position in open_positions:
 ### Recipe 9: Shadow Portfolio (Learning from Rejections)
 
 ```python
-from market_analyzer import analyze_gate_effectiveness
+from income_desk import analyze_gate_effectiveness
 
 effectiveness = analyze_gate_effectiveness(gate_history, shadow_outcomes, actual_outcomes)
 
@@ -2059,7 +2059,7 @@ if effectiveness.shadow_win_rate > 0.60:
 ### Recipe 10: Weekly Calibration Loop
 
 ```python
-from market_analyzer import calibrate_weights, TradeOutcome
+from income_desk import calibrate_weights, TradeOutcome
 
 outcomes = [TradeOutcome(ticker="SPY", strategy="iron_condor", ...)]
 new_weights = calibrate_weights(outcomes)
@@ -2093,7 +2093,7 @@ TIER 3 --- IS THIS TRADE ACTUALLY PROFITABLE?
 
 ---
 
-*market_analyzer --- capital preservation first, income second, growth third.*
+*income_desk --- capital preservation first, income second, growth third.*
 *1072+ tests. 75+ CLI commands. US + India markets. TastyTrade + Zerodha brokers.*
 *Options + equities + futures + capital deployment. 75+ position-aware functions.*
 *5 investment strategies. 13 stress test scenarios. 17 trade gates. 22 macro assets tracked.*

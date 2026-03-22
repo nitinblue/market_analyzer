@@ -20,7 +20,7 @@ from datetime import date
 
 from tabulate import tabulate
 
-from market_analyzer import (
+from income_desk import (
     DataService,
     MarketAnalyzer,
     get_settings,

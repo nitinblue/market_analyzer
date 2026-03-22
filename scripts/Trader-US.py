@@ -38,16 +38,16 @@ def main():
 
     # Connect data source
     if args.broker:
-        from market_analyzer.cli._broker import connect_broker
+        from income_desk.cli._broker import connect_broker
         md, mm, acct, wl = connect_broker(is_paper=False)
         if md is None:
             print("Broker connection failed. Run: income-desk --setup")
             return
-        from market_analyzer import MarketAnalyzer, DataService
+        from income_desk import MarketAnalyzer, DataService
         ma = MarketAnalyzer(data_service=DataService(), market_data=md, market_metrics=mm)
         print("Data: BROKER (live)")
     else:
-        from market_analyzer.adapters.simulated import (
+        from income_desk.adapters.simulated import (
             create_ideal_income, create_post_crash_recovery, create_calm_market,
             create_volatile_market, create_crash_scenario, create_from_snapshot,
             SimulatedMetrics, SimulatedAccount,
@@ -64,12 +64,12 @@ def main():
         if sim is None:
             print("No snapshot found. Run 'refresh_sim' during market hours.")
             return
-        from market_analyzer import MarketAnalyzer, DataService
+        from income_desk import MarketAnalyzer, DataService
         ma = MarketAnalyzer(data_service=DataService(), market_data=sim, market_metrics=SimulatedMetrics(sim))
         print(f"Data: SIMULATED ({args.sim})")
 
     # Run trader
-    from market_analyzer.demo.trader import run_trader, print_trader_report
+    from income_desk.demo.trader import run_trader, print_trader_report
 
     if args.broker:
         sim_data = None
@@ -88,7 +88,7 @@ def main():
 
     # Save report
     from pathlib import Path
-    report_path = Path.home() / ".market_analyzer" / "last_us_trader_report.json"
+    report_path = Path.home() / ".income_desk" / "last_us_trader_report.json"
     report_path.parent.mkdir(exist_ok=True)
     report_path.write_text(report.model_dump_json(indent=2))
     print(f"\nReport saved: {report_path}")

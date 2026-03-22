@@ -1,4 +1,4 @@
-# Contributing to market_analyzer
+# Contributing to income_desk
 
 ## Development Setup
 
@@ -38,7 +38,7 @@ py -3.12 -m venv .venv_312
 
 ## Adding a New Broker
 
-1. Create `market_analyzer/broker/yourbroker/` with 4 files
+1. Create `income_desk/broker/yourbroker/` with 4 files
 2. Implement 3-5 ABCs from `broker/base.py`
 3. Map your broker's data format to `OptionQuote`, `MarketMetrics`, `AccountBalance`
 4. Add `connect_yourbroker()` function
@@ -57,7 +57,7 @@ py -3.12 -m venv .venv_312
 ## Architecture
 
 ```
-market_analyzer/
+income_desk/
   models/          # Pydantic data models (no logic)
   features/        # Pure functions (no data fetching)
   service/         # Service layer (orchestrates data + features)

@@ -4,7 +4,7 @@ from datetime import date, datetime
 
 import pytest
 
-from market_analyzer.models.fundamentals import (
+from income_desk.models.fundamentals import (
     BusinessInfo,
     CashMetrics,
     DebtMetrics,
@@ -18,13 +18,13 @@ from market_analyzer.models.fundamentals import (
     UpcomingEvents,
     ValuationMetrics,
 )
-from market_analyzer.models.macro import (
+from income_desk.models.macro import (
     MacroCalendar,
     MacroEvent,
     MacroEventImpact,
     MacroEventType,
 )
-from market_analyzer.models.opportunity import (
+from income_desk.models.opportunity import (
     FundamentalScore,
     LEAPOpportunity,
     LEAPStrategy,
@@ -32,14 +32,14 @@ from market_analyzer.models.opportunity import (
     ZeroDTEOpportunity,
     ZeroDTEStrategy,
 )
-from market_analyzer.models.phase import (
+from income_desk.models.phase import (
     PhaseEvidence,
     PhaseID,
     PhaseResult,
     PriceStructure,
 )
-from market_analyzer.models.regime import RegimeID, RegimeResult, TrendDirection
-from market_analyzer.models.technicals import (
+from income_desk.models.regime import RegimeID, RegimeResult, TrendDirection
+from income_desk.models.technicals import (
     BollingerBands,
     MACDData,
     MovingAverages,
@@ -52,8 +52,8 @@ from market_analyzer.models.technicals import (
     MarketPhase,
     PhaseIndicator,
 )
-from market_analyzer.opportunity.option_plays.zero_dte import assess_zero_dte
-from market_analyzer.opportunity.option_plays.leap import assess_leap
+from income_desk.opportunity.option_plays.zero_dte import assess_zero_dte
+from income_desk.opportunity.option_plays.leap import assess_leap
 
 
 # --- Test helpers ---
@@ -704,7 +704,7 @@ class TestSerialization:
 
 def _make_narrow_orb() -> ORBData:
     """Narrow ORB range (<0.5%) — triggers Iron Man selection."""
-    from market_analyzer.models.technicals import ORBLevel
+    from income_desk.models.technicals import ORBLevel
     return ORBData(
         ticker="TEST",
         date=date(2026, 2, 22),
@@ -736,7 +736,7 @@ def _make_narrow_orb() -> ORBData:
 
 def _make_orb_with_levels(status: str = "within", range_pct: float = 0.80) -> ORBData:
     """ORB with extension levels for testing ORB integration."""
-    from market_analyzer.models.technicals import ORBLevel
+    from income_desk.models.technicals import ORBLevel
     return ORBData(
         ticker="TEST",
         date=date(2026, 2, 22),
@@ -930,7 +930,7 @@ class TestORBIntegrationAllStrategies:
 
 class TestConfig:
     def test_opportunity_settings_load(self):
-        from market_analyzer.config import get_settings, reset_settings
+        from income_desk.config import get_settings, reset_settings
 
         reset_settings()
         settings = get_settings()
@@ -939,7 +939,7 @@ class TestConfig:
         assert settings.opportunity.leap.earnings_blackout_days == 5
 
     def test_zero_dte_thresholds_configurable(self):
-        from market_analyzer.config import get_settings
+        from income_desk.config import get_settings
 
         cfg = get_settings().opportunity.zero_dte
         assert cfg.min_atr_pct == 0.3
@@ -947,7 +947,7 @@ class TestConfig:
         assert cfg.go_threshold == 0.55
 
     def test_leap_thresholds_configurable(self):
-        from market_analyzer.config import get_settings
+        from income_desk.config import get_settings
 
         cfg = get_settings().opportunity.leap
         assert cfg.go_threshold == 0.50

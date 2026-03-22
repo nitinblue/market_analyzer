@@ -51,9 +51,9 @@ def main():
         try:
             from dotenv import load_dotenv
             load_dotenv()
-            from market_analyzer.broker.dhan import connect_dhan
+            from income_desk.broker.dhan import connect_dhan
             md, mm, acct, wl = connect_dhan()
-            from market_analyzer import MarketAnalyzer, DataService
+            from income_desk import MarketAnalyzer, DataService
             ma = MarketAnalyzer(data_service=DataService(), market_data=md, market_metrics=mm)
             print("Data: DHAN BROKER (live India)")
         except Exception as e:
@@ -65,12 +65,12 @@ def main():
             from dotenv import load_dotenv
             load_dotenv()
             import os
-            from market_analyzer.broker.zerodha import connect_zerodha
+            from income_desk.broker.zerodha import connect_zerodha
             md, mm, acct, wl = connect_zerodha(
                 api_key=os.environ.get("ZERODHA_API_KEY", ""),
                 access_token=os.environ.get("ZERODHA_ACCESS_TOKEN", ""),
             )
-            from market_analyzer import MarketAnalyzer, DataService
+            from income_desk import MarketAnalyzer, DataService
             ma = MarketAnalyzer(data_service=DataService(), market_data=md, market_metrics=mm)
             print("Data: ZERODHA BROKER (live India)")
         except Exception as e:
@@ -78,7 +78,7 @@ def main():
             return
 
     else:
-        from market_analyzer.adapters.simulated import (
+        from income_desk.adapters.simulated import (
             create_india_trading, create_from_snapshot,
             SimulatedMetrics, SimulatedAccount,
         )
@@ -90,7 +90,7 @@ def main():
         else:
             sim = create_india_trading()
 
-        from market_analyzer import MarketAnalyzer, DataService
+        from income_desk import MarketAnalyzer, DataService
         ma = MarketAnalyzer(data_service=DataService(), market_data=sim, market_metrics=SimulatedMetrics(sim))
         print(f"Data: SIMULATED ({args.sim})")
 
@@ -120,7 +120,7 @@ def main():
     print()
 
     # Run trader
-    from market_analyzer.demo.trader import run_trader, print_trader_report
+    from income_desk.demo.trader import run_trader, print_trader_report
 
     sim_data = sim if not args.broker else None
 
@@ -176,7 +176,7 @@ def main():
 
     # Save report
     from pathlib import Path
-    report_path = Path.home() / ".market_analyzer" / "last_india_trader_report.json"
+    report_path = Path.home() / ".income_desk" / "last_india_trader_report.json"
     report_path.parent.mkdir(exist_ok=True)
     report_path.write_text(report.model_dump_json(indent=2))
     print(f"\nReport saved: {report_path}")

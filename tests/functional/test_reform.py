@@ -3,12 +3,12 @@
 from datetime import date
 import pytest
 
-from market_analyzer.features.exit_intelligence import (
+from income_desk.features.exit_intelligence import (
     compute_regime_stop,
     compute_time_adjusted_target,
     compute_remaining_theta_value,
 )
-from market_analyzer.features.position_sizing import (
+from income_desk.features.position_sizing import (
     compute_kelly_fraction,
     compute_kelly_position_size,
     compute_position_size,
@@ -17,9 +17,9 @@ from market_analyzer.features.position_sizing import (
     compute_regime_adjusted_bp,
     PortfolioExposure,
 )
-from market_analyzer.features.dte_optimizer import select_optimal_dte
-from market_analyzer.features.entry_levels import compute_iv_rank_quality
-from market_analyzer.models.exit import RegimeStop, TimeAdjustedTarget, ThetaDecayResult
+from income_desk.features.dte_optimizer import select_optimal_dte
+from income_desk.features.entry_levels import compute_iv_rank_quality
+from income_desk.models.exit import RegimeStop, TimeAdjustedTarget, ThetaDecayResult
 
 
 class TestExitIntelligencePipeline:

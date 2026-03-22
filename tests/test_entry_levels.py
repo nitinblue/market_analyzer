@@ -1,7 +1,7 @@
 """Tests for entry-level intelligence models and functions."""
 
 import pytest
-from market_analyzer.models.entry import (
+from income_desk.models.entry import (
     StrikeProximityLeg,
     StrikeProximityResult,
     SkewOptimalStrike,
@@ -112,11 +112,11 @@ class TestEntryModels:
 
 from datetime import date, timedelta
 
-from market_analyzer.models.levels import (
+from income_desk.models.levels import (
     LevelRole, LevelSource, LevelsAnalysis, PriceLevel, TradeDirection,
 )
-from market_analyzer.models.opportunity import LegAction, LegSpec, TradeSpec
-from market_analyzer.features.entry_levels import compute_strike_support_proximity
+from income_desk.models.opportunity import LegAction, LegSpec, TradeSpec
+from income_desk.features.entry_levels import compute_strike_support_proximity
 
 
 def _make_leg(role: str, action: LegAction, opt_type: str, strike: float) -> LegSpec:
@@ -253,8 +253,8 @@ class TestStrikeProximity:
         assert result.overall_score == 0.0
 
 
-from market_analyzer.models.vol_surface import SkewSlice
-from market_analyzer.features.entry_levels import select_skew_optimal_strike
+from income_desk.models.vol_surface import SkewSlice
+from income_desk.features.entry_levels import select_skew_optimal_strike
 
 
 def _make_skew(
@@ -307,12 +307,12 @@ class TestSkewOptimalStrike:
 # Task 4: score_entry_level
 # ---------------------------------------------------------------------------
 
-from market_analyzer.models.technicals import (
+from income_desk.models.technicals import (
     BollingerBands, MACDData, MovingAverages, RSIData,
     StochasticData, SupportResistance, TechnicalSnapshot,
     MarketPhase, PhaseIndicator,
 )
-from market_analyzer.features.entry_levels import score_entry_level
+from income_desk.features.entry_levels import score_entry_level
 
 
 def _make_technicals(
@@ -401,7 +401,7 @@ class TestEntryLevelScore:
 # Task 5: compute_limit_entry_price
 # ---------------------------------------------------------------------------
 
-from market_analyzer.features.entry_levels import compute_limit_entry_price
+from income_desk.features.entry_levels import compute_limit_entry_price
 
 
 class TestLimitEntryPrice:
@@ -450,7 +450,7 @@ class TestLimitEntryPrice:
 # Task 6: compute_pullback_levels
 # ---------------------------------------------------------------------------
 
-from market_analyzer.features.entry_levels import compute_pullback_levels
+from income_desk.features.entry_levels import compute_pullback_levels
 
 
 class TestPullbackLevels:
@@ -496,7 +496,7 @@ class TestPullbackLevels:
 # Task 7: Wire Skew into build_iron_condor_legs + TradeSpec entry fields
 # ---------------------------------------------------------------------------
 
-from market_analyzer.opportunity.option_plays._trade_spec_helpers import build_iron_condor_legs
+from income_desk.opportunity.option_plays._trade_spec_helpers import build_iron_condor_legs
 
 
 class TestSkewWiredIntoIC:
@@ -557,8 +557,8 @@ class TestTradeSpecEntryFields:
 # Task 8: Wire proximity check into daily validation
 # ---------------------------------------------------------------------------
 
-from market_analyzer.validation.daily_readiness import run_daily_checks
-from market_analyzer.validation.models import Severity
+from income_desk.validation.daily_readiness import run_daily_checks
+from income_desk.validation.models import Severity
 
 
 class TestStrikeProximityInDailyChecks:
@@ -619,7 +619,7 @@ class TestStrikeProximityInDailyChecks:
 
 class TestCLIEntryAnalysis:
     def test_do_entry_analysis_import(self) -> None:
-        from market_analyzer import (
+        from income_desk import (
             compute_strike_support_proximity,
             select_skew_optimal_strike,
             score_entry_level,
@@ -703,8 +703,8 @@ class TestEarningsBlackoutInDailyChecks:
 # ---------------------------------------------------------------------------
 
 
-from market_analyzer.models.entry import IVRankQuality  # noqa: E402
-from market_analyzer.features.entry_levels import compute_iv_rank_quality  # noqa: E402
+from income_desk.models.entry import IVRankQuality  # noqa: E402
+from income_desk.features.entry_levels import compute_iv_rank_quality  # noqa: E402
 
 
 class TestIVRankQuality:

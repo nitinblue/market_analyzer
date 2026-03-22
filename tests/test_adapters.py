@@ -7,10 +7,10 @@ import pytest
 from datetime import date
 from pathlib import Path
 
-from market_analyzer.adapters.csv_provider import CSVProvider
-from market_analyzer.adapters.dict_quotes import DictQuoteProvider, DictMetricsProvider
-from market_analyzer.models.data import DataRequest, DataType
-from market_analyzer.models.opportunity import LegSpec, LegAction
+from income_desk.adapters.csv_provider import CSVProvider
+from income_desk.adapters.dict_quotes import DictQuoteProvider, DictMetricsProvider
+from income_desk.models.data import DataRequest, DataType
+from income_desk.models.opportunity import LegSpec, LegAction
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +57,7 @@ class TestCSVProvider:
         assert "Close" in df.columns
 
     def test_missing_ticker_raises(self, tmp_path: Path) -> None:
-        from market_analyzer.data.exceptions import DataFetchError
+        from income_desk.data.exceptions import DataFetchError
 
         provider = CSVProvider(tmp_path)
         with pytest.raises(DataFetchError):
@@ -107,7 +107,7 @@ class TestCSVProvider:
         assert len(df) == 1
 
     def test_provider_type(self, tmp_path: Path) -> None:
-        from market_analyzer.models.data import ProviderType
+        from income_desk.models.data import ProviderType
 
         provider = CSVProvider(tmp_path)
         assert provider.provider_type == ProviderType.CSV
@@ -237,16 +237,16 @@ class TestDictMetricsProvider:
 
 class TestIBKRAdapterSkeleton:
     def test_importable(self) -> None:
-        from market_analyzer.adapters.ibkr_adapter import IBKRMarketData  # noqa: F401
+        from income_desk.adapters.ibkr_adapter import IBKRMarketData  # noqa: F401
 
     def test_provider_name(self) -> None:
-        from market_analyzer.adapters.ibkr_adapter import IBKRMarketData
+        from income_desk.adapters.ibkr_adapter import IBKRMarketData
 
         md = IBKRMarketData.__new__(IBKRMarketData)
         assert md.provider_name == "ibkr"
 
     def test_get_option_chain_raises_not_implemented(self) -> None:
-        from market_analyzer.adapters.ibkr_adapter import IBKRMarketData
+        from income_desk.adapters.ibkr_adapter import IBKRMarketData
 
         md = IBKRMarketData.__new__(IBKRMarketData)
         md._ib = object()  # bypass connect
@@ -254,7 +254,7 @@ class TestIBKRAdapterSkeleton:
             md.get_option_chain("SPY")
 
     def test_get_quotes_raises_not_implemented(self) -> None:
-        from market_analyzer.adapters.ibkr_adapter import IBKRMarketData
+        from income_desk.adapters.ibkr_adapter import IBKRMarketData
 
         md = IBKRMarketData.__new__(IBKRMarketData)
         md._ib = object()
@@ -264,16 +264,16 @@ class TestIBKRAdapterSkeleton:
 
 class TestSchwabAdapterSkeleton:
     def test_importable(self) -> None:
-        from market_analyzer.adapters.schwab_adapter import SchwabMarketData  # noqa: F401
+        from income_desk.adapters.schwab_adapter import SchwabMarketData  # noqa: F401
 
     def test_provider_name(self) -> None:
-        from market_analyzer.adapters.schwab_adapter import SchwabMarketData
+        from income_desk.adapters.schwab_adapter import SchwabMarketData
 
         md = SchwabMarketData.__new__(SchwabMarketData)
         assert md.provider_name == "schwab"
 
     def test_get_option_chain_raises_not_implemented(self) -> None:
-        from market_analyzer.adapters.schwab_adapter import SchwabMarketData
+        from income_desk.adapters.schwab_adapter import SchwabMarketData
 
         md = SchwabMarketData.__new__(SchwabMarketData)
         md._client = object()  # bypass connect
@@ -281,7 +281,7 @@ class TestSchwabAdapterSkeleton:
             md.get_option_chain("SPY")
 
     def test_occ_symbol_format(self) -> None:
-        from market_analyzer.adapters.schwab_adapter import SchwabMarketData
+        from income_desk.adapters.schwab_adapter import SchwabMarketData
 
         leg = _make_leg(580.0, "call", date(2026, 4, 24))
         occ = SchwabMarketData._to_occ("SPY", leg)
@@ -314,8 +314,8 @@ class TestIntegrationWithMA:
         )
         df.to_csv(tmp_path / "CSVTEST.csv")
 
-        from market_analyzer import MarketAnalyzer, DataService
-        from market_analyzer.adapters.csv_provider import CSVProvider
+        from income_desk import MarketAnalyzer, DataService
+        from income_desk.adapters.csv_provider import CSVProvider
 
         ds = DataService()
         ds._registry.register_priority(CSVProvider(tmp_path))
@@ -327,8 +327,8 @@ class TestIntegrationWithMA:
 
     def test_dict_quotes_provider_wired_into_ma(self) -> None:
         """DictQuoteProvider wires into MarketAnalyzer.quotes correctly."""
-        from market_analyzer import MarketAnalyzer, DataService
-        from market_analyzer.adapters.dict_quotes import DictQuoteProvider
+        from income_desk import MarketAnalyzer, DataService
+        from income_desk.adapters.dict_quotes import DictQuoteProvider
 
         quotes = {
             ("SPY", 570.0, "put", "2026-04-24"): {"bid": 1.20, "ask": 1.35, "iv": 0.22},
@@ -341,8 +341,8 @@ class TestIntegrationWithMA:
 
     def test_dict_metrics_provider_wired_into_ma(self) -> None:
         """DictMetricsProvider wires into MarketAnalyzer.quotes metrics."""
-        from market_analyzer import MarketAnalyzer, DataService
-        from market_analyzer.adapters.dict_quotes import DictMetricsProvider
+        from income_desk import MarketAnalyzer, DataService
+        from income_desk.adapters.dict_quotes import DictMetricsProvider
 
         metrics = {"SPY": {"iv_rank": 43.0, "iv_percentile": 91.0}}
         provider = DictMetricsProvider(metrics)

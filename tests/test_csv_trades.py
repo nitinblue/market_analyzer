@@ -1,4 +1,4 @@
-"""Tests for market_analyzer.adapters.csv_trades — broker CSV import."""
+"""Tests for income_desk.adapters.csv_trades — broker CSV import."""
 from __future__ import annotations
 
 from datetime import date
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from market_analyzer.adapters.csv_trades import (
+from income_desk.adapters.csv_trades import (
     ImportedPosition,
     ImportResult,
     _parse_fidelity_symbol,

@@ -1,4 +1,4 @@
-# Open Source Readiness: market_analyzer
+# Open Source Readiness: income_desk
 
 > Written: 2026-03-21 | Version: 0.3.0
 
@@ -6,7 +6,7 @@
 
 ## 0. Product Vision
 
-**market_analyzer brings institutional-grade systematic trading to small accounts.**
+**income_desk brings institutional-grade systematic trading to small accounts.**
 
 There are tools for institutions (Bloomberg, expensive). There are tools for retail (TOS, manual). The space in between — systematic income trading for $30-50K accounts with real risk management — is empty. MA fills it.
 
@@ -69,7 +69,7 @@ The system gets better over time from REAL outcomes, not from curve-fitting hist
 | `__version__` in `__init__.py` | **Fixed** — 0.3.0 |
 | `py.typed` marker | **Fixed** — PEP 561 compliance |
 | `.env.example` | **Fixed** — credential template |
-| Hardcoded eTrading path in `_broker.py` | **Fixed** — uses `~/.market_analyzer/.env` |
+| Hardcoded eTrading path in `_broker.py` | **Fixed** — uses `~/.income_desk/.env` |
 | CHANGELOG.md | **Fixed** — version history added |
 
 ### Still Needed for Full OSS Readiness
@@ -96,7 +96,7 @@ The system gets better over time from REAL outcomes, not from curve-fitting hist
 | Apache 2.0 | Larger projects, corporate use | Adds patent grant — protects contributors |
 | GPL v3 | Force-open derivatives | Any derivative must also be GPL — limits corporate adoption |
 
-**Recommendation: MIT** (already applied). It maximizes adoption while maintaining attribution. Users can build commercial products on top of market_analyzer without restriction, which drives ecosystem growth.
+**Recommendation: MIT** (already applied). It maximizes adoption while maintaining attribution. Users can build commercial products on top of income_desk without restriction, which drives ecosystem growth.
 
 ---
 
@@ -132,7 +132,7 @@ Trust is earned in tiers. Each tier roughly doubles your project's perceived cre
 ## 4. The "Broker Token" Problem for Open Source Users
 
 ### Problem
-market_analyzer uses TastyTrade for live quotes and Greeks. External users won't have your credentials.
+income_desk uses TastyTrade for live quotes and Greeks. External users won't have your credentials.
 
 ### Solution: Pluggable Broker Architecture (Already Built)
 
@@ -160,9 +160,9 @@ export TASTYTRADE_CLIENT_SECRET_LIVE=your_secret
 export TASTYTRADE_REFRESH_TOKEN_LIVE=your_token
 
 # Credentials — option 2: config file
-mkdir ~/.market_analyzer
-cp .env.example ~/.market_analyzer/.env
-# Edit ~/.market_analyzer/.env with your credentials
+mkdir ~/.income_desk
+cp .env.example ~/.income_desk/.env
+# Edit ~/.income_desk/.env with your credentials
 
 # Launch with broker
 analyzer-cli --broker
@@ -180,7 +180,7 @@ A "How to Connect Your Broker" guide in docs/ covering:
 ## 5. The "State Layer" Problem
 
 ### Problem
-market_analyzer is a stateless library. Users need somewhere to store:
+income_desk is a stateless library. Users need somewhere to store:
 - Open positions (so `filter_trades_with_portfolio()` works)
 - Trade outcomes (so `calibrate_weights()` improves over time)
 - Personal preferences (default tickers, account size, risk limits)
@@ -188,7 +188,7 @@ market_analyzer is a stateless library. Users need somewhere to store:
 ### Solution: User Context Store (Proposed)
 
 ```
-~/.market_analyzer/
+~/.income_desk/
     config.yaml          # User preferences (default tickers, account size, risk limits)
     cache/               # OHLCV cache (already exists, auto-created)
     models/              # HMM models (already exists, auto-created)
@@ -374,14 +374,14 @@ These are well-scoped areas where contributors can add value without needing to 
 2. **Run bandit** — Python security linter:
    ```bash
    pip install bandit
-   bandit -r market_analyzer/ -ll
+   bandit -r income_desk/ -ll
    ```
 
 3. **Check .gitignore** — verify these are excluded:
    ```
    .env
    *.yaml (credential files)
-   ~/.market_analyzer/
+   ~/.income_desk/
    ```
 
 4. **Rotate any exposed credentials** — if TastyTrade tokens appeared in git history, invalidate them.
@@ -421,7 +421,7 @@ We will respond within 48 hours and provide a fix within 7 days for critical iss
 The root README.md is the most important file in the repository. People decide whether to use your project in 30 seconds of reading it. Recommended structure:
 
 ```markdown
-# market_analyzer
+# income_desk
 
 > Systematic options analysis library: HMM regime detection, ranked trade recommendations,
 > and every analytical building block for informed options trading decisions.
@@ -465,4 +465,4 @@ MIT
 
 ---
 
-*This document was generated 2026-03-21 to track market_analyzer's readiness for public release.*
+*This document was generated 2026-03-21 to track income_desk's readiness for public release.*

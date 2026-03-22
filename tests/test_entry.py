@@ -2,9 +2,9 @@
 
 import pytest
 
-from market_analyzer.models.entry import EntryConfirmation, EntryTriggerType
-from market_analyzer.service.entry import EntryService
-from market_analyzer.service.technical import TechnicalService
+from income_desk.models.entry import EntryConfirmation, EntryTriggerType
+from income_desk.service.entry import EntryService
+from income_desk.service.technical import TechnicalService
 
 
 class TestEntryService:

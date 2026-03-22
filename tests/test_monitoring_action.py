@@ -5,9 +5,9 @@ from datetime import date
 
 import pytest
 
-from market_analyzer.models.opportunity import LegAction, LegSpec, TradeSpec
-from market_analyzer.models.exit import MonitoringAction
-from market_analyzer.opportunity.option_plays._trade_spec_helpers import build_closing_trade_spec
+from income_desk.models.opportunity import LegAction, LegSpec, TradeSpec
+from income_desk.models.exit import MonitoringAction
+from income_desk.opportunity.option_plays._trade_spec_helpers import build_closing_trade_spec
 
 
 def _leg(role: str, action: LegAction, opt_type: str, strike: float) -> LegSpec:
@@ -154,7 +154,7 @@ class TestLegActionEnum:
 class TestComputeMonitoringAction:
 
     def test_profitable_position_hold(self):
-        from market_analyzer.features.exit_intelligence import compute_monitoring_action
+        from income_desk.features.exit_intelligence import compute_monitoring_action
         result = compute_monitoring_action(
             trade_spec=_ic(),
             entry_price=1.50,
@@ -171,7 +171,7 @@ class TestComputeMonitoringAction:
         assert result.has_closing_order is False
 
     def test_stop_loss_hit_produces_closing_spec(self):
-        from market_analyzer.features.exit_intelligence import compute_monitoring_action
+        from income_desk.features.exit_intelligence import compute_monitoring_action
         # 3x entry price = stop hit (R1 stop is 2x)
         result = compute_monitoring_action(
             trade_spec=_ic(),
@@ -191,7 +191,7 @@ class TestComputeMonitoringAction:
             assert leg.action in (LegAction.BUY_TO_CLOSE, LegAction.SELL_TO_CLOSE)
 
     def test_stop_loss_closing_spec_has_correct_ticker(self):
-        from market_analyzer.features.exit_intelligence import compute_monitoring_action
+        from income_desk.features.exit_intelligence import compute_monitoring_action
         result = compute_monitoring_action(
             trade_spec=_ic(),
             entry_price=1.50,
@@ -206,7 +206,7 @@ class TestComputeMonitoringAction:
         assert result.closing_trade_spec.ticker == "SPY"
 
     def test_stress_fail_produces_closing_spec(self):
-        from market_analyzer.features.exit_intelligence import compute_monitoring_action
+        from income_desk.features.exit_intelligence import compute_monitoring_action
         # Very high ATR relative to credit = stress fail
         result = compute_monitoring_action(
             trade_spec=_ic(),
@@ -225,7 +225,7 @@ class TestComputeMonitoringAction:
             assert result.closing_trade_spec is not None
 
     def test_dte_exit_produces_closing_spec(self):
-        from market_analyzer.features.exit_intelligence import compute_monitoring_action
+        from income_desk.features.exit_intelligence import compute_monitoring_action
         # dte_remaining=5 is below exit_dte=21 on the IC
         result = compute_monitoring_action(
             trade_spec=_ic(),
@@ -242,7 +242,7 @@ class TestComputeMonitoringAction:
         assert result.has_closing_order
 
     def test_regime_change_triggers_close(self):
-        from market_analyzer.features.exit_intelligence import compute_monitoring_action
+        from income_desk.features.exit_intelligence import compute_monitoring_action
         # Entered in R1, now R4 with elevated ATR
         result = compute_monitoring_action(
             trade_spec=_ic(),
@@ -260,7 +260,7 @@ class TestComputeMonitoringAction:
         assert result.has_closing_order
 
     def test_monitoring_action_serialises(self):
-        from market_analyzer.features.exit_intelligence import compute_monitoring_action
+        from income_desk.features.exit_intelligence import compute_monitoring_action
         result = compute_monitoring_action(
             trade_spec=_ic(),
             entry_price=1.50,
@@ -280,7 +280,7 @@ class TestComputeMonitoringAction:
         assert "stress_report" in d
 
     def test_stress_report_always_present(self):
-        from market_analyzer.features.exit_intelligence import compute_monitoring_action
+        from income_desk.features.exit_intelligence import compute_monitoring_action
         result = compute_monitoring_action(
             trade_spec=_ic(),
             entry_price=1.50,
@@ -296,7 +296,7 @@ class TestComputeMonitoringAction:
         assert isinstance(result.stress_report, dict)
 
     def test_closing_trade_spec_legs_match_count(self):
-        from market_analyzer.features.exit_intelligence import compute_monitoring_action
+        from income_desk.features.exit_intelligence import compute_monitoring_action
         result = compute_monitoring_action(
             trade_spec=_ic(),
             entry_price=1.50,

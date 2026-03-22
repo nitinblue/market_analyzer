@@ -1,5 +1,5 @@
 """Thin wrapper — real code lives in market_analyzer.cli.explore."""
-from market_analyzer.cli.explore import main
+from income_desk.cli.explore import main
 
 if __name__ == "__main__":
     main()

@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to market_analyzer will be documented in this file.
+All notable changes to income_desk will be documented in this file.
 
 ## [0.3.0] - 2026-03-21
 

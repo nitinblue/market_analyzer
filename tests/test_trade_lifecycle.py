@@ -3,8 +3,8 @@
 import pytest
 from datetime import date
 
-from market_analyzer.trade_spec_factory import build_iron_condor, build_credit_spread, build_debit_spread
-from market_analyzer.trade_lifecycle import (
+from income_desk.trade_spec_factory import build_iron_condor, build_credit_spread, build_debit_spread
+from income_desk.trade_lifecycle import (
     AggregatedGreeks,
     AlignedStrikes,
     Breakevens,
@@ -23,7 +23,7 @@ from market_analyzer.trade_lifecycle import (
     filter_trades_by_account,
     monitor_exit_conditions,
 )
-from market_analyzer.models.quotes import OptionQuote
+from income_desk.models.quotes import OptionQuote
 
 
 def _ic_spec():
@@ -339,8 +339,8 @@ class TestExitMonitor:
 
 class TestTradeHealthCheck:
     def test_healthy_trade(self):
-        from market_analyzer.models.regime import RegimeID, RegimeResult
-        from market_analyzer.models.technicals import (
+        from income_desk.models.regime import RegimeID, RegimeResult
+        from income_desk.models.technicals import (
             BollingerBands, MACDData, MovingAverages, PhaseIndicator,
             RSIData, StochasticData, SupportResistance, TechnicalSnapshot,
         )

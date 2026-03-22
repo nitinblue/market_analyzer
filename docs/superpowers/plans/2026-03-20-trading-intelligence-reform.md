@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Close 10 gaps across exit discipline, position sizing, trade construction, and signal quality — transforming market_analyzer into a complete trading intelligence system.
+**Goal:** Close 10 gaps across exit discipline, position sizing, trade construction, and signal quality — transforming income_desk into a complete trading intelligence system.
 
 **Architecture:** Pure functions in focused modules (exit_intelligence.py, dte_optimizer.py) consuming existing models. Extensions to position_sizing.py and entry_levels.py. Wiring into trade_lifecycle.py and adjustment.py via optional parameters for full backward compatibility.
 
-**Tech Stack:** Python 3.12, Pydantic BaseModel, existing market_analyzer models. No new dependencies.
+**Tech Stack:** Python 3.12, Pydantic BaseModel, existing income_desk models. No new dependencies.
 
 **Venv / test command:** `.venv_312/Scripts/python.exe -m pytest tests/ -v`
 
@@ -17,19 +17,19 @@
 **Goal:** Create Pydantic models for all exit intelligence outputs.
 
 **Files to create:**
-- `market_analyzer/models/exit.py`
+- `income_desk/models/exit.py`
 
 **Files to test:**
 - `tests/test_exit_intelligence.py`
 
 ### Steps
 
-- [ ] **1.1** Create `market_analyzer/models/exit.py` with three models
+- [ ] **1.1** Create `income_desk/models/exit.py` with three models
 - [ ] **1.2** Create `tests/test_exit_intelligence.py` with model tests
 - [ ] **1.3** Run tests: `.venv_312/Scripts/python.exe -m pytest tests/test_exit_intelligence.py -v`
 - [ ] **1.4** Commit: `git commit -m "feat: add exit intelligence models (RegimeStop, TimeAdjustedTarget, ThetaDecayResult)"`
 
-### 1.1 — Create `market_analyzer/models/exit.py`
+### 1.1 — Create `income_desk/models/exit.py`
 
 ```python
 """Pydantic models for exit intelligence."""
@@ -78,7 +78,7 @@ class ThetaDecayResult(BaseModel):
 """Tests for exit intelligence models and functions."""
 
 import pytest
-from market_analyzer.models.exit import RegimeStop, TimeAdjustedTarget, ThetaDecayResult
+from income_desk.models.exit import RegimeStop, TimeAdjustedTarget, ThetaDecayResult
 
 
 class TestExitModels:
@@ -170,19 +170,19 @@ class TestExitModels:
 **Goal:** Implement the three exit intelligence pure functions.
 
 **Files to create:**
-- `market_analyzer/features/exit_intelligence.py`
+- `income_desk/features/exit_intelligence.py`
 
 **Files to test:**
 - `tests/test_exit_intelligence.py` (append to Task 1)
 
 ### Steps
 
-- [ ] **2.1** Create `market_analyzer/features/exit_intelligence.py` with three functions
+- [ ] **2.1** Create `income_desk/features/exit_intelligence.py` with three functions
 - [ ] **2.2** Append function tests to `tests/test_exit_intelligence.py`
 - [ ] **2.3** Run tests: `.venv_312/Scripts/python.exe -m pytest tests/test_exit_intelligence.py -v`
 - [ ] **2.4** Commit: `git commit -m "feat: add exit intelligence functions (regime stops, time-adjusted targets, theta decay)"`
 
-### 2.1 — Create `market_analyzer/features/exit_intelligence.py`
+### 2.1 — Create `income_desk/features/exit_intelligence.py`
 
 ```python
 """Exit intelligence: regime-contingent stops, time-adjusted targets, theta decay.
@@ -194,7 +194,7 @@ from __future__ import annotations
 
 import math
 
-from market_analyzer.models.exit import RegimeStop, ThetaDecayResult, TimeAdjustedTarget
+from income_desk.models.exit import RegimeStop, ThetaDecayResult, TimeAdjustedTarget
 
 # Regime → stop-loss multiplier
 # R1: calm MR — standard 2x, breaches are unusual
@@ -364,7 +364,7 @@ def compute_remaining_theta_value(
 Append the following after the `TestExitModels` class:
 
 ```python
-from market_analyzer.features.exit_intelligence import (
+from income_desk.features.exit_intelligence import (
     compute_regime_stop,
     compute_remaining_theta_value,
     compute_time_adjusted_target,
@@ -583,7 +583,7 @@ class TestComputeRemainingThetaValue:
 **Goal:** Add optional regime-stop and time-adjusted target parameters to `monitor_exit_conditions()` for backward-compatible exit intelligence.
 
 **Files to modify:**
-- `market_analyzer/trade_lifecycle.py`
+- `income_desk/trade_lifecycle.py`
 
 **Files to test:**
 - `tests/test_exit_intelligence.py` (append)
@@ -599,7 +599,7 @@ class TestComputeRemainingThetaValue:
 
 ### 3.1 — Modify `monitor_exit_conditions()` signature
 
-In `market_analyzer/trade_lifecycle.py`, change the function signature to add three new optional parameters **after** `lot_size`:
+In `income_desk/trade_lifecycle.py`, change the function signature to add three new optional parameters **after** `lot_size`:
 
 ```python
 def monitor_exit_conditions(
@@ -665,7 +665,7 @@ In the credit branch profit_target block, add time-adjusted target logic. Before
         target_source = "fixed"
         if (days_held is not None and dte_at_entry is not None
                 and effective_target is not None and dte_at_entry > 0):
-            from market_analyzer.features.exit_intelligence import compute_time_adjusted_target
+            from income_desk.features.exit_intelligence import compute_time_adjusted_target
             time_adj = compute_time_adjusted_target(
                 days_held=days_held, dte_at_entry=dte_at_entry,
                 current_profit_pct=pnl_pct, original_target_pct=effective_target,
@@ -694,7 +694,7 @@ In the credit branch profit_target block, add time-adjusted target logic. Before
 ### 3.4 — Append integration tests
 
 ```python
-from market_analyzer.trade_lifecycle import monitor_exit_conditions
+from income_desk.trade_lifecycle import monitor_exit_conditions
 
 
 class TestMonitorExitWithRegimeStop:
@@ -795,7 +795,7 @@ class TestMonitorExitWithTimeAdjustedTarget:
 **Goal:** Add correlation-based Kelly adjustment and regime-aware margin estimation to position_sizing.py.
 
 **Files to modify:**
-- `market_analyzer/features/position_sizing.py`
+- `income_desk/features/position_sizing.py`
 
 **Files to test:**
 - `tests/test_position_sizing.py` (append)
@@ -810,7 +810,7 @@ class TestMonitorExitWithTimeAdjustedTarget:
 - [ ] **4.6** Run tests: `.venv_312/Scripts/python.exe -m pytest tests/test_position_sizing.py -v`
 - [ ] **4.7** Commit: `git commit -m "feat: add correlation-adjusted Kelly and regime-aware margin estimation"`
 
-### 4.1 — Add models to `market_analyzer/features/position_sizing.py`
+### 4.1 — Add models to `income_desk/features/position_sizing.py`
 
 Append after the `PortfolioExposure` class:
 
@@ -1000,7 +1000,7 @@ def compute_regime_adjusted_bp(
 ### 4.5 — Append tests to `tests/test_position_sizing.py`
 
 ```python
-from market_analyzer.features.position_sizing import (
+from income_desk.features.position_sizing import (
     CorrelationAdjustment,
     RegimeMarginEstimate,
     compute_pairwise_correlation,
@@ -1172,7 +1172,7 @@ class TestRegimeAdjustedBP:
 **Goal:** Create a master sizing function that chains Kelly, correlation, and margin into one call.
 
 **Files to modify:**
-- `market_analyzer/features/position_sizing.py`
+- `income_desk/features/position_sizing.py`
 
 **Files to test:**
 - `tests/test_position_sizing.py` (append)
@@ -1298,7 +1298,7 @@ def compute_position_size(
 ### 5.2 — Append tests
 
 ```python
-from market_analyzer.features.position_sizing import compute_position_size
+from income_desk.features.position_sizing import compute_position_size
 
 
 class TestUnifiedPositionSize:
@@ -1382,19 +1382,19 @@ class TestUnifiedPositionSize:
 **Goal:** Create DTE selection from vol surface term structure.
 
 **Files to create:**
-- `market_analyzer/features/dte_optimizer.py`
+- `income_desk/features/dte_optimizer.py`
 
 **Files to test:**
 - `tests/test_dte_optimizer.py`
 
 ### Steps
 
-- [ ] **6.1** Create `market_analyzer/features/dte_optimizer.py`
+- [ ] **6.1** Create `income_desk/features/dte_optimizer.py`
 - [ ] **6.2** Create `tests/test_dte_optimizer.py`
 - [ ] **6.3** Run tests: `.venv_312/Scripts/python.exe -m pytest tests/test_dte_optimizer.py -v`
 - [ ] **6.4** Commit: `git commit -m "feat: add DTE optimizer from vol surface term structure"`
 
-### 6.1 — Create `market_analyzer/features/dte_optimizer.py`
+### 6.1 — Create `income_desk/features/dte_optimizer.py`
 
 ```python
 """DTE optimization: select optimal expiration from vol surface.
@@ -1411,7 +1411,7 @@ from datetime import date
 
 from pydantic import BaseModel
 
-from market_analyzer.models.vol_surface import VolatilitySurface
+from income_desk.models.vol_surface import VolatilitySurface
 
 # Regime → preferred DTE range and rationale
 _REGIME_DTE_PREFERENCE: dict[int, tuple[int, int, str]] = {
@@ -1526,8 +1526,8 @@ from datetime import date, timedelta
 
 import pytest
 
-from market_analyzer.features.dte_optimizer import DTERecommendation, select_optimal_dte
-from market_analyzer.models.vol_surface import (
+from income_desk.features.dte_optimizer import DTERecommendation, select_optimal_dte
+from income_desk.models.vol_surface import (
     SkewSlice,
     TermStructurePoint,
     VolatilitySurface,
@@ -1676,8 +1676,8 @@ class TestSelectOptimalDTE:
 **Goal:** Add CONVERT_TO_DIAGONAL and CONVERT_TO_CALENDAR adjustment types and regime-change switching logic.
 
 **Files to modify:**
-- `market_analyzer/models/adjustment.py`
-- `market_analyzer/service/adjustment.py`
+- `income_desk/models/adjustment.py`
+- `income_desk/service/adjustment.py`
 
 **Files to test:**
 - `tests/test_adjustment.py` (append)
@@ -1691,7 +1691,7 @@ class TestSelectOptimalDTE:
 - [ ] **7.5** Run tests: `.venv_312/Scripts/python.exe -m pytest tests/test_adjustment.py -v`
 - [ ] **7.6** Commit: `git commit -m "feat: add strategy switching (CONVERT_TO_DIAGONAL/CALENDAR) on regime change"`
 
-### 7.1 — Extend `AdjustmentType` in `market_analyzer/models/adjustment.py`
+### 7.1 — Extend `AdjustmentType` in `income_desk/models/adjustment.py`
 
 Add two new values to the `AdjustmentType` StrEnum, after `CONVERT`:
 
@@ -1710,7 +1710,7 @@ class AdjustmentType(StrEnum):
     CONVERT_TO_CALENDAR = "convert_to_calendar"
 ```
 
-### 7.2–7.3 — Modify `recommend_action()` in `market_analyzer/service/adjustment.py`
+### 7.2–7.3 — Modify `recommend_action()` in `income_desk/service/adjustment.py`
 
 Add `entry_regime_id: int | None = None` parameter:
 
@@ -1759,11 +1759,11 @@ class TestStrategySwitch:
     """Tests for regime-change strategy switching in recommend_action()."""
 
     def _build_service(self):
-        from market_analyzer.service.adjustment import AdjustmentService
+        from income_desk.service.adjustment import AdjustmentService
         return AdjustmentService()
 
     def _build_regime(self, regime_id: int):
-        from market_analyzer.models.regime import RegimeID, RegimeResult
+        from income_desk.models.regime import RegimeID, RegimeResult
         from datetime import date
         return RegimeResult(
             ticker="SPY", regime=RegimeID(regime_id), confidence=0.80,
@@ -1772,7 +1772,7 @@ class TestStrategySwitch:
         )
 
     def _build_technicals(self, price: float = 580.0, atr: float = 5.0):
-        from market_analyzer.models.technicals import TechnicalSnapshot
+        from income_desk.models.technicals import TechnicalSnapshot
         return TechnicalSnapshot(
             ticker="SPY", current_price=price, atr=atr, atr_pct=atr / price * 100,
             rsi=50.0, macd_histogram=0.0, bb_position=0.5,
@@ -1782,7 +1782,7 @@ class TestStrategySwitch:
         )
 
     def _build_ic_spec(self, short_put=570.0, short_call=590.0):
-        from market_analyzer.models.opportunity import LegAction, LegSpec, TradeSpec
+        from income_desk.models.opportunity import LegAction, LegSpec, TradeSpec
         from datetime import date
         legs = [
             LegSpec(role="short_put", action=LegAction.SELL_TO_OPEN, option_type="put",
@@ -1878,9 +1878,9 @@ class TestStrategySwitch:
 **Goal:** Add ticker-type-aware IV rank quality scoring and wire it as check #10 in daily readiness.
 
 **Files to modify:**
-- `market_analyzer/models/entry.py`
-- `market_analyzer/features/entry_levels.py`
-- `market_analyzer/validation/daily_readiness.py`
+- `income_desk/models/entry.py`
+- `income_desk/features/entry_levels.py`
+- `income_desk/validation/daily_readiness.py`
 
 **Files to test:**
 - `tests/test_entry_levels.py` (append)
@@ -1888,15 +1888,15 @@ class TestStrategySwitch:
 
 ### Steps
 
-- [ ] **8.1** Add `IVRankQuality` model to `market_analyzer/models/entry.py`
-- [ ] **8.2** Add `compute_iv_rank_quality()` function to `market_analyzer/features/entry_levels.py`
+- [ ] **8.1** Add `IVRankQuality` model to `income_desk/models/entry.py`
+- [ ] **8.2** Add `compute_iv_rank_quality()` function to `income_desk/features/entry_levels.py`
 - [ ] **8.3** Add check #10 to `run_daily_checks()` in `daily_readiness.py`
 - [ ] **8.4** Append tests to `tests/test_entry_levels.py`
 - [ ] **8.5** Append tests to `tests/test_validation_daily_readiness.py`
 - [ ] **8.6** Run tests: `.venv_312/Scripts/python.exe -m pytest tests/test_entry_levels.py tests/test_validation_daily_readiness.py -v`
 - [ ] **8.7** Commit: `git commit -m "feat: add IV rank quality by ticker type + validation check #10"`
 
-### 8.1 — Add `IVRankQuality` to `market_analyzer/models/entry.py`
+### 8.1 — Add `IVRankQuality` to `income_desk/models/entry.py`
 
 Append after the `PullbackAlert` class:
 
@@ -1912,12 +1912,12 @@ class IVRankQuality(BaseModel):
     rationale: str
 ```
 
-### 8.2 — Add `compute_iv_rank_quality()` to `market_analyzer/features/entry_levels.py`
+### 8.2 — Add `compute_iv_rank_quality()` to `income_desk/features/entry_levels.py`
 
 Append at the end of the file:
 
 ```python
-from market_analyzer.models.entry import IVRankQuality
+from income_desk.models.entry import IVRankQuality
 
 # Ticker type -> (good_threshold, wait_threshold)
 _IV_RANK_THRESHOLDS: dict[str, tuple[float, float]] = {
@@ -1980,7 +1980,7 @@ def compute_iv_rank_quality(
 
 ### 8.3 — Add check #10 to `run_daily_checks()`
 
-In `market_analyzer/validation/daily_readiness.py`, modify the signature to add `ticker_type: str = "etf"`:
+In `income_desk/validation/daily_readiness.py`, modify the signature to add `ticker_type: str = "etf"`:
 
 ```python
 def run_daily_checks(
@@ -2025,7 +2025,7 @@ After the earnings_blackout check (check #9) and before the `return ValidationRe
 ```python
     # ── Check 10: IV rank quality by ticker type ──
     if iv_rank is not None:
-        from market_analyzer.features.entry_levels import compute_iv_rank_quality
+        from income_desk.features.entry_levels import compute_iv_rank_quality
         iv_quality = compute_iv_rank_quality(iv_rank, ticker_type)
         if iv_quality.quality == "good":
             iv_sev = Severity.PASS
@@ -2051,8 +2051,8 @@ After the earnings_blackout check (check #9) and before the `return ValidationRe
 ### 8.4 — Append tests to `tests/test_entry_levels.py`
 
 ```python
-from market_analyzer.models.entry import IVRankQuality
-from market_analyzer.features.entry_levels import compute_iv_rank_quality
+from income_desk.models.entry import IVRankQuality
+from income_desk.features.entry_levels import compute_iv_rank_quality
 
 
 class TestIVRankQuality:
@@ -2131,7 +2131,7 @@ class TestIVRankQualityCheck:
 
     def _run_with_iv_rank(self, iv_rank, ticker_type="etf"):
         """Run daily checks with IV rank and return the iv_rank_quality check."""
-        from market_analyzer.validation.daily_readiness import run_daily_checks
+        from income_desk.validation.daily_readiness import run_daily_checks
         # Use the same fixture pattern as existing tests in the file
         report = run_daily_checks(
             ticker="SPY",
@@ -2150,7 +2150,7 @@ class TestIVRankQualityCheck:
         return iv_checks[0] if iv_checks else None
 
     def _make_basic_spec(self):
-        from market_analyzer.models.opportunity import LegAction, LegSpec, TradeSpec
+        from income_desk.models.opportunity import LegAction, LegSpec, TradeSpec
         from datetime import date
         legs = [
             LegSpec(role="short_put", action=LegAction.SELL_TO_OPEN, option_type="put",
@@ -2175,31 +2175,31 @@ class TestIVRankQualityCheck:
         )
 
     def test_good_iv_rank_passes(self) -> None:
-        from market_analyzer.validation.models import Severity
+        from income_desk.validation.models import Severity
         check = self._run_with_iv_rank(35.0, "etf")
         assert check is not None
         assert check.severity == Severity.PASS
 
     def test_marginal_iv_rank_warns(self) -> None:
-        from market_analyzer.validation.models import Severity
+        from income_desk.validation.models import Severity
         check = self._run_with_iv_rank(25.0, "etf")
         assert check is not None
         assert check.severity == Severity.WARN
 
     def test_low_iv_rank_fails(self) -> None:
-        from market_analyzer.validation.models import Severity
+        from income_desk.validation.models import Severity
         check = self._run_with_iv_rank(15.0, "etf")
         assert check is not None
         assert check.severity == Severity.FAIL
 
     def test_no_iv_rank_warns(self) -> None:
-        from market_analyzer.validation.models import Severity
+        from income_desk.validation.models import Severity
         check = self._run_with_iv_rank(None, "etf")
         assert check is not None
         assert check.severity == Severity.WARN
 
     def test_equity_higher_threshold(self) -> None:
-        from market_analyzer.validation.models import Severity
+        from income_desk.validation.models import Severity
         # 35 is "good" for ETF but "wait" for equity
         check_etf = self._run_with_iv_rank(35.0, "etf")
         check_eq = self._run_with_iv_rank(35.0, "equity")
@@ -2208,7 +2208,7 @@ class TestIVRankQualityCheck:
 
     def test_10_checks_total(self) -> None:
         """Daily suite now has 10 checks."""
-        from market_analyzer.validation.daily_readiness import run_daily_checks
+        from income_desk.validation.daily_readiness import run_daily_checks
         report = run_daily_checks(
             ticker="SPY",
             trade_spec=self._make_basic_spec(),
@@ -2226,8 +2226,8 @@ class TestIVRankQualityCheck:
 **Goal:** Add models and analysis function for tracking adjustment effectiveness.
 
 **Files to modify:**
-- `market_analyzer/models/adjustment.py`
-- `market_analyzer/features/position_sizing.py` (or new module)
+- `income_desk/models/adjustment.py`
+- `income_desk/features/position_sizing.py` (or new module)
 
 **Files to test:**
 - `tests/test_position_sizing.py` (append)
@@ -2240,7 +2240,7 @@ class TestIVRankQualityCheck:
 - [ ] **9.4** Run tests: `.venv_312/Scripts/python.exe -m pytest tests/test_position_sizing.py -v`
 - [ ] **9.5** Commit: `git commit -m "feat: add adjustment outcome tracking and effectiveness analysis"`
 
-### 9.1 — Add models to `market_analyzer/models/adjustment.py`
+### 9.1 — Add models to `income_desk/models/adjustment.py`
 
 Append after the `AdjustmentAnalysis` class:
 
@@ -2269,10 +2269,10 @@ class AdjustmentEffectiveness(BaseModel):
 
 ### 9.2 — Add `analyze_adjustment_effectiveness()`
 
-Append to `market_analyzer/features/position_sizing.py`:
+Append to `income_desk/features/position_sizing.py`:
 
 ```python
-from market_analyzer.models.adjustment import AdjustmentEffectiveness, AdjustmentOutcome
+from income_desk.models.adjustment import AdjustmentEffectiveness, AdjustmentOutcome
 
 
 def analyze_adjustment_effectiveness(
@@ -2369,8 +2369,8 @@ def analyze_adjustment_effectiveness(
 
 ```python
 from datetime import date as dt_date
-from market_analyzer.models.adjustment import AdjustmentOutcome, AdjustmentEffectiveness
-from market_analyzer.features.position_sizing import analyze_adjustment_effectiveness
+from income_desk.models.adjustment import AdjustmentOutcome, AdjustmentEffectiveness
+from income_desk.features.position_sizing import analyze_adjustment_effectiveness
 
 
 class TestAdjustmentEffectiveness:
@@ -2464,48 +2464,48 @@ class TestAdjustmentEffectiveness:
 **Goal:** Wire all new exports, add CLI commands, and run full regression.
 
 **Files to modify:**
-- `market_analyzer/__init__.py`
-- `market_analyzer/cli/interactive.py`
+- `income_desk/__init__.py`
+- `income_desk/cli/interactive.py`
 
 **Files to create:**
 - `tests/functional/test_reform.py`
 
 ### Steps
 
-- [ ] **10.1** Add all new exports to `market_analyzer/__init__.py`
+- [ ] **10.1** Add all new exports to `income_desk/__init__.py`
 - [ ] **10.2** Add `do_optimal_dte` CLI command
 - [ ] **10.3** Add `do_exit_intelligence` CLI command
 - [ ] **10.4** Create `tests/functional/test_reform.py` with end-to-end tests
 - [ ] **10.5** Run full regression: `.venv_312/Scripts/python.exe -m pytest tests/ -v`
 - [ ] **10.6** Commit: `git commit -m "feat: wire exit intelligence + DTE optimizer CLI commands, add reform functional tests"`
 
-### 10.1 — Add exports to `market_analyzer/__init__.py`
+### 10.1 — Add exports to `income_desk/__init__.py`
 
 Add these import blocks after the existing entry model imports:
 
 ```python
 # Exit intelligence models
-from market_analyzer.models.exit import RegimeStop, TimeAdjustedTarget, ThetaDecayResult
+from income_desk.models.exit import RegimeStop, TimeAdjustedTarget, ThetaDecayResult
 
 # Exit intelligence functions
-from market_analyzer.features.exit_intelligence import (
+from income_desk.features.exit_intelligence import (
     compute_regime_stop,
     compute_remaining_theta_value,
     compute_time_adjusted_target,
 )
 
 # DTE optimizer
-from market_analyzer.features.dte_optimizer import DTERecommendation, select_optimal_dte
+from income_desk.features.dte_optimizer import DTERecommendation, select_optimal_dte
 
 # IV rank quality
-from market_analyzer.models.entry import IVRankQuality
-from market_analyzer.features.entry_levels import compute_iv_rank_quality
+from income_desk.models.entry import IVRankQuality
+from income_desk.features.entry_levels import compute_iv_rank_quality
 
 # Adjustment outcomes
-from market_analyzer.models.adjustment import AdjustmentOutcome, AdjustmentEffectiveness
+from income_desk.models.adjustment import AdjustmentOutcome, AdjustmentEffectiveness
 
 # Unified sizing + correlation
-from market_analyzer.features.position_sizing import (
+from income_desk.features.position_sizing import (
     CorrelationAdjustment,
     RegimeMarginEstimate,
     compute_pairwise_correlation,
@@ -2518,7 +2518,7 @@ from market_analyzer.features.position_sizing import (
 
 ### 10.2 — Add `do_optimal_dte` CLI command
 
-Add to `market_analyzer/cli/interactive.py`:
+Add to `income_desk/cli/interactive.py`:
 
 ```python
     def do_optimal_dte(self, arg: str) -> None:
@@ -2542,7 +2542,7 @@ Add to `market_analyzer/cli/interactive.py`:
             regime = ma.regime.detect(ticker)
             vol = ma.vol_surface.compute(ticker)
 
-            from market_analyzer.features.dte_optimizer import select_optimal_dte
+            from income_desk.features.dte_optimizer import select_optimal_dte
             result = select_optimal_dte(
                 vol, regime_id=regime.regime.value,
                 min_dte=min_dte, max_dte=max_dte,
@@ -2598,7 +2598,7 @@ Add to `market_analyzer/cli/interactive.py`:
             regime = ma.regime.detect(ticker)
             regime_id = regime.regime.value
 
-            from market_analyzer.features.exit_intelligence import (
+            from income_desk.features.exit_intelligence import (
                 compute_regime_stop,
                 compute_remaining_theta_value,
                 compute_time_adjusted_target,
@@ -2656,12 +2656,12 @@ from datetime import date, timedelta
 
 import pytest
 
-from market_analyzer.features.exit_intelligence import (
+from income_desk.features.exit_intelligence import (
     compute_regime_stop,
     compute_remaining_theta_value,
     compute_time_adjusted_target,
 )
-from market_analyzer.features.position_sizing import (
+from income_desk.features.position_sizing import (
     compute_kelly_position_size,
     compute_pairwise_correlation,
     compute_position_size,
@@ -2670,10 +2670,10 @@ from market_analyzer.features.position_sizing import (
     analyze_adjustment_effectiveness,
     PortfolioExposure,
 )
-from market_analyzer.features.dte_optimizer import select_optimal_dte
-from market_analyzer.features.entry_levels import compute_iv_rank_quality
-from market_analyzer.models.adjustment import AdjustmentOutcome
-from market_analyzer.trade_lifecycle import monitor_exit_conditions
+from income_desk.features.dte_optimizer import select_optimal_dte
+from income_desk.features.entry_levels import compute_iv_rank_quality
+from income_desk.models.adjustment import AdjustmentOutcome
+from income_desk.trade_lifecycle import monitor_exit_conditions
 
 
 class TestExitIntelligenceEndToEnd:

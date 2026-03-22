@@ -32,8 +32,8 @@ logging.disable(logging.WARNING)
 
 
 def run_check():
-    from market_analyzer.cli._broker import connect_broker
-    from market_analyzer import MarketAnalyzer, DataService
+    from income_desk.cli._broker import connect_broker
+    from income_desk import MarketAnalyzer, DataService
 
     md, mm, acct, wl = connect_broker(is_paper=False)
     if md is None:

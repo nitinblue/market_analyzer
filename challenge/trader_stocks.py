@@ -28,12 +28,12 @@ import io
 if sys.stdout.encoding != "utf-8":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-from market_analyzer import (
+from income_desk import (
     DataService,
     MarketAnalyzer,
     MarketRegistry,
 )
-from market_analyzer.equity_research import (
+from income_desk.equity_research import (
     InvestmentHorizon,
     InvestmentStrategy,
     analyze_stock,
@@ -115,7 +115,7 @@ def run(
 
     # Macro research for sector guidance
     try:
-        from market_analyzer.macro_research import RESEARCH_ASSETS, generate_research_report
+        from income_desk.macro_research import RESEARCH_ASSETS, generate_research_report
 
         research_data = {}
         for ticker in list(RESEARCH_ASSETS.keys())[:10]:  # Top 10 for speed
