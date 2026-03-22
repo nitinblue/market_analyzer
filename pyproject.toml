@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "market-analyzer"
+name = "income-desk"
 version = "0.3.0"
-description = "Market analysis toolkit: HMM regime detection, technicals, phase detection, and opportunity assessment for options trading"
+description = "Systematic options trading intelligence for small accounts. Regime detection, profitability gates, Kelly sizing, crash sentinel, decision audit. Your personal trading desk brain."
 requires-python = ">=3.11"
 dependencies = [
     "pandas>=2.0",
@@ -39,14 +39,20 @@ dev = [
     "pytest-mock>=3.0",
 ]
 all = [
-    "market-analyzer[ibkr,schwab,zerodha,dhan,plot]",
+    "income-desk[ibkr,schwab,zerodha,dhan,plot]",
 ]
 
 [project.scripts]
+# Primary CLI
+income-desk = "market_analyzer.cli.interactive:main"
+# Legacy aliases (backward compat)
+analyzer-cli = "market_analyzer.cli.interactive:main"
 analyzer-explore = "market_analyzer.cli.explore:main"
 analyzer-plot = "market_analyzer.cli.plot:main"
 analyzer-rank = "market_analyzer.cli.rank:main"
-analyzer-cli = "market_analyzer.cli.interactive:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["market_analyzer"]
 
 [tool.pytest.ini_options]
 markers = [

@@ -1,16 +1,17 @@
-# market_analyzer
+# income-desk
 
-**Systematic options trading intelligence for small accounts.**
+**The brain behind your trading desk.**
 
-Every trade suggestion is bespoke to your portfolio, your risk profile, your capital. This isn't a signal service — it's a personal trading intelligence system.
+Every trade suggestion is bespoke to your portfolio, your risk profile, your capital. This isn't a signal service — it's a personal trading intelligence system for income-first options traders.
 
 [![Tests](https://github.com/nitinblue/market_analyzer/actions/workflows/test.yml/badge.svg)](https://github.com/nitinblue/market_analyzer/actions)
+[![PyPI](https://img.shields.io/pypi/v/income-desk.svg)](https://pypi.org/project/income-desk/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://python.org)
 
 ## What It Does
 
-market_analyzer brings institutional-grade trading intelligence to $30-50K accounts:
+income-desk brings institutional-grade trading intelligence to $30-50K accounts:
 
 - **Per-instrument regime detection** — SPY can be R2 (high-vol mean-reverting) while GLD is R1 (calm). Not one global "market is bullish."
 - **10-check profitability gate** — answers "will this iron condor actually make money after fees on a $35K account?"
@@ -24,8 +25,8 @@ No backtesting. Start with 1 contract, trade real, system learns from YOUR outco
 ## Quick Start
 
 ```bash
-pip install market-analyzer
-analyzer-cli
+pip install income-desk
+income-desk
 ```
 
 ```
@@ -61,7 +62,7 @@ DECISION AUDIT — IWM IC — 85/100 B+ — APPROVED
 ## Connect Your Broker
 
 ```bash
-analyzer-cli --setup    # Interactive wizard
+income-desk --setup    # Interactive wizard
 ```
 
 | Broker | Market | Cost | Setup |
