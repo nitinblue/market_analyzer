@@ -59,6 +59,63 @@ DECISION AUDIT — IWM IC — 85/100 B+ — APPROVED
   Legs: 90/100 A    Trade: 82/100 B    Portfolio: 88/100 B+    Risk: 92/100 A
 ```
 
+## Pre-Built Traders — Try It Now
+
+No broker needed. Run a full trading simulation with one command:
+
+**US Income Trader** — $100K portfolio, 5 tickers, 8 desks:
+```bash
+income-desk --trader us
+```
+
+```
+TRADER REPORT — US Market
+Capital: $100,000 | Risk: moderate | Sentinel: ORANGE
+
+DESKS (8):
+  desk_income_defined          $25,200
+  desk_0dte_defined            $10,800
+  desk_wheel                   $17,500
+  ...
+
+REGIMES:
+  SPY     R2          QQQ     R4 << SKIP
+  IWM     R1          GLD     R1
+
+TRADES: 4 booked, 6 blocked
+  IWM  iron_condor  20x  $4.68  POP 66%  → desk_income_defined
+  SPY  iron_butterfly  19x  $9.60  → desk_income_defined
+  ...
+
+PORTFOLIO: Risk deployed $4,957 (5.0%) | Cash remaining $66,500
+```
+
+**India Income Trader** — ₹50L portfolio, NIFTY/BANKNIFTY:
+```bash
+income-desk --trader india
+```
+
+Shows India-specific context: European exercise, lot sizes (NIFTY=25, BANKNIFTY=15), weekly expiry days, INR formatting.
+
+**Demo Portfolio** — interactive simulated trading:
+```bash
+income-desk --demo
+> portfolio              # See desk allocation
+> trade IWM              # Place a simulated trade (full pipeline)
+> health IWM             # Monitor position
+> close_trade abc123     # Close and record P&L
+```
+
+**Offline Simulation** — works on weekends:
+```bash
+income-desk --sim income       # Ideal income day (elevated IV, R1)
+income-desk --sim recovery     # Post-crash rich premiums (R2, IV rank 80%+)
+income-desk --sim crash        # Crash scenario (R4, VIX 45+)
+income-desk --sim india_trading # India NIFTY/BANKNIFTY
+```
+
+---
+
 ## Connect Your Broker
 
 ```bash
