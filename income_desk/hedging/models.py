@@ -12,10 +12,11 @@ from income_desk.models.opportunity import TradeSpec
 class HedgeTier(StrEnum):
     """Which hedging approach to use, ordered by preference."""
 
-    DIRECT = "direct"                     # Tier 1: liquid same-ticker options
+    TRADE_ADJUSTMENT = "trade_adjustment"    # Primary for small accounts: roll, widen, convert
+    DIRECT = "direct"                        # Tier 1: liquid same-ticker options
     FUTURES_SYNTHETIC = "futures_synthetic"  # Tier 2: futures + optional call/put
-    PROXY_INDEX = "proxy_index"           # Tier 3: correlated index hedge
-    NONE = "none"                         # No hedge available or needed
+    PROXY_INDEX = "proxy_index"              # Tier 3: correlated index hedge
+    NONE = "none"                            # No hedge available or needed
 
 
 class HedgeGoal(StrEnum):
@@ -248,5 +249,27 @@ class FnOCoverage(BaseModel):
     commentary: str
 
 
-# Resolve forward reference in HedgeApproach
+class TradeMaintenanceResult(BaseModel):
+    """Trade maintenance recommendation — the primary 'hedge' for small accounts.
+
+    For option positions (ICs, credit spreads, calendars) on small accounts,
+    separate Greek-level hedging instruments are impractical.  The real risk
+    control is disciplined trade adjustment: roll a tested leg, widen wings,
+    convert to a diagonal, or close before max loss.
+
+    This model captures the recommended adjustment action plus enough context
+    for eTrading to execute it automatically.
+    """
+
+    ticker: str
+    action: str          # "hold", "roll", "widen", "convert_to_diagonal", "close"
+    urgency: str         # "none", "monitor", "soon", "immediate"
+    rationale: str       # Why this action was chosen
+    trade_spec: TradeSpec | None  # Adjustment order (None if action is "hold")
+    regime_context: str           # How current regime influenced the recommendation
+    account_size_note: str        # Informs caller about account-size reasoning
+
+
+# Resolve forward references
 HedgeApproach.model_rebuild()
+TradeMaintenanceResult.model_rebuild()

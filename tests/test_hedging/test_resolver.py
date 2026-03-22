@@ -151,3 +151,121 @@ class TestResolverAlternatives:
         )
         # Proxy is last resort — no better alternatives
         assert len(approach.alternatives) == 0
+
+
+class TestSmallAccountTradeAdjustment:
+    """Small accounts + option positions → TRADE_ADJUSTMENT is the hedge."""
+
+    def test_small_account_ic_recommends_adjustment(self, registry: MarketRegistry):
+        """Small account ($50K) with iron condor → TRADE_ADJUSTMENT, not structural."""
+        approach = resolve_hedge_strategy(
+            ticker="SPY",
+            position_value=500,
+            shares=1,
+            current_price=580.0,
+            regime_id=1,
+            market="US",
+            account_nlv=50_000,
+            position_type="iron_condor",
+            registry=registry,
+        )
+        assert approach.recommended_tier == HedgeTier.TRADE_ADJUSTMENT
+        assert "trade adjustment" in approach.rationale.lower()
+        assert "50,000" in approach.rationale or "50000" in approach.rationale
+
+    def test_small_account_credit_spread_recommends_adjustment(self, registry: MarketRegistry):
+        """Small account with credit spread → TRADE_ADJUSTMENT."""
+        approach = resolve_hedge_strategy(
+            ticker="SPY",
+            position_value=200,
+            shares=1,
+            current_price=580.0,
+            regime_id=2,
+            market="US",
+            account_nlv=100_000,
+            position_type="credit_spread",
+            registry=registry,
+        )
+        assert approach.recommended_tier == HedgeTier.TRADE_ADJUSTMENT
+        assert "trade adjustment" in approach.rationale.lower()
+
+    def test_small_account_generic_option_spread_recommends_adjustment(self, registry: MarketRegistry):
+        """Small account with generic option_spread → TRADE_ADJUSTMENT."""
+        approach = resolve_hedge_strategy(
+            ticker="QQQ",
+            position_value=300,
+            shares=1,
+            current_price=450.0,
+            regime_id=1,
+            market="US",
+            account_nlv=75_000,
+            position_type="option_spread",
+            registry=registry,
+        )
+        assert approach.recommended_tier == HedgeTier.TRADE_ADJUSTMENT
+
+    def test_large_account_option_position_does_not_force_adjustment(self, registry: MarketRegistry):
+        """Large account ($500K) with iron condor → NOT TRADE_ADJUSTMENT (falls through to normal logic)."""
+        approach = resolve_hedge_strategy(
+            ticker="SPY",
+            position_value=500,
+            shares=1,
+            current_price=580.0,
+            regime_id=1,
+            market="US",
+            account_nlv=500_000,
+            position_type="iron_condor",
+            registry=registry,
+        )
+        assert approach.recommended_tier != HedgeTier.TRADE_ADJUSTMENT
+
+    def test_small_account_equity_still_gets_structural_hedge(self, registry: MarketRegistry):
+        """Small account holding equity (not options) → structural hedge, not adjustment."""
+        approach = resolve_hedge_strategy(
+            ticker="RELIANCE",
+            position_value=625_000,
+            shares=250,
+            current_price=2500.0,
+            regime_id=2,
+            market="INDIA",
+            account_nlv=100_000,
+            position_type="equity",
+            registry=registry,
+        )
+        assert approach.recommended_tier in (
+            HedgeTier.DIRECT,
+            HedgeTier.FUTURES_SYNTHETIC,
+            HedgeTier.PROXY_INDEX,
+        )
+
+    def test_trade_adjustment_has_direct_as_alternative(self, registry: MarketRegistry):
+        """TRADE_ADJUSTMENT result includes DIRECT as an informational alternative."""
+        approach = resolve_hedge_strategy(
+            ticker="SPY",
+            position_value=500,
+            shares=1,
+            current_price=580.0,
+            regime_id=2,
+            market="US",
+            account_nlv=80_000,
+            position_type="iron_condor",
+            registry=registry,
+        )
+        assert approach.recommended_tier == HedgeTier.TRADE_ADJUSTMENT
+        alt_tiers = [a.tier for a in approach.alternatives]
+        assert HedgeTier.DIRECT in alt_tiers
+
+    def test_trade_adjustment_cost_is_zero(self, registry: MarketRegistry):
+        """Trade adjustment hedge has 0.0 estimated cost (no separate instrument to buy)."""
+        approach = resolve_hedge_strategy(
+            ticker="SPY",
+            position_value=500,
+            shares=1,
+            current_price=580.0,
+            regime_id=1,
+            market="US",
+            account_nlv=50_000,
+            position_type="credit_spread",
+            registry=registry,
+        )
+        assert approach.estimated_cost_pct == 0.0

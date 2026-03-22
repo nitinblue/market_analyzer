@@ -38,6 +38,7 @@ from income_desk.hedging.models import (
     HedgeMonitorResult,
     HedgeEffectiveness,
     FnOCoverage,
+    TradeMaintenanceResult,
 )
 
 # Universe
@@ -85,6 +86,12 @@ from income_desk.hedging.monitoring import (
     compute_hedge_effectiveness,
 )
 
+# Trade maintenance (primary hedge for small accounts)
+from income_desk.hedging.trade_maintenance import (
+    recommend_trade_maintenance,
+    SMALL_ACCOUNT_THRESHOLD,
+)
+
 __all__ = [
     # Backward-compat legacy
     "HedgeType",
@@ -107,6 +114,7 @@ __all__ = [
     "HedgeMonitorResult",
     "HedgeEffectiveness",
     "FnOCoverage",
+    "TradeMaintenanceResult",
     # Universe
     "classify_hedge_tier",
     "get_fno_coverage",
@@ -134,4 +142,8 @@ __all__ = [
     # Monitoring
     "monitor_hedge_status",
     "compute_hedge_effectiveness",
+    # Trade maintenance
+    "TradeMaintenanceResult",
+    "recommend_trade_maintenance",
+    "SMALL_ACCOUNT_THRESHOLD",
 ]

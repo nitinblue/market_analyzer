@@ -24,6 +24,17 @@ from income_desk.hedging.universe import (
 from income_desk.registry import MarketRegistry
 
 
+# Accounts below this threshold treat trade adjustment as the primary hedge
+# for option positions — separate Greek-level instruments are impractical.
+SMALL_ACCOUNT_THRESHOLD = 200_000
+
+# Position types that represent defined-risk option structures
+_OPTION_POSITION_TYPES = frozenset(
+    {"option_spread", "iron_condor", "credit_spread", "iron_butterfly",
+     "calendar", "diagonal", "ratio_spread", "zero_dte"}
+)
+
+
 def resolve_hedge_strategy(
     ticker: str,
     position_value: float,
@@ -34,10 +45,12 @@ def resolve_hedge_strategy(
     account_nlv: float | None = None,
     max_hedge_cost_pct: float = 3.0,
     registry: MarketRegistry | None = None,
+    position_type: str = "equity",
 ) -> HedgeApproach:
     """Resolve which hedge strategy to use for a position.
 
     Decision tree:
+    0. Small account + option position → TRADE_ADJUSTMENT (adjustment IS the hedge)
     1. Classify instrument via registry → get base tier
     2. Check affordability — can the account handle 1 lot?
     3. If DIRECT + affordable → recommend DIRECT
@@ -56,11 +69,69 @@ def resolve_hedge_strategy(
         account_nlv: Account net liquidating value (for affordability check).
         max_hedge_cost_pct: Maximum acceptable hedge cost as % of position value.
         registry: MarketRegistry instance.
+        position_type: Type of position being hedged.
+            "equity"         — shares/ETF (structural hedges apply)
+            "iron_condor"    — IC or any of _OPTION_POSITION_TYPES
+            "credit_spread"  — see above
+            "option_spread"  — generic option spread
+            "futures"        — futures position
 
     Returns:
         HedgeApproach with recommended tier, rationale, and alternatives.
     """
     reg = registry or MarketRegistry()
+
+    # Step 0: small account + option position → TRADE_ADJUSTMENT is the hedge
+    if (
+        account_nlv is not None
+        and account_nlv < SMALL_ACCOUNT_THRESHOLD
+        and position_type in _OPTION_POSITION_TYPES
+    ):
+        # Collect tier context for alternatives (informational, not recommended)
+        _base = classify_hedge_tier(ticker, market.upper(), reg)
+        try:
+            _inst = reg.get_instrument(ticker, market.upper())
+            _lot_size = _inst.lot_size
+            _has_liq = _inst.options_liquidity in ("high", "medium")
+            _has_fut = market.upper() == "INDIA"
+        except KeyError:
+            _lot_size = 100 if market.upper() == "US" else 0
+            _has_liq = market.upper() == "US"
+            _has_fut = False
+
+        _lot_val = _lot_size * current_price if _lot_size > 0 else 0
+        _lot_affordable = (_lot_val < account_nlv * 0.20) if _lot_val > 0 else True
+
+        regime_ctx = _regime_hedge_context(regime_id)
+        return HedgeApproach(
+            ticker=ticker,
+            market=market.upper(),
+            recommended_tier=HedgeTier.TRADE_ADJUSTMENT,
+            goal=HedgeGoal.DOWNSIDE,
+            rationale=(
+                f"Small account (${account_nlv:,.0f} < ${SMALL_ACCOUNT_THRESHOLD:,}). "
+                f"Options positions ({position_type}) carry defined risk by structure — "
+                f"the primary hedge is trade adjustment (roll tested side, widen wings, "
+                f"convert to diagonal) rather than a separate hedge instrument. "
+                f"{regime_ctx}"
+            ),
+            alternatives=[
+                HedgeAlternative(
+                    tier=HedgeTier.DIRECT,
+                    reason_not_chosen=(
+                        f"Structural hedge viable but secondary — option structure "
+                        f"already limits max loss. Prefer adjustment for small accounts."
+                    ),
+                    estimated_cost_pct=_estimate_direct_cost(regime_id),
+                ),
+            ],
+            estimated_cost_pct=0.0,
+            basis_risk="none",
+            has_liquid_options=_has_liq,
+            has_futures=_has_fut,
+            lot_size=_lot_size,
+            lot_size_affordable=_lot_affordable,
+        )
     market = market.upper()
 
     # Step 1: classify base tier
