@@ -2,6 +2,32 @@
 
 All notable changes to income_desk will be documented in this file.
 
+## [1.0.0] - 2026-03-22
+
+### Breaking Changes
+- **Module renamed**: `market_analyzer` → `income_desk`. All imports change: `from income_desk import ...`
+- **User config directory**: `~/.market_analyzer/` → `~/.income_desk/`
+- See `ETRADING_MIGRATION.md` for migration steps
+
+### Added
+- **Desk Management**: 6 APIs — capital allocation by asset class (Options/Stocks/Metals/Futures) → risk type (defined/undefined) → desks
+- **Demo Portfolio**: `--demo` flag, `trade`/`portfolio`/`close_trade` commands, simulated $100K trading
+- **Trader Runners**: `Trader-US.py` and `Trader-IND.py` — end-to-end simulation scripts
+- **CSV Trade Import**: Import positions from thinkorswim, TastyTrade, Schwab, IBKR, Fidelity, Webull, or generic CSV
+- **Multi-Account Consolidation**: Cross-broker portfolio view from CSV imports
+- **Simulated Market Data**: 8 presets (calm, volatile, crash, income, recovery, wheel, india, india_trading) + snapshot refresh
+- **Assignment Workflows**: CSP/wheel analysis, covered call, assignment handling, assignment risk warning
+- **Cash vs Margin Analytics**: Structure-based margin buffers, regime-adjusted BP
+- **Interest Rate Risk**: Per-ticker + portfolio rate sensitivity assessment
+- **4 New Brokers**: Alpaca (free tier), IBKR, Schwab/thinkorswim, Dhan (India)
+- **Setup Wizard**: `--setup` for guided broker connection
+- **BYOD Adapters**: CSVProvider, DictQuoteProvider, IBKR/Schwab skeletons
+- **Fitness-for-Purpose**: Every output classified as fit for live_execution/paper_trading/screening/research/education
+- **Open Source Infrastructure**: README, CONTRIBUTING, LICENSE (MIT), CI, issue templates, SECURITY, CODE_OF_CONDUCT
+- **Published to PyPI**: `pip install income-desk`
+
+---
+
 ## [0.3.0] - 2026-03-21
 
 ### Added

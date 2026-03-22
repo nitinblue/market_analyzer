@@ -1,6 +1,6 @@
 """Market analysis toolkit: regime detection, technicals, phase detection, and opportunity assessment."""
 
-__version__ = "0.3.1"
+__version__ = "1.0.0"
 
 # Config
 from income_desk.config import (

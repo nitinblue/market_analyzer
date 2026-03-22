@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "income-desk"
-version = "0.3.1"
+version = "1.0.0"
 description = "Systematic options trading intelligence for small accounts. Regime detection, profitability gates, Kelly sizing, crash sentinel, decision audit. Your personal trading desk brain."
 readme = "README.md"
 license = {text = "MIT"}
