@@ -2979,3 +2979,341 @@ effectiveness = compute_hedge_effectiveness(
 - Most stocks have liquid options — `resolve_hedge_strategy()` returns DIRECT for ~90% of US tickers
 - Standard lot size 100 — affordability rarely an issue above $10K account
 - SPY/QQQ are the primary proxy instruments for Tier 3
+
+---
+
+## 25. Module Rename — market_analyzer → income_desk (March 22, 2026)
+
+**BREAKING CHANGE:** The Python module has been renamed from `market_analyzer` to `income_desk`.
+
+### Before (no longer works)
+
+```python
+from market_analyzer import MarketAnalyzer, DataService
+from market_analyzer.broker.tastytrade import connect_tastytrade
+```
+
+### After (new correct imports)
+
+```python
+from income_desk import MarketAnalyzer, DataService
+from income_desk.broker.tastytrade import connect_tastytrade
+```
+
+### What Changed
+
+| Item | Old | New |
+|------|-----|-----|
+| Package name (PyPI) | `market-analyzer` | `income-desk` |
+| Python module | `market_analyzer` | `income_desk` |
+| Config directory | `~/.market_analyzer/` | `~/.income_desk/` |
+| Entry points | `analyzer-cli`, `analyzer-explore`, `analyzer-plot` | `income-cli`, `income-explore`, `income-plot` |
+| Package version | — | v1.0.0 |
+
+### What Did NOT Change
+
+- All function signatures
+- All model classes and field names
+- All CLI command names (inside the REPL)
+- All broker integrations and APIs
+- All data service behavior
+
+**eTrading migration:** Use the automated migration script in `ETRADING_MIGRATION.md`. Summary:
+
+```bash
+# Replace all imports in eTrading codebase
+find . -name "*.py" -type f -exec sed -i 's/from market_analyzer/from income_desk/g' {} \;
+find . -name "*.py" -type f -exec sed -i 's/import market_analyzer/import income_desk/g' {} \;
+
+# Update requirements.txt or pyproject.toml
+sed -i 's/market-analyzer/income-desk/g' requirements.txt
+sed -i 's/market-analyzer/income-desk/g' pyproject.toml
+
+# Reinstall
+pip install income-desk==1.0.0
+```
+
+**eTrading environment:** If you have hardcoded `~/.market_analyzer` config paths, update to `~/.income_desk`. The config schema is identical.
+
+---
+
+## 26. CSV Trade Import — Multi-Broker Position Consolidation (March 22, 2026)
+
+eTrading can now import positions from ANY broker via CSV export — no API connection required. This is critical for:
+- Accounts at brokers without API support (some international brokers, small retail brokers)
+- Users who want to consolidate positions from multiple brokers
+- Portfolio reconciliation (compare CSV export vs MA tracking)
+
+### API
+
+```python
+from income_desk import import_trades_csv, detect_broker_format
+
+# Auto-detect broker format and parse
+result = import_trades_csv(
+    csv_path="/path/to/fidelity_positions.csv",
+    auto_detect=True,
+)
+
+# result.broker_detected = "fidelity_positions"
+# result.source_file = "/path/to/fidelity_positions.csv"
+# result.total_imported = 5
+# result.total_skipped = 0
+# result.parse_errors = []
+# result.positions = [
+#     ImportedPosition(
+#         ticker="META",
+#         security_type="option",
+#         option_type="call",
+#         strike=625.0,
+#         expiration=datetime(2026, 3, 27),
+#         quantity=-1,  # short 1 contract
+#         avg_price=1.50,
+#     ),
+#     ImportedPosition(
+#         ticker="GBTC",
+#         security_type="equity",
+#         quantity=100,
+#         avg_price=31.25,
+#     ),
+#     ...
+# ]
+```
+
+### Supported CSV Formats
+
+| Broker | Format Name | Status | Notes |
+|--------|-------------|--------|-------|
+| thinkorswim (TD) | `thinkorswim_positions` | ✅ Tested | Export: Accounts → Positions tab → CSV |
+| TastyTrade | `tastytrade_positions` | ✅ Tested | Via API preferred, CSV backup for manual export |
+| Charles Schwab | `schwab_positions` | ✅ Tested | Export from Positions tab |
+| Interactive Brokers | `ibkr_positions` | ✅ Tested | Portfolio reports → IB Flex Web Service |
+| Fidelity | `fidelity_positions` | ✅ Tested | Portfolio → Download → Positions for selected date |
+| Webull | `webull_positions` | ⚠️ Partial | Equity + options; futures not supported |
+| Generic CSV | `generic_csv` | ⚠️ Basic | Requires columns: symbol, type, side, qty, price |
+
+### eTrading Integration
+
+**Step 1: User uploads CSV**
+```
+eTrading UI → Upload CSV → "Which broker?"
+  [Auto-detect] [thinkorswim] [TastyTrade] [Schwab] [IBKR] [Fidelity] [Webull] [Generic]
+```
+
+**Step 2: eTrading parses and stores**
+```python
+result = import_trades_csv(file_path, broker_format="fidelity_positions")
+
+# Store in eTrading DB:
+for pos in result.positions:
+    db.imported_positions.insert({
+        "user_id": current_user,
+        "import_date": result.import_timestamp,
+        "broker_source": result.broker_detected,
+        "ticker": pos.ticker,
+        "security_type": pos.security_type,
+        "quantity": pos.quantity,
+        "avg_price": pos.avg_price,
+        # ... other fields
+    })
+```
+
+**Step 3: Use imported positions in portfolio analysis**
+```python
+from income_desk import analyze_portfolio_hedge, monitor_exit_conditions
+
+# All portfolio-aware functions work seamlessly:
+imported_positions = [
+    {"ticker": "META", "shares": -1, "value": -625, ...},  # Short 1 call contract
+    {"ticker": "GBTC", "shares": 100, "value": 3125, ...},
+]
+
+# Same analysis as API-connected positions
+hedge_analysis = analyze_portfolio_hedge(imported_positions)
+monitoring = monitor_exit_conditions(imported_positions)
+```
+
+### Data Quality Notes
+
+- **Lot tracking:** If CSV doesn't include cost basis, use current price as entry estimate
+- **Expiration ambiguity:** 3/27/26 vs 3/27/2026 — auto-normalize to datetime
+- **Option legs:** Some brokers group spreads as 1 line (qty=1, side="credit_spread"), others split into individual legs (qty=2 short, qty=1 long). Normalizer detects and converts to individual legs.
+- **Symbol normalization:** Auto-converts TSLA to TSLA, SPY to SPY, but also ORB tickers (^GSPC → SPX) to user-facing names
+- **Errors are verbose:** If a row can't parse, the error lists exactly which fields are missing/malformed
+
+### eTrading Checklist
+
+| Step | API | eTrading Action |
+|------|-----|-----------------|
+| **First-time upload** | `import_trades_csv(..., auto_detect=True)` | Show detected broker + preview table, confirm before saving |
+| **Bulk import** | Loop `import_trades_csv()` for multiple files | Show progress bar, error summary |
+| **Periodic reconciliation** | Re-import same CSV, compare to stored positions | Detect fills, exits, adjustments since last import |
+| **Portfolio hedging** | Pass imported positions to `analyze_portfolio_hedge()` | Works identically to API positions |
+| **Monitoring** | `monitor_exit_conditions(imported_positions)` | Same alerts/recommendations as API-connected |
+
+---
+
+## 27. Trade Maintenance as Primary Hedge (Small Accounts) (March 22, 2026)
+
+For accounts under $200K notional, the hedging resolver now identifies **trade maintenance** (adjustment, roll, conversion) as the primary risk mitigation tier instead of separate hedging instruments. This is critical for small accounts where:
+- Lot sizes are large relative to account (100 shares = 15% of $50K account)
+- Buying a separate hedge (put spread, futures short) creates proportional transaction costs
+- Simple adjustments (roll, widen, convert) protect capital more efficiently
+
+### API: Hedge Strategy Resolution
+
+```python
+from income_desk import resolve_hedge_strategy
+
+# Small account ($50K) buying equity
+approach = resolve_hedge_strategy(
+    ticker="SPY",
+    position_value=7500,
+    shares=25,
+    current_price=300,
+    regime_id=2,
+    account_nlv=50000,  # Small account
+    position_type="equity_long",
+)
+
+# For small account, tier-1 recommendation is trade maintenance:
+# approach.recommended_tier = "trade_adjustment"
+# approach.rationale = "Small account ($50,000). A $7,500 long position is 15% of portfolio.
+#   Buying a protective put ($75 debit × 25 = $1,875, 2.5% cost/month) is inefficient.
+#   Better: monitor for mean reversion (R2) or use wider collar on iron condor entry."
+# approach.maintenance_actions = [
+#     "If position loses 10% → consider rolling to short call or widening short side",
+#     "If regime shifts to R4 → convert IC to diagonal (take off short side, extend back)",
+#     "If 21 DTE remaining → roll to next month for theta decay",
+# ]
+```
+
+### API: Trade Maintenance Recommendation
+
+```python
+from income_desk.hedging import recommend_trade_maintenance
+
+# During position monitoring, if a trade is tested:
+result = recommend_trade_maintenance(
+    trade_spec=ic_spec,  # Original IC entry
+    current_price=572.0,  # Current SPY
+    entry_price=575.0,    # Where we entered
+    entry_premium=1.50,   # Credit we collected
+    regime_id=3,          # Current regime
+    entry_regime_id=2,    # Regime when we entered
+    dte_remaining=20,
+    account_nlv=50000,
+)
+
+# result.action = "convert_to_diagonal"
+# result.urgency = "soon"
+# result.rationale = """Position is 3 ATR down ($150 loss, 10% of credit).
+#   Entered in R2 (mean reversion), now in R3 (trending).
+#   Close short put side, extend short call side 1 month to capture trend."""
+# result.trade_spec = TradeSpec(
+#     legs=[
+#         LegSpec(action="BTC", contract_symbol="SPY 3/27 P570", qty=1),
+#         LegSpec(action="STO", contract_symbol="SPY 4/24 C575", qty=1),
+#     ],
+#     reason="Convert IC to diagonal when regime changes away from mean reversion"
+# )
+```
+
+### Decision Framework for Trade Maintenance
+
+**Priority order (checked in sequence):**
+
+1. **Expiring + losing** (≤5 DTE AND P&L < 0)
+   - Action: CLOSE_FULL
+   - Urgency: IMMEDIATE
+   - Rationale: No theta left, realize loss, redeploy capital
+
+2. **Near max loss** (P&L loss ≥60% of max loss)
+   - Action: CLOSE_FULL
+   - Urgency: IMMEDIATE
+   - Rationale: Risk/reward is bad; better to exit and find new trade
+
+3. **Regime changed + losing** (regime_id ≠ entry_regime_id AND P&L < 0)
+   - Action: CONVERT_TO_DIAGONAL (for IC) or ROLL_OUT (for spread)
+   - Urgency: SOON (if ≤14 DTE: IMMEDIATE)
+   - Rationale: Original setup (e.g., IC in R2) is no longer appropriate; adjust structure to match new regime
+
+4. **Tested (one side breached)** (P&L loss ≥15% of max loss)
+   - Action (R1/R2): ROLL_AWAY — extend duration, adjust strike
+   - Action (R3): WIDEN_UNTESTED — take more premium on wider wing
+   - Action (R4): CLOSE_FULL — no roll in trending regime
+   - Urgency: MONITOR (≤14 DTE: SOON)
+   - Rationale: One wing is under pressure; R1/R2 benefit from roll (mean revert), R3/R4 need exit
+
+5. **Profitable** (P&L ≥ 50% of max profit)
+   - Action: CLOSE_FULL
+   - Urgency: DISCRETIONARY
+   - Rationale: Good risk/reward exhausted; close and redeploy
+
+6. **Open + delta exposure** (no imminent threats)
+   - Action: DO_NOTHING
+   - Urgency: MONITOR
+   - Rationale: Working as designed; let theta decay
+
+### eTrading Integration
+
+When position monitoring detects a tested/threatened position on small account:
+
+**Instead of suggesting:** "Buy a protective call spread ($300 debit)"
+
+**Show:** `recommend_trade_maintenance()` result with concrete trade_spec to execute
+
+```
+⚠️  POSITION ALERT: SPY IC (Short P570 / Short C580)
+   Entry: $1.50 credit | Current P&L: -$150 (10% of credit) | DTE: 20
+
+   RECOMMENDATION: Convert to Diagonal
+
+   Current: STO 1x SPY P570 3/27, STO 1x SPY C580 3/27
+   Close:   BTC 1x SPY P570 3/27  ($0.30 bid)
+   Open:    STO 1x SPY C575 4/24  ($1.10 bid)
+
+   Net cost: $0.30 debit
+   Rationale: Entered in R2 (mean reversion), now R3 (trending).
+             Keep short call for income, close short put to reduce directional
+             risk. Extend call side to capture longer-term trend.
+
+   Urgency: SOON (decide within 1-2 days)
+
+   [Execute Adjustment] [Mark as Monitored] [Close Full Position]
+```
+
+### Config: Small Account Thresholds
+
+```python
+from income_desk.config import SmallAccountSettings
+
+# In eTrading config:
+small_account_thresholds = SmallAccountSettings(
+    position_value_pct=0.20,  # Single position > 20% of account
+    account_nlv_threshold=200000,  # Use trade maintenance for NLV < $200K
+    hedge_cost_threshold_pct=0.03,  # If separate hedge costs > 0.3%/month, use maintenance
+    maintenance_lookback_days=30,   # When evaluating "tested", use 30-day ATR
+)
+```
+
+### Data eTrading Must Track
+
+For the recommendation engine to work:
+
+| Data | When | Used for |
+|------|------|----------|
+| `trade_spec` at entry | At order placement | Identify what was entered (IC vs spread vs diagonal) |
+| `entry_premium` | At order placement | Calculate P&L % threshold for "tested" detection |
+| `entry_regime_id` | At order placement | Detect regime mismatch (e.g., entered R2, now R3) |
+| `entry_price` (underlying) | At order placement | Calculate directional stress (how far price moved) |
+| `current_price` | Every monitoring cycle | Feed to `recommend_trade_maintenance()` |
+| `dte_remaining` | Every monitoring cycle | Escalate urgency as expiration nears |
+| `current_regime_id` | Every monitoring cycle (via regime API) | Detect regime changes |
+
+**eTrading checklist:**
+- Store `entry_regime_id` in trade record at booking ✓
+- Call `ma.regime.detect(ticker)` in every monitoring cycle ✓
+- Pass current regime to `recommend_trade_maintenance()` ✓
+- When result.action is not DO_NOTHING, show adjustment recommendation card ✓
+- Log maintenance action execution for performance calibration ✓
