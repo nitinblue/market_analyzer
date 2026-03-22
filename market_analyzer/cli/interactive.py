@@ -3094,6 +3094,40 @@ Requires --broker connection."""
             print(f"\n  {_styled('To connect:', 'bold')} analyzer-cli --broker")
             print(f"  Requires:      TASTYTRADE_***_DATA env vars in eTrading/.env")
 
+    def do_refresh_sim(self, arg: str) -> None:
+        """Capture live market data for simulation: refresh_sim [TICKERS]
+
+        Run during market hours with --broker connected.
+        Saves snapshot to ~/.market_analyzer/sim_snapshot.json.
+        Use 'analyzer-cli --sim snapshot' to load it offline.
+
+        Examples:
+            refresh_sim                    # Default: SPY QQQ IWM GLD TLT
+            refresh_sim SPY QQQ NIFTY      # Custom tickers
+        """
+        tickers = arg.strip().split() if arg.strip() else None
+
+        from market_analyzer.adapters.simulated import refresh_simulation_data
+
+        print("Capturing live market data...")
+        snapshot = refresh_simulation_data(self._get_ma(), tickers)
+
+        captured = len([t for t in snapshot["tickers"].values() if "error" not in t])
+        errors = len([t for t in snapshot["tickers"].values() if "error" in t])
+
+        print(f"Captured {captured} tickers" + (f" ({errors} errors)" if errors else ""))
+        for ticker, info in snapshot["tickers"].items():
+            if "error" in info:
+                print(f"  {ticker}: ERROR — {info['error']}")
+            else:
+                iv_str = f"IV {info['iv']:.1%}" if info.get("iv") else ""
+                ivr_str = f"IVR {info['iv_rank']:.0f}%" if info.get("iv_rank") is not None else ""
+                print(f"  {ticker}: ${info['price']:.2f}  R{info.get('regime_id', '?')}  {iv_str}  {ivr_str}")
+
+        from market_analyzer.adapters.simulated import SIM_SNAPSHOT_FILE
+        print(f"\nSaved to {SIM_SNAPSHOT_FILE}")
+        print("Use: analyzer-cli --sim snapshot")
+
     def do_risk(self, arg: str) -> None:
         """Show portfolio risk dashboard from demo positions.\nUsage: risk\n       risk --nlv 50000 --peak 52000\n\nBuilds a demo portfolio to show what the risk dashboard computes.\neTrading provides real positions; this command shows the computation."""
         import traceback
@@ -6858,10 +6892,11 @@ def main() -> None:
     )
     parser.add_argument(
         "--sim",
-        choices=["calm", "volatile", "crash", "india"],
+        choices=["calm", "volatile", "crash", "india", "snapshot"],
         help=(
             "Start with simulated market data — no broker or internet required. "
-            "Scenarios: calm (R1-like), volatile (R2-like), crash (R4-like), india (NSE). "
+            "Scenarios: calm (R1-like), volatile (R2-like), crash (R4-like), india (NSE), "
+            "snapshot (last saved live capture). "
             "Trust: UNRELIABLE — for testing/development only."
         ),
     )
@@ -6898,16 +6933,33 @@ def main() -> None:
             create_volatile_market,
         )
 
-        _sim_scenarios = {
-            "calm": create_calm_market,
-            "volatile": create_volatile_market,
-            "crash": create_crash_scenario,
-            "india": create_india_market,
-        }
-        sim_market_data = _sim_scenarios[args.sim]()
-        sim_market_metrics = SimulatedMetrics(sim_market_data)
-        sim_account = SimulatedAccount()
-        print(_styled(f"[SIM] Scenario: {args.sim}", "yellow"))
+        if args.sim == "snapshot":
+            from market_analyzer.adapters.simulated import (
+                create_from_snapshot,
+                get_snapshot_info,
+            )
+            info = get_snapshot_info()
+            if info:
+                age_str = f"{info['age_hours']:.0f}h ago" if info["age_hours"] is not None else "unknown age"
+                print(_styled(f"[SIM] Loading snapshot from {info['captured_at']} ({age_str})", "yellow"))
+                print(_styled(f"Tickers: {', '.join(info['tickers'])}", "yellow"))
+            sim_market_data = create_from_snapshot()
+            if sim_market_data is None:
+                print("No snapshot found. Run 'refresh_sim' during market hours with --broker.")
+                return
+            sim_market_metrics = SimulatedMetrics(sim_market_data)
+            sim_account = SimulatedAccount()
+        else:
+            _sim_scenarios = {
+                "calm": create_calm_market,
+                "volatile": create_volatile_market,
+                "crash": create_crash_scenario,
+                "india": create_india_market,
+            }
+            sim_market_data = _sim_scenarios[args.sim]()
+            sim_market_metrics = SimulatedMetrics(sim_market_data)
+            sim_account = SimulatedAccount()
+            print(_styled(f"[SIM] Scenario: {args.sim}", "yellow"))
         print(_styled("Trust: UNRELIABLE — simulated data, for testing/development only.", "yellow"))
 
     try:

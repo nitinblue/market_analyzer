@@ -28,9 +28,13 @@ Usage::
 """
 from __future__ import annotations
 
+import json
 import math
-from datetime import date, time, timedelta
+from datetime import date, datetime, time, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING
+
+SIM_SNAPSHOT_FILE = Path.home() / ".market_analyzer" / "sim_snapshot.json"
 
 from market_analyzer.broker.base import MarketDataProvider, MarketMetricsProvider
 from market_analyzer.models.quotes import AccountBalance, MarketMetrics, OptionQuote
@@ -350,6 +354,142 @@ def _generate_option_quote(
         volume=int(proximity * 10_000),
         open_interest=int(proximity * 50_000),
     )
+
+
+# ── Snapshot capture / restore ────────────────────────────────────────────────
+
+
+def refresh_simulation_data(
+    ma,  # MarketAnalyzer instance (with broker connected)
+    tickers: list[str] | None = None,
+) -> dict:
+    """Capture live market data and save as simulation snapshot.
+
+    Run this when the market is open. The snapshot is saved to
+    ~/.market_analyzer/sim_snapshot.json and used by create_from_snapshot()
+    when the market is closed.
+
+    Args:
+        ma: MarketAnalyzer with broker connected (has_broker=True).
+        tickers: Tickers to capture. Default: SPY, QQQ, IWM, GLD, TLT.
+
+    Returns:
+        Dict of captured data (also saved to disk).
+    """
+    if tickers is None:
+        tickers = ["SPY", "QQQ", "IWM", "GLD", "TLT"]
+
+    snapshot: dict = {
+        "captured_at": datetime.now().isoformat(),
+        "source": ma.quotes.source if hasattr(ma, "quotes") else "unknown",
+        "tickers": {},
+    }
+
+    for ticker in tickers:
+        try:
+            # Get underlying price and technical indicators
+            tech = ma.technicals.snapshot(ticker)
+            price = tech.current_price
+            atr_pct = tech.atr_pct
+            rsi = tech.rsi.value
+
+            # Get IV and metrics
+            metrics = ma.quotes.get_metrics(ticker) if hasattr(ma, "quotes") else None
+            iv_rank = None
+            iv_pct = None
+            if metrics:
+                if hasattr(metrics, "iv_rank"):
+                    iv_rank = metrics.iv_rank
+                    iv_pct = metrics.iv_percentile
+                elif isinstance(metrics, dict):
+                    iv_rank = metrics.get("iv_rank") or metrics.get("ivRank")
+                    iv_pct = metrics.get("iv_percentile") or metrics.get("ivPercentile")
+
+            # Get vol surface front-month IV
+            vol = ma.vol_surface.surface(ticker)
+            front_iv = vol.front_iv if vol else 0.20
+
+            # Get regime
+            regime = ma.regime.detect(ticker)
+
+            snapshot["tickers"][ticker] = {
+                "price": round(price, 2),
+                "iv": round(front_iv, 4),
+                "iv_rank": round(iv_rank, 1) if iv_rank is not None else None,
+                "iv_percentile": round(iv_pct, 1) if iv_pct is not None else None,
+                "atr_pct": round(atr_pct, 2),
+                "rsi": round(rsi, 1),
+                "regime_id": regime.regime.value,
+                "regime_confidence": round(regime.confidence, 2),
+            }
+        except Exception as e:
+            snapshot["tickers"][ticker] = {"error": str(e)}
+
+    # Save to disk
+    SIM_SNAPSHOT_FILE.parent.mkdir(exist_ok=True)
+    SIM_SNAPSHOT_FILE.write_text(json.dumps(snapshot, indent=2))
+
+    return snapshot
+
+
+def create_from_snapshot() -> SimulatedMarketData | None:
+    """Create SimulatedMarketData from the last saved snapshot.
+
+    Returns None if no snapshot exists.
+    """
+    if not SIM_SNAPSHOT_FILE.exists():
+        return None
+
+    try:
+        data = json.loads(SIM_SNAPSHOT_FILE.read_text())
+    except Exception:
+        return None
+
+    tickers: dict[str, dict] = {}
+    for ticker, info in data.get("tickers", {}).items():
+        if "error" in info:
+            continue
+        tickers[ticker] = {
+            "price": info.get("price", 0),
+            "iv": info.get("iv", 0.20),
+            "iv_rank": info.get("iv_rank"),
+            "atr_pct": info.get("atr_pct", 1.0),
+        }
+
+    if not tickers:
+        return None
+
+    return SimulatedMarketData(tickers)
+
+
+def get_snapshot_info() -> dict | None:
+    """Get info about the saved snapshot without loading full data."""
+    if not SIM_SNAPSHOT_FILE.exists():
+        return None
+
+    try:
+        data = json.loads(SIM_SNAPSHOT_FILE.read_text())
+        captured = data.get("captured_at", "unknown")
+        source = data.get("source", "unknown")
+        tickers = list(data.get("tickers", {}).keys())
+
+        # How old is it?
+        age_hours = None
+        try:
+            captured_dt = datetime.fromisoformat(captured)
+            age_hours = (datetime.now() - captured_dt).total_seconds() / 3600
+        except Exception:
+            pass
+
+        return {
+            "captured_at": captured,
+            "age_hours": round(age_hours, 1) if age_hours is not None else None,
+            "source": source,
+            "tickers": tickers,
+            "ticker_count": len(tickers),
+        }
+    except Exception:
+        return None
 
 
 # ── Preset scenarios ──────────────────────────────────────────────────────────

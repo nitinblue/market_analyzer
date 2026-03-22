@@ -422,3 +422,160 @@ class TestGenerateOptionQuote:
         exp60 = date.today() + datetime.timedelta(days=60)
         q_60 = _generate_option_quote("SPY", 580.0, "call", exp60, 60, 580.0, 0.18)
         assert q_60.mid > q_1.mid
+
+
+class TestRefreshAndSnapshot:
+    def test_refresh_saves_to_disk(self, tmp_path, monkeypatch):
+        """refresh_simulation_data saves JSON to disk."""
+        monkeypatch.setattr(
+            "market_analyzer.adapters.simulated.SIM_SNAPSHOT_FILE",
+            tmp_path / "snapshot.json",
+        )
+
+        # Create a minimal mock MA
+        class MockQuotes:
+            source = "test"
+
+            def get_metrics(self, t):
+                return None
+
+        class MockTech:
+            current_price = 580.0
+            atr_pct = 1.2
+
+            class rsi:
+                value = 52.0
+
+        class MockVol:
+            front_iv = 0.18
+
+        class MockRegime:
+            class regime:
+                value = 1
+
+            confidence = 0.95
+
+        class MockMA:
+            quotes = MockQuotes()
+
+            class technicals:
+                @staticmethod
+                def snapshot(t):
+                    return MockTech()
+
+            class vol_surface:
+                @staticmethod
+                def surface(t):
+                    return MockVol()
+
+            class regime:
+                @staticmethod
+                def detect(t):
+                    return MockRegime()
+
+        from market_analyzer.adapters.simulated import refresh_simulation_data
+
+        result = refresh_simulation_data(MockMA(), ["SPY"])
+        assert "SPY" in result["tickers"]
+        assert result["tickers"]["SPY"]["price"] == 580.0
+        assert (tmp_path / "snapshot.json").exists()
+
+    def test_create_from_snapshot(self, tmp_path, monkeypatch):
+        """create_from_snapshot loads saved data."""
+        import json
+
+        snapshot_file = tmp_path / "snapshot.json"
+        monkeypatch.setattr(
+            "market_analyzer.adapters.simulated.SIM_SNAPSHOT_FILE", snapshot_file
+        )
+
+        snapshot_file.write_text(
+            json.dumps(
+                {
+                    "captured_at": "2026-03-21T10:00:00",
+                    "source": "test",
+                    "tickers": {
+                        "SPY": {"price": 580.0, "iv": 0.18, "iv_rank": 43, "atr_pct": 1.2},
+                        "GLD": {"price": 420.0, "iv": 0.25, "iv_rank": 68, "atr_pct": 2.5},
+                    },
+                }
+            )
+        )
+
+        from market_analyzer.adapters.simulated import create_from_snapshot
+
+        sim = create_from_snapshot()
+        assert sim is not None
+        assert sim.get_underlying_price("SPY") == 580.0
+        assert sim.get_underlying_price("GLD") == 420.0
+
+        chain = sim.get_option_chain("SPY")
+        assert len(chain) > 0
+
+    def test_no_snapshot_returns_none(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "market_analyzer.adapters.simulated.SIM_SNAPSHOT_FILE",
+            tmp_path / "nonexistent.json",
+        )
+
+        from market_analyzer.adapters.simulated import create_from_snapshot
+
+        assert create_from_snapshot() is None
+
+    def test_snapshot_info(self, tmp_path, monkeypatch):
+        import json
+        from datetime import datetime
+
+        snapshot_file = tmp_path / "snapshot.json"
+        monkeypatch.setattr(
+            "market_analyzer.adapters.simulated.SIM_SNAPSHOT_FILE", snapshot_file
+        )
+
+        snapshot_file.write_text(
+            json.dumps(
+                {
+                    "captured_at": datetime.now().isoformat(),
+                    "source": "tastytrade",
+                    "tickers": {
+                        "SPY": {"price": 580.0},
+                        "QQQ": {"price": 490.0},
+                    },
+                }
+            )
+        )
+
+        from market_analyzer.adapters.simulated import get_snapshot_info
+
+        info = get_snapshot_info()
+        assert info is not None
+        assert info["ticker_count"] == 2
+        assert info["source"] == "tastytrade"
+        assert info["age_hours"] is not None
+
+    def test_snapshot_skips_error_tickers(self, tmp_path, monkeypatch):
+        import json
+
+        snapshot_file = tmp_path / "snapshot.json"
+        monkeypatch.setattr(
+            "market_analyzer.adapters.simulated.SIM_SNAPSHOT_FILE", snapshot_file
+        )
+
+        snapshot_file.write_text(
+            json.dumps(
+                {
+                    "captured_at": "2026-03-21T10:00:00",
+                    "source": "test",
+                    "tickers": {
+                        "SPY": {"price": 580.0, "iv": 0.18},
+                        "BAD": {"error": "fetch failed"},
+                    },
+                }
+            )
+        )
+
+        from market_analyzer.adapters.simulated import create_from_snapshot
+
+        sim = create_from_snapshot()
+        assert sim is not None
+        assert sim.get_underlying_price("SPY") == 580.0
+        assert sim.get_underlying_price("BAD") is None

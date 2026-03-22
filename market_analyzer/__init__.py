@@ -267,6 +267,9 @@ from market_analyzer.adapters.simulated import (
     create_volatile_market,
     create_crash_scenario,
     create_india_market,
+    refresh_simulation_data,
+    create_from_snapshot,
+    get_snapshot_info,
 )
 
 # Pre-market scanner
