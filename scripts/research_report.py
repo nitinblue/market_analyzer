@@ -190,7 +190,7 @@ def generate_india_report(
     try:
         cal = ma.macro.calendar()
         if hasattr(cal, 'events') and cal.events:
-            india_events = [e for e in cal.events if e.event_type.value == "rbi_mpc"][:8]
+            india_events = [e for e in cal.events if e.event_type.value == "rbi_mpc" and e.date >= date.today()][:8]
             if india_events:
                 w("**Upcoming Macro Events:**")
                 w()
@@ -214,7 +214,7 @@ def generate_india_report(
         for rt in rate_tickers:
             try:
                 rr = assess_rate_risk(rt)
-                w(f"| {rt} | {rr.rate_sensitivity} | {rr.impact_per_100bp:.1%} | {rr.recommendation} |")
+                w(f"| {rt} | {rr.rate_sensitivity} | {rr.impact_per_100bp:.1%} | {rr.recommendation.replace('_', ' ').capitalize()} |")
             except Exception:
                 pass
         w()
@@ -427,7 +427,7 @@ def generate_us_report(
         if hasattr(bs, 'indicators') and bs.indicators:
             for ind in bs.indicators[:5]:
                 if hasattr(ind, 'name') and hasattr(ind, 'value'):
-                    w(f"- {ind.name}: {ind.value}")
+                    w(f"- {ind.name}: {ind.value:.2f}" if isinstance(ind.value, float) else f"- {ind.name}: {ind.value}")
         w()
     except Exception:
         w("**Black Swan:** Unavailable (requires market data)")
@@ -456,7 +456,7 @@ def generate_us_report(
         for rt in rate_tickers:
             try:
                 rr = assess_rate_risk(rt)
-                w(f"| {rt} | {rr.rate_sensitivity} | {rr.impact_per_100bp:.1%} | {rr.recommendation} |")
+                w(f"| {rt} | {rr.rate_sensitivity} | {rr.impact_per_100bp:.1%} | {rr.recommendation.replace('_', ' ').capitalize()} |")
             except Exception:
                 pass
         w()
@@ -468,7 +468,7 @@ def generate_us_report(
         cal = ma.macro.calendar()
         if hasattr(cal, 'events') and cal.events:
             us_event_types = {"fomc", "cpi", "nfp", "pce", "gdp"}
-            us_events = [e for e in cal.events if e.event_type.value in us_event_types][:8]
+            us_events = [e for e in cal.events if e.event_type.value in us_event_types and e.date >= date.today()][:8]
             if us_events:
                 w("**Upcoming Macro Events:**")
                 w()
