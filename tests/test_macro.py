@@ -120,3 +120,13 @@ class TestGetNextEvent:
     def test_returns_none_past_all_dates(self):
         event = get_next_event(as_of=date(2030, 1, 1))
         assert event is None
+
+
+class TestRBIMPC:
+    def test_rbi_mpc_events_in_calendar(self):
+        cal = get_macro_calendar(as_of=date(2026, 1, 1), lookahead_days=365)
+        rbi_events = [e for e in cal.events if e.event_type == MacroEventType.RBI_MPC]
+        assert len(rbi_events) >= 5  # 6 meetings per year, at least 5 in 365 days
+        assert cal.next_rbi is not None
+        assert cal.days_to_next_rbi is not None
+        assert cal.days_to_next_rbi > 0

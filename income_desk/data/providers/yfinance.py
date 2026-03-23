@@ -29,6 +29,7 @@ _YFINANCE_ALIASES: dict[str, str] = {
     # India indices
     "NIFTY":     "^NSEI",                # Nifty 50
     "BANKNIFTY": "^NSEBANK",             # Bank Nifty
+    "INDIAVIX":  "^INDIAVIX",            # India VIX
     "FINNIFTY":  "NIFTY_FIN_SERVICE.NS", # Fin Nifty
     "SENSEX":    "^BSESN",               # BSE Sensex
 }

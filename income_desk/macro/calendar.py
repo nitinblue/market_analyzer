@@ -11,6 +11,7 @@ from income_desk.macro._econ_schedule import (
     generate_pce_dates,
 )
 from income_desk.macro._fomc_dates import FOMC_DATES
+from income_desk.macro._rbi_dates import RBI_MPC_DATES
 from income_desk.models.macro import (
     MacroCalendar,
     MacroEvent,
@@ -93,6 +94,19 @@ def _build_all_events() -> list[MacroEvent]:
             )
         )
 
+    # RBI MPC
+    for dt, is_review in RBI_MPC_DATES:
+        events.append(
+            MacroEvent(
+                event_type=MacroEventType.RBI_MPC,
+                date=dt,
+                name="RBI MPC Rate Decision",
+                impact=MacroEventImpact.HIGH,
+                description="Reserve Bank of India Monetary Policy Committee rate decision.",
+                options_impact="High impact on NIFTY/BANKNIFTY options. IV crush after announcement. Bank stocks sensitive.",
+            )
+        )
+
     return sorted(events, key=lambda e: e.date)
 
 
@@ -142,6 +156,10 @@ def get_macro_calendar(
     next_fomc = fomc_future[0] if fomc_future else None
     days_to_next_fomc = (next_fomc.date - as_of).days if next_fomc else None
 
+    rbi_future = [e for e in future if e.event_type == MacroEventType.RBI_MPC]
+    next_rbi = rbi_future[0] if rbi_future else None
+    days_to_next_rbi = (next_rbi.date - as_of).days if next_rbi else None
+
     events_7 = [e for e in all_events if as_of <= e.date <= as_of + timedelta(days=7)]
     events_30 = [e for e in all_events if as_of <= e.date <= as_of + timedelta(days=30)]
 
@@ -151,6 +169,8 @@ def get_macro_calendar(
         days_to_next=days_to_next,
         next_fomc=next_fomc,
         days_to_next_fomc=days_to_next_fomc,
+        next_rbi=next_rbi,
+        days_to_next_rbi=days_to_next_rbi,
         events_next_7_days=events_7,
         events_next_30_days=events_30,
     )

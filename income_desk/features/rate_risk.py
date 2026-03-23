@@ -100,6 +100,13 @@ _RATE_SENSITIVITY: dict[str, tuple[str, float, float]] = {
     "XLK": ("low", 0.0, -0.22),      # Technology — growth = long duration
     "ARKK": ("low", 0.0, -0.35),     # Speculative tech — very rate sensitive (high duration equity)
     "TNA": ("low", 0.0, -0.10),      # 3x small cap
+
+    # India banking — highly sensitive to RBI repo rate
+    "HDFCBANK": ("high", 0.0, 0.40),    # HDFC Bank — large private bank, NIM-driven
+    "ICICIBANK": ("high", 0.0, 0.38),   # ICICI Bank — private bank, rate beneficiary
+    "SBIN": ("high", 0.0, 0.45),        # SBI — PSU bank, most rate-sensitive
+    "AXISBANK": ("high", 0.0, 0.38),    # Axis Bank — private bank
+    "KOTAKBANK": ("moderate", 0.0, 0.30),# Kotak Mahindra — less rate-sensitive than peers
 }
 
 

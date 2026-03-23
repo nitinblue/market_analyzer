@@ -14,6 +14,7 @@ class MacroEventType(StrEnum):
     NFP = "nfp"
     PCE = "pce"
     GDP = "gdp"
+    RBI_MPC = "rbi_mpc"
 
 
 class MacroEventImpact(StrEnum):
@@ -41,5 +42,7 @@ class MacroCalendar(BaseModel):
     days_to_next: int | None
     next_fomc: MacroEvent | None
     days_to_next_fomc: int | None
+    next_rbi: MacroEvent | None = None
+    days_to_next_rbi: int | None = None
     events_next_7_days: list[MacroEvent]
     events_next_30_days: list[MacroEvent]
