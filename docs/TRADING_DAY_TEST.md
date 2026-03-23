@@ -235,13 +235,18 @@
 
 ## STILL NOT WORKING / KNOWN GAPS
 
-### GAP-1: No broker = no IV rank anywhere
+### GAP-1: Paper mode has no IV rank (TastyTrade cert API limitation)
 
-Without `--broker`, IV rank is `None` for every ticker. This means:
-- Validation `iv_rank_quality` always warns
-- POP estimates use ATR-only method (less accurate)
-- Rate risk recommendations are generic
-- **Workaround:** Always run with `--broker` for real decisions
+`api.cert.tastyworks.com/market-metrics` returns HTTP 404. IV rank/percentile only available on the **production** API (`api.tastyworks.com`).
+
+**Live mode confirmed working (2026-03-23 10:30 ET):**
+- SPY: IVR=34.4%, IVP=76.6%
+- QQQ: IVR=33.4%
+- GLD: IVR=77.5% (extremely elevated — confirms research report signal)
+- AAPL: IVR=17.3%
+- TLT: IVR=31.2%
+
+**Workaround:** Use `--broker` with live credentials (not `--paper`) for metrics. Paper mode still works for quotes and account balance.
 
 ### GAP-2: India VIX data unavailable from yfinance
 
