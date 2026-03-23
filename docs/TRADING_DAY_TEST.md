@@ -324,6 +324,28 @@ Tested with TastyTrade paper account (5WY28619) on Sunday after-hours.
 | Account filtering | Not possible | Available (BP-aware) |
 | Validation accuracy | 4 warnings for missing data | Fewer warnings when data available |
 
+### Full Service Test (15 services, broker connected)
+
+| Service | Status | Detail |
+|---------|--------|--------|
+| technicals | PASS | price=648.57 RSI=30.4 ATR=1.60 |
+| levels | PASS | support=0 resistance=8 |
+| screening | PASS | 3 candidates from SPY/AAPL/TLT |
+| entry | PASS | confirm() works (wrong enum in first test) |
+| strategy | PASS | StrategyParameters returned |
+| exit | PASS | ExitPlan returned |
+| adjustment | PASS | analyze() works |
+| us_report | PASS | 137 lines generated |
+| india_report | PASS | 114 lines generated |
+| vol_surface | PASS | surface() works |
+| account | PASS | NLV=$1,000,000 (paper) |
+| fundamentals | PASS | get() works |
+| black_swan | PASS | level=elevated score=0.26 |
+| quotes | PASS | 2549 options, source=yfinance |
+| watchlist | PASS | broker watchlists accessible |
+
+**Result: 15/15 services operational with broker.**
+
 **Conclusion:** Broker connection is essential for production use. Weekend testing confirms pipeline works end-to-end but IV rank data requires market hours.
 
 ---
