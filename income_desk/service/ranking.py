@@ -270,7 +270,9 @@ class TradeRankingService:
 
             for strategy in strategies:
                 total_assessed += 1
-                method_name = _ASSESS_METHODS[strategy]
+                method_name = _ASSESS_METHODS.get(strategy)
+                if method_name is None:
+                    continue
                 assess_fn = getattr(self.opportunity, method_name, None)
                 if assess_fn is None:
                     continue
