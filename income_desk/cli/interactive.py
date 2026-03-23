@@ -7066,6 +7066,108 @@ stratified by risk category (defined / semi_defined / undefined)."""
             })
         print(tabulate(rows, headers="keys", tablefmt="simple", stralign="right"))
 
+    def do_regression(self, arg: str) -> None:
+        """Run regression validation on eTrading snapshots.\nUsage: regression [PATH]\n  PATH defaults to C:/Users/nitin/PythonProjects/eTrading/trading_cotrader/reports/regression/"""
+        from pathlib import Path
+
+        default_dir = Path(
+            "C:/Users/nitin/PythonProjects/eTrading/trading_cotrader/reports/regression/"
+        )
+        report_dir = Path(arg.strip()) if arg.strip() else default_dir
+
+        if not report_dir.is_dir():
+            print(_styled(f"Directory not found: {report_dir}", "red"))
+            return
+
+        try:
+            from income_desk.regression.poller import poll_and_validate
+        except ImportError as exc:
+            print(_styled(f"Import error: {exc}", "red"))
+            return
+
+        try:
+            results = poll_and_validate(report_dir)
+        except Exception as exc:
+            print(_styled(f"Validation failed: {exc}", "red"))
+            return
+
+        if not results:
+            # No new snapshots — try to show the latest feedback file
+            feedback_files = sorted(report_dir.glob("*_ID_feedback.json"))
+            if feedback_files:
+                import json
+                latest = feedback_files[-1]
+                try:
+                    from income_desk.regression.models import RegressionFeedback
+
+                    data = json.loads(latest.read_text(encoding="utf-8"))
+                    fb = RegressionFeedback(**data)
+                    print(f"\n  {_styled('No new snapshots.', 'dim')} Showing latest feedback:\n")
+                    self._print_regression_feedback(fb, latest.name)
+                except Exception as exc:
+                    print(f"  No new snapshots. Latest feedback: {latest.name}")
+                    print(f"  {_styled(f'Could not parse: {exc}', 'yellow')}")
+            else:
+                print(f"\n  No snapshots found in {report_dir}")
+            return
+
+        for fb in results:
+            self._print_regression_feedback(fb)
+
+    def _print_regression_feedback(
+        self, fb, filename: str | None = None,
+    ) -> None:
+        """Format and print a RegressionFeedback object."""
+        from income_desk.regression.models import RegressionFeedback
+
+        title = f"REGRESSION VALIDATION — {fb.snapshot_id}"
+        if filename:
+            title = f"REGRESSION VALIDATION — {filename.replace('_ID_feedback.json', '')}"
+
+        print(f"\n{title}")
+        print("=" * len(title))
+
+        # Verdict line
+        verdict = fb.overall.verdict
+        if verdict == "GREEN":
+            verdict_styled = _styled(verdict, "green")
+        elif verdict == "AMBER":
+            verdict_styled = _styled(verdict, "yellow")
+        else:
+            verdict_styled = _styled(verdict, "red")
+
+        print(
+            f"Overall: {verdict_styled} "
+            f"({fb.overall.passed}/{fb.overall.total_checks} passed, "
+            f"{fb.overall.pass_rate}%)"
+        )
+        print()
+
+        # Domain results
+        for domain_name, dr in fb.domains.items():
+            if dr.failed == 0:
+                status = _styled("PASS", "green")
+            else:
+                status = _styled("FAIL", "red")
+            print(f"  {status} {domain_name:<24} {dr.passed}/{dr.total}")
+            for failure in dr.failures:
+                sev = failure.severity
+                if sev == "error":
+                    sev_styled = _styled("error  ", "red")
+                elif sev == "warning":
+                    sev_styled = _styled("warning", "yellow")
+                else:
+                    sev_styled = _styled("info   ", "dim")
+                print(f"       {sev_styled} {failure.message}")
+
+        # Recommendations
+        if fb.recommendations:
+            print(f"\n  {_styled('Recommendations:', 'bold')}")
+            for rec in fb.recommendations:
+                print(f"    - {rec}")
+
+        print()
+
     def do_quit(self, arg: str) -> bool:
         """Exit the REPL."""
         print("Goodbye.")

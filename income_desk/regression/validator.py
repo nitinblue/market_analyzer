@@ -93,9 +93,23 @@ def _check_trade_integrity(trades: list[SnapshotTrade]) -> DomainResult:
     result = DomainResult()
 
     for trade in trades:
-        # Skip trades with no option legs (equity-only, e.g. BAC stock)
+        # Equity-only trades — validate entry_price > 0
         if not trade.has_option_legs:
-            result.record_pass()  # equity trades don't need TradeSpec reconstruction
+            if trade.has_entry and trade.entry_price > 0:
+                result.record_pass()
+            elif trade.is_shadow and not trade.has_entry:
+                result.record_pass()  # shadow equity with no entry is fine
+            else:
+                result.record_fail(
+                    CheckFailure(
+                        trade_id=trade.id,
+                        check="equity_entry_price",
+                        expected="entry_price > 0",
+                        actual=trade.entry_price,
+                        severity="warning",
+                        message=f"{trade.ticker}: equity trade with invalid entry_price={trade.entry_price}",
+                    )
+                )
             continue
 
         # Skip shadow trades with entry_price=0 — they were never executed
@@ -116,16 +130,34 @@ def _check_trade_integrity(trades: list[SnapshotTrade]) -> DomainResult:
         ]
 
         if not dxlink_symbols:
-            result.record_fail(
-                CheckFailure(
-                    trade_id=trade.id,
-                    check="trade_spec_reconstruction",
-                    expected="DXLink symbols present",
-                    actual="No DXLink symbols found",
-                    severity="warning",
-                    message=f"{trade.ticker}: no DXLink symbols on option legs",
-                )
+            # Fall back: check if legs have enough data to identify the trade
+            has_leg_data = all(
+                leg.strike and leg.expiration and leg.option_type
+                for leg in trade.legs
+                if leg.asset_type == "option"
             )
+            if has_leg_data:
+                result.record_fail(
+                    CheckFailure(
+                        trade_id=trade.id,
+                        check="trade_spec_reconstruction",
+                        expected="DXLink symbols present",
+                        actual="No DXLink symbols, but leg data available",
+                        severity="info",
+                        message=f"{trade.ticker}: no DXLink symbols on option legs (leg data present but no dxlink_symbol)",
+                    )
+                )
+            else:
+                result.record_fail(
+                    CheckFailure(
+                        trade_id=trade.id,
+                        check="trade_spec_reconstruction",
+                        expected="DXLink symbols present",
+                        actual="No DXLink symbols found",
+                        severity="warning",
+                        message=f"{trade.ticker}: no DXLink symbols on option legs",
+                    )
+                )
             continue
 
         try:
@@ -140,6 +172,27 @@ def _check_trade_integrity(trades: list[SnapshotTrade]) -> DomainResult:
                 entry_price=trade.entry_price if trade.has_entry else None,
             )
             result.record_pass()
+
+            # Compare reconstructed structure_type with stored strategy_type
+            if trade.strategy_type and spec.structure_type:
+                reconstructed = str(spec.structure_type).lower().replace(" ", "_")
+                stored = trade.strategy_type.lower().replace(" ", "_")
+                if reconstructed == stored:
+                    result.record_pass()
+                else:
+                    result.record_fail(
+                        CheckFailure(
+                            trade_id=trade.id,
+                            check="structure_type_match",
+                            expected=stored,
+                            actual=reconstructed,
+                            severity="warning",
+                            message=(
+                                f"{trade.ticker}: structure_type mismatch — "
+                                f"reconstructed '{reconstructed}' vs stored '{stored}'"
+                            ),
+                        )
+                    )
 
             # If we have entry_price, try compute_income_yield and compare
             if trade.has_entry and trade.entry_price > 0:

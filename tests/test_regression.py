@@ -7,7 +7,19 @@ from pathlib import Path
 
 import pytest
 
-from income_desk.regression import RegressionFeedback, validate_snapshot, poll_and_validate
+from income_desk.regression import (
+    RegressionFeedback,
+    validate_snapshot,
+    poll_and_validate,
+    create_calm_market,
+    create_volatile_market,
+    create_crash_scenario,
+    create_from_snapshot,
+    load_history,
+    compute_trend,
+    HistoryEntry,
+    TrendReport,
+)
 from income_desk.regression.models import (
     CheckFailure,
     DomainResult,
@@ -403,3 +415,313 @@ class TestRealSnapshot:
         """Sanity: real snapshot should have open trades."""
         raw = json.loads(REAL_SNAPSHOT.read_text(encoding="utf-8"))
         assert len(raw.get("open_trades", [])) > 0
+
+
+# ── Simulation snapshot tests ──
+
+
+class TestSimulationSnapshots:
+    """Each simulation function produces a valid snapshot that passes validation."""
+
+    def _validate_simulation(self, snapshot: dict, tmp_path: Path) -> RegressionFeedback:
+        """Helper: write snapshot to disk and validate it."""
+        snapshot_file = tmp_path / f"snapshot_{snapshot['snapshot_id']}.json"
+        snapshot_file.write_text(json.dumps(snapshot), encoding="utf-8")
+        return validate_snapshot(snapshot_file)
+
+    def test_calm_market_structure(self):
+        snap = create_calm_market()
+        assert snap["broker_connected"] is True
+        assert snap["regime"]["regime_id"] == 1
+        assert len(snap["open_trades"]) == 3
+        assert len(snap["portfolios"]) >= 1
+        assert len(snap["desks"]) >= 1
+        assert "decision_log" in snap
+        assert "closed_today" in snap
+
+    def test_calm_market_validates(self, tmp_path: Path):
+        snap = create_calm_market()
+        fb = self._validate_simulation(snap, tmp_path)
+        assert fb.overall.verdict in ("GREEN", "AMBER")
+        assert fb.overall.total_checks > 0
+        # Data trust should be all green (broker connected, regime, capital)
+        dt = fb.domains["data_trust"]
+        assert dt.failed == 0
+
+    def test_volatile_market_structure(self):
+        snap = create_volatile_market()
+        assert snap["regime"]["regime_id"] == 2
+        assert len(snap["open_trades"]) == 2
+        # Trades should have tested health
+        for trade in snap["open_trades"]:
+            assert trade["health_status"] in ("tested", "safe")
+
+    def test_volatile_market_validates(self, tmp_path: Path):
+        snap = create_volatile_market()
+        fb = self._validate_simulation(snap, tmp_path)
+        assert fb.overall.total_checks > 0
+        assert fb.overall.verdict in ("GREEN", "AMBER", "RED")
+
+    def test_crash_scenario_structure(self):
+        snap = create_crash_scenario()
+        assert snap["regime"]["regime_id"] == 4
+        assert len(snap["open_trades"]) == 3
+        assert len(snap["closed_today"]) >= 1
+        # Trades should have breached/max_loss health
+        health_statuses = {t["health_status"] for t in snap["open_trades"]}
+        assert health_statuses & {"breached", "max_loss"}
+
+    def test_crash_scenario_validates(self, tmp_path: Path):
+        snap = create_crash_scenario()
+        fb = self._validate_simulation(snap, tmp_path)
+        assert fb.overall.total_checks > 0
+
+    def test_create_from_snapshot_override(self):
+        base = create_calm_market()
+        modified = create_from_snapshot(base, broker_connected=False)
+        assert modified["broker_connected"] is False
+        # Original unchanged
+        assert base["broker_connected"] is True
+
+    def test_create_from_snapshot_nested_override(self):
+        base = create_calm_market()
+        modified = create_from_snapshot(base, regime__confidence=0.50)
+        assert modified["regime"]["confidence"] == 0.50
+        assert base["regime"]["confidence"] == 0.82  # original unchanged
+
+    def test_create_from_snapshot_validates(self, tmp_path: Path):
+        """Modified snapshot still validates."""
+        base = create_calm_market()
+        modified = create_from_snapshot(
+            base,
+            snapshot_id="sim-override-test",
+            broker_connected=False,
+        )
+        fb = self._validate_simulation(modified, tmp_path)
+        assert fb.overall.total_checks > 0
+        # Should have broker_connected failure
+        dt = fb.domains["data_trust"]
+        assert dt.failed >= 1
+
+    def test_all_trades_have_required_fields(self):
+        """Every trade in every simulation has id, ticker, legs, decision_lineage."""
+        for factory in (create_calm_market, create_volatile_market, create_crash_scenario):
+            snap = factory()
+            for trade in snap["open_trades"]:
+                assert "id" in trade
+                assert "ticker" in trade
+                assert "legs" in trade
+                assert len(trade["legs"]) >= 2
+                assert "decision_lineage" in trade
+                assert "health_status" in trade
+
+    def test_all_legs_have_dxlink_symbols(self):
+        """Every option leg has a dxlink_symbol and action."""
+        for factory in (create_calm_market, create_volatile_market, create_crash_scenario):
+            snap = factory()
+            for trade in snap["open_trades"]:
+                for leg in trade["legs"]:
+                    if leg.get("asset_type") == "option":
+                        assert leg.get("dxlink_symbol"), f"Missing dxlink_symbol in {trade['id']}"
+                        assert leg.get("action"), f"Missing action in {trade['id']}"
+
+
+# ── History tracking tests ──
+
+
+class TestHistoryTracking:
+    """Test load_history and compute_trend with synthetic feedback files."""
+
+    def _write_feedback(
+        self,
+        tmp_path: Path,
+        snapshot_id: str,
+        date: str,
+        pass_rate: float,
+        verdict: str,
+        domains: dict[str, dict],
+    ) -> Path:
+        """Write a synthetic feedback JSON file."""
+        feedback = {
+            "snapshot_id": snapshot_id,
+            "validated_at": f"{date}T16:00:00",
+            "domains": domains,
+            "overall": {
+                "total_checks": 10,
+                "passed": int(pass_rate / 10),
+                "failed": 10 - int(pass_rate / 10),
+                "pass_rate": pass_rate,
+                "verdict": verdict,
+            },
+            "recommendations": [],
+        }
+        path = tmp_path / f"snapshot_US_{date.replace('-', '')}_ID_feedback.json"
+        path.write_text(json.dumps(feedback), encoding="utf-8")
+        return path
+
+    def test_load_history_empty_dir(self, tmp_path: Path):
+        entries = load_history(tmp_path)
+        assert entries == []
+
+    def test_load_history_nonexistent_dir(self, tmp_path: Path):
+        entries = load_history(tmp_path / "nonexistent")
+        assert entries == []
+
+    def test_load_history_with_files(self, tmp_path: Path):
+        self._write_feedback(
+            tmp_path,
+            snapshot_id="snap-001",
+            date="2026-03-20",
+            pass_rate=90.0,
+            verdict="GREEN",
+            domains={
+                "trade_integrity": {"passed": 5, "failed": 0, "total": 5, "failures": []},
+                "pnl_validation": {"passed": 4, "failed": 1, "total": 5, "failures": []},
+            },
+        )
+        self._write_feedback(
+            tmp_path,
+            snapshot_id="snap-002",
+            date="2026-03-21",
+            pass_rate=80.0,
+            verdict="AMBER",
+            domains={
+                "trade_integrity": {"passed": 4, "failed": 1, "total": 5, "failures": []},
+                "pnl_validation": {"passed": 3, "failed": 2, "total": 5, "failures": []},
+            },
+        )
+
+        entries = load_history(tmp_path)
+        assert len(entries) == 2
+        assert entries[0].date == "2026-03-20"
+        assert entries[1].date == "2026-03-21"
+        assert entries[0].pass_rate == 90.0
+        assert entries[1].pass_rate == 80.0
+        assert all(isinstance(e, HistoryEntry) for e in entries)
+
+    def test_load_history_sorted_by_date(self, tmp_path: Path):
+        # Write in reverse order
+        self._write_feedback(
+            tmp_path, "snap-b", "2026-03-22", 85.0, "AMBER",
+            {"d1": {"passed": 8, "failed": 2, "total": 10, "failures": []}},
+        )
+        self._write_feedback(
+            tmp_path, "snap-a", "2026-03-20", 95.0, "GREEN",
+            {"d1": {"passed": 9, "failed": 1, "total": 10, "failures": []}},
+        )
+        entries = load_history(tmp_path)
+        assert entries[0].date <= entries[1].date
+
+    def test_compute_trend_empty(self):
+        report = compute_trend([])
+        assert isinstance(report, TrendReport)
+        assert report.avg_pass_rate == 0.0
+        assert report.trend_direction == "stable"
+
+    def test_compute_trend_improving(self, tmp_path: Path):
+        self._write_feedback(
+            tmp_path, "snap-1", "2026-03-18", 70.0, "RED",
+            {"d1": {"passed": 7, "failed": 3, "total": 10, "failures": []}},
+        )
+        self._write_feedback(
+            tmp_path, "snap-2", "2026-03-19", 72.0, "RED",
+            {"d1": {"passed": 7, "failed": 3, "total": 10, "failures": []}},
+        )
+        self._write_feedback(
+            tmp_path, "snap-3", "2026-03-20", 90.0, "GREEN",
+            {"d1": {"passed": 9, "failed": 1, "total": 10, "failures": []}},
+        )
+        self._write_feedback(
+            tmp_path, "snap-4", "2026-03-21", 95.0, "GREEN",
+            {"d1": {"passed": 10, "failed": 0, "total": 10, "failures": []}},
+        )
+
+        entries = load_history(tmp_path)
+        report = compute_trend(entries)
+        assert report.trend_direction == "improving"
+        assert report.avg_pass_rate > 0
+
+    def test_compute_trend_degrading(self, tmp_path: Path):
+        self._write_feedback(
+            tmp_path, "snap-1", "2026-03-18", 95.0, "GREEN",
+            {"d1": {"passed": 10, "failed": 0, "total": 10, "failures": []}},
+        )
+        self._write_feedback(
+            tmp_path, "snap-2", "2026-03-19", 92.0, "GREEN",
+            {"d1": {"passed": 9, "failed": 1, "total": 10, "failures": []}},
+        )
+        self._write_feedback(
+            tmp_path, "snap-3", "2026-03-20", 70.0, "RED",
+            {"d1": {"passed": 7, "failed": 3, "total": 10, "failures": []}},
+        )
+        self._write_feedback(
+            tmp_path, "snap-4", "2026-03-21", 65.0, "RED",
+            {"d1": {"passed": 6, "failed": 4, "total": 10, "failures": []}},
+        )
+
+        entries = load_history(tmp_path)
+        report = compute_trend(entries)
+        assert report.trend_direction == "degrading"
+
+    def test_compute_trend_best_worst_domain(self, tmp_path: Path):
+        self._write_feedback(
+            tmp_path, "snap-1", "2026-03-20", 85.0, "AMBER",
+            {
+                "trade_integrity": {"passed": 10, "failed": 0, "total": 10, "failures": []},
+                "pnl_validation": {"passed": 5, "failed": 5, "total": 10, "failures": []},
+            },
+        )
+        self._write_feedback(
+            tmp_path, "snap-2", "2026-03-21", 85.0, "AMBER",
+            {
+                "trade_integrity": {"passed": 9, "failed": 1, "total": 10, "failures": []},
+                "pnl_validation": {"passed": 6, "failed": 4, "total": 10, "failures": []},
+            },
+        )
+
+        entries = load_history(tmp_path)
+        report = compute_trend(entries)
+        assert report.best_domain == "trade_integrity"
+        assert report.worst_domain == "pnl_validation"
+
+    def test_compute_trend_recurring_failures(self, tmp_path: Path):
+        # pnl_validation fails in all 3 entries -> recurring
+        for i, date in enumerate(["2026-03-19", "2026-03-20", "2026-03-21"]):
+            self._write_feedback(
+                tmp_path, f"snap-{i}", date, 80.0, "AMBER",
+                {
+                    "trade_integrity": {"passed": 10, "failed": 0, "total": 10, "failures": []},
+                    "pnl_validation": {"passed": 6, "failed": 4, "total": 10, "failures": []},
+                },
+            )
+
+        entries = load_history(tmp_path)
+        report = compute_trend(entries)
+        assert "pnl_validation" in report.recurring_failures
+        assert "trade_integrity" not in report.recurring_failures
+
+    def test_history_entry_model(self):
+        entry = HistoryEntry(
+            snapshot_id="test",
+            date="2026-03-20",
+            market="US",
+            pass_rate=85.0,
+            verdict="AMBER",
+            domain_scores={"d1": 90.0, "d2": 80.0},
+        )
+        assert entry.snapshot_id == "test"
+        data = entry.model_dump()
+        assert "domain_scores" in data
+
+    def test_trend_report_model(self):
+        report = TrendReport(
+            entries=[],
+            avg_pass_rate=85.0,
+            trend_direction="stable",
+            recurring_failures=["pnl"],
+            best_domain="integrity",
+            worst_domain="pnl",
+        )
+        assert report.trend_direction == "stable"
+        data = report.model_dump()
+        assert "recurring_failures" in data
