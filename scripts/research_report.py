@@ -186,60 +186,55 @@ def generate_report(
 
         w()
 
-        # ── EXISTING POSITION HOLDERS ──
-        w("### If You Already Have Positions (India)")
+        # ── UNIFIED ACTION TABLE ──
+        w("### Action Table — India")
         w()
-        w("| Your Position | Current Regime | Action | Urgency | Detail |")
-        w("|--------------|----------------|--------|---------|--------|")
+        w("> Each row = one ticker. Two action columns: what to do if you HOLD it, what to do if you want to DEPLOY fresh capital.")
+        w("> Click any action in eTrading to instantly generate a scenario trade with full P&L, risk, and Greeks.")
+        w()
+        w("| Ticker | R | RSI | ATR% | If Holding | If Deploying Fresh Capital |")
+        w("|--------|---|-----|------|-----------|---------------------------|")
+
         for d in india_data:
             if "error" in d:
                 continue
             t, r, rsi, atr = d["ticker"], d["regime"], d["rsi"], d["atr_pct"]
+            move = d["price"] * atr / 100
+
+            # Holding action
             if r == 4:
-                w(f"| {t} IC/spread | **R4** | **CLOSE** | Immediate | R4 destroys income structures. Close at market. Take the loss. Capital preservation > hope. |")
-                w(f"| {t} equity | **R4** | **HEDGE or HOLD** | Today | If long-term hold: add NIFTY put hedge. If trading position: close. ATR {atr:.1f}% = daily ±{d['price']*atr/100:.0f} moves. |")
+                hold = f"**CLOSE income positions immediately.** Equity: hedge with NIFTY put or close trading positions. ATR = ±{move:.0f}/day."
+                deploy = f"**DO NOT ENTER.** R4 explosive. Wait for R2 transition."
+            elif r == 3 and rsi < 30:
+                hold = f"IC/spread: convert to diagonal or close tested side (1.5× stop). Equity: hold with tight stop — deeply oversold but trending."
+                deploy = f"**WAIT.** Oversold in downtrend = value trap risk. Need R2 regime first."
             elif r == 3:
-                w(f"| {t} IC/spread | R3 trend | **CONVERT** | Soon | Trend persists. Convert IC → diagonal in trend direction. Or close tested side. Stop at 1.5× credit. |")
-                if rsi < 30:
-                    w(f"| {t} equity | R3 oversold | **HOLD + HEDGE** | This week | RSI {rsi:.0f} oversold but trend is down. Add collar if lot size permits. Do NOT average down. |")
-                else:
-                    w(f"| {t} equity | R3 trend | **TIGHTEN STOP** | This week | Set stop at recent swing low. Do not add. |")
+                hold = f"IC/spread: close or convert. Equity: tighten stop to swing low. Do not add."
+                deploy = f"**WAIT.** Trending down (R3). Not for income."
+            elif r == 2 and rsi < 35:
+                hold = f"IC/spread: hold with 3.0× regime stop (wider than normal). Equity: sell covered call for income."
+                deploy = f"**APPROACHING.** R2 + RSI {rsi:.0f}. Wait for RSI < 30 → credit spread, wider wings, 21 DTE."
             elif r == 2:
-                w(f"| {t} IC/spread | R2 vol MR | **HOLD** (wider stop) | Monitor | R2 swings are wide but revert. Use 3.0× regime stop, not 2.0×. Don't panic on intraday spike. |")
-                w(f"| {t} equity | R2 | **HOLD** | Monitor | Mean-reverting vol. If profitable: consider selling covered call for income. |")
+                hold = f"IC/spread: hold, 3.0× stop. Equity: hold, sell CC if IV elevated."
+                deploy = f"**MONITOR.** R2 but RSI {rsi:.0f} not oversold yet. Wait."
+            elif r == 1 and rsi < 30:
+                hold = f"**HOLD — textbook income environment.** Let theta work. Standard 2.0× stop."
+                deploy = f"**ENTER NOW.** R1 + RSI {rsi:.0f} oversold = ideal income entry. Credit spread or CSP. 1 lot, quarter Kelly."
+            elif r == 1 and rsi < 40:
+                hold = f"Hold. R1 calm, structures working as designed."
+                deploy = f"**BUILDING.** R1 + RSI {rsi:.0f}. Wait for RSI < 30 to confirm oversold entry."
             elif r == 1:
-                if rsi < 35:
-                    w(f"| {t} IC/spread | R1 + oversold | **HOLD** (textbook) | None | Perfect income environment. Let theta work. Standard 2.0× stop. |")
-                else:
-                    w(f"| {t} IC/spread | R1 calm | **HOLD** | None | Calm regime. Structures working as designed. |")
-        w()
+                hold = f"Hold. Calm regime."
+                deploy = f"Standard entry available. Check IV rank for premium adequacy."
+            else:
+                hold = f"Monitor."
+                deploy = f"Evaluate."
 
-        # ── NEW POSITION IDEAS ──
-        w("### New Position Ideas (India)")
-        w()
-        opportunities = [d for d in india_data if d.get("signal") in ("OPPORTUNITY", "BUILDING") and "regime" in d]
-        avoids = [d for d in india_data if d.get("signal") == "AVOID" and "regime" in d]
+            bold_t = f"**{t}**" if r in (1,) and rsi < 30 else t
+            regime_fmt = f"**R{r}**" if r == 4 else f"R{r}"
+            w(f"| {bold_t} | {regime_fmt} | {rsi:.0f} | {atr:.1f} | {hold} | {deploy} |")
 
-        if not opportunities:
-            w("**No immediate opportunities.** All R1/R2 tickers are above oversold threshold. Wait for RSI < 30 on R1 names or regime transition on R2 names.")
-        else:
-            w("| Ticker | Regime | RSI | Setup | Structure | Entry Trigger | Risk |")
-            w("|--------|--------|-----|-------|-----------|---------------|------|")
-            for d in opportunities:
-                t, r, rsi = d["ticker"], d["regime"], d["rsi"]
-                if r == 1 and rsi < 30:
-                    w(f"| **{t}** | R1 | {rsi:.0f} | **Income entry** | Credit spread or CSP | RSI < 27 confirms | Max 1 lot, quarter Kelly |")
-                elif r == 1 and rsi < 40:
-                    w(f"| {t} | R1 | {rsi:.0f} | Building | Credit spread | Wait for RSI < 30 | Not yet — patience |")
-                elif r == 2 and rsi < 35:
-                    w(f"| {t} | R2 | {rsi:.0f} | Approaching | Wider IC (1.5× ATR) | RSI < 30 + R2 confirmed | Shorter DTE (21), 3× stop |")
-                elif r == 2:
-                    w(f"| {t} | R2 | {rsi:.0f} | Monitoring | — | Wait for oversold | Not ready |")
         w()
-
-        if avoids:
-            w("**Avoid these (R4):** " + ", ".join(f"{d['ticker']} (ATR {d['atr_pct']:.1f}%)" for d in avoids))
-            w()
 
         # Deployment phases
         w("### India Deployment Plan")
@@ -290,68 +285,55 @@ def generate_report(
 
         w()
 
-        # ── EXISTING POSITION HOLDERS (US) ──
-        w("### If You Already Have Positions (US)")
+        # ── UNIFIED ACTION TABLE (US) ──
+        w("### Action Table — US")
         w()
-        w("| Your Position | Current Regime | Action | Urgency | Detail |")
-        w("|--------------|----------------|--------|---------|--------|")
+        w("> Each row = one ticker. Two action columns: what to do if you HOLD it, what to do if you want to DEPLOY fresh capital.")
+        w("> Click any action in eTrading to instantly generate a scenario trade with full P&L, risk, and Greeks.")
+        w()
+        w("| Ticker | R | RSI | IVR | If Holding | If Deploying Fresh Capital |")
+        w("|--------|---|-----|-----|-----------|---------------------------|")
+
         for d in us_data:
             if "error" in d:
                 continue
             t, r, rsi, atr = d["ticker"], d["regime"], d["rsi"], d["atr_pct"]
             ivr = d.get("iv_rank", 0) or 0
+            ivr_str = f"{ivr:.0f}%" if ivr else "—"
+
             if r == 4:
-                w(f"| {t} IC/spread | **R4** | **CLOSE** | Immediate | Explosive regime. Close at market. No adjustments — just exit. |")
-                w(f"| {t} equity | **R4** | **HEDGE** | Today | Add SPY put or collar. ATR {atr:.1f}% = violent moves. |")
+                hold = f"**CLOSE income immediately.** Equity: add SPY put hedge or close. ATR {atr:.1f}%."
+                deploy = f"**DO NOT ENTER.** R4 explosive."
+            elif r == 3 and rsi < 30:
+                hold = f"IC: close or convert to diagonal. Equity: hold with tight stop — deeply oversold but trending."
+                deploy = f"**WATCH.** Oversold in trend. Wait for R2. {'IVR ' + str(int(ivr)) + '% — premium will be rich when regime turns.' if ivr > 50 else ''}"
             elif r == 3:
-                w(f"| {t} IC/spread | R3 trend | **CLOSE or CONVERT** | Soon | Convert to diagonal if profitable side exists. Otherwise close. 1.5× stop. |")
-                if rsi < 30:
-                    w(f"| {t} equity | R3 + RSI {rsi:.0f} | **HOLD** (oversold) | Monitor | Deeply oversold in trend. Don't add but don't panic sell. Tighten stop. |")
+                hold = f"IC: close tested side, 1.5× stop. Equity: tighten stop."
+                deploy = f"**WAIT.** R3 trending.{' IVR ' + str(int(ivr)) + '% — set alert for R2 transition.' if ivr > 45 else ''}"
+            elif r == 2 and rsi < 32:
+                hold = f"IC: hold, 3.0× regime stop. Equity: sell CC if IVR > 40%.{' IVR ' + str(int(ivr)) + '%.' if ivr else ''}"
+                deploy = f"**APPROACHING.** R2 + RSI {rsi:.0f}. IC with wider wings (1.5× ATR), 21 DTE, 3× stop.{' IVR ' + str(int(ivr)) + '% = good premium.' if ivr > 40 else ''}"
             elif r == 2:
-                w(f"| {t} IC/spread | R2 | **HOLD** (3× stop) | Monitor | R2 = wider swings that revert. Widen stop to 3.0× credit. Be patient. |")
-                if ivr > 50:
-                    w(f"| {t} equity | R2 + IVR {ivr:.0f}% | **SELL CC** | This week | IV rank elevated — sell covered call for income while holding. |")
+                hold = f"IC: hold, 3.0× stop. Equity: hold."
+                deploy = f"**MONITOR.** R2 but RSI {rsi:.0f} not oversold. Wait."
+            elif r == 1 and ivr > 40 and rsi < 40:
+                hold = f"**HOLD — ideal.** IC: standard 2.0× stop. Equity: sell CC (IVR {ivr:.0f}% = premium available)."
+                deploy = f"**ENTER NOW.** R1 + IVR {ivr:.0f}% + RSI {rsi:.0f}. IC or credit spread. Half Kelly."
+            elif r == 1 and ivr > 40:
+                hold = f"Hold. R1 calm. Sell CC on equity (IVR {ivr:.0f}%)."
+                deploy = f"**AVAILABLE.** R1 + IVR {ivr:.0f}%. Standard IC entry."
             elif r == 1:
-                w(f"| {t} IC/spread | R1 | **HOLD** | None | Ideal regime. Theta working for you. Standard 2.0× stop. |")
-                if ivr > 40:
-                    w(f"| {t} equity | R1 + IVR {ivr:.0f}% | **SELL CC** | This week | Good premium. Sell OTM call 30 DTE. |")
+                hold = f"Hold. R1 calm."
+                deploy = f"**R1 but IVR {ivr:.0f}% low** — thin premium. Only if credit > $0.80 on 5-wide."
+            else:
+                hold = f"Monitor."
+                deploy = f"Evaluate."
+
+            bold_t = f"**{t}**" if r == 1 and ivr > 40 else t
+            regime_fmt = f"**R{r}**" if r == 4 else f"R{r}"
+            w(f"| {bold_t} | {regime_fmt} | {rsi:.0f} | {ivr_str} | {hold} | {deploy} |")
+
         w()
-
-        # ── NEW POSITION IDEAS (US) ──
-        w("### New Position Ideas (US)")
-        w()
-        us_opps = [d for d in us_data if d.get("regime") == 1 and d.get("iv_rank", 0) and d["iv_rank"] > 40]
-        us_watch = [d for d in us_data if d.get("regime") in (2, 3) and d.get("iv_rank", 0) and d["iv_rank"] > 50 and d.get("rsi", 50) < 35]
-
-        if us_opps:
-            w("**Actionable now (R1 + IV Rank > 40%):**")
-            w()
-            w("| Ticker | Regime | IV Rank | RSI | Structure | Size | Entry |")
-            w("|--------|--------|---------|-----|-----------|------|-------|")
-            for d in us_opps:
-                w(f"| **{d['ticker']}** | R1 | {d['iv_rank']:.0f}% | {d['rsi']:.0f} | IC or credit spread | 1-2 contracts, half Kelly | Limit at mid, patient |")
-            w()
-
-        if us_watch:
-            w("**Watch for R2 transition (high IV, approaching oversold):**")
-            w()
-            for d in us_watch:
-                w(f"- **{d['ticker']}** (R{d['regime']}, IV Rank {d['iv_rank']:.0f}%, RSI {d['rsi']:.0f}): "
-                  f"When regime transitions to R2 → premium will be extraordinary. Set alert.")
-            w()
-
-        high_iv_r3 = [d for d in us_data if d.get("regime") == 3 and d.get("iv_rank", 0) and d["iv_rank"] > 55]
-        if high_iv_r3:
-            w("**Highest premium potential (waiting for regime transition):**")
-            w()
-            for d in high_iv_r3:
-                w(f"- **{d['ticker']}** IV Rank {d['iv_rank']:.0f}% but R3 trending — when R2 arrives, this is the main trade")
-            w()
-
-        avoids_us = [d for d in us_data if d.get("regime") == 4 and "error" not in d]
-        if avoids_us:
-            w("**Avoid (R4):** " + ", ".join(f"{d['ticker']}" for d in avoids_us))
-            w()
 
         # US deployment
         w("### US Deployment Plan")
