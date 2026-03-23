@@ -126,12 +126,164 @@ def generate_report(
     w("---")
     w()
 
-    # Crash sentinel
-    w("### MARKET HEALTH")
+    # ── MACRO ENVIRONMENT ──
+    w("## MACRO ENVIRONMENT")
     w()
-    w(f"**Crash Sentinel: {sentinel_signal.upper()}**")
+    w("### Crash Sentinel")
+    w()
+    w(f"**Signal: {sentinel_signal.upper()}**")
     for r in sentinel_reasons:
         w(f"- {r}")
+    w()
+
+    # Key index metrics
+    w("### Key Benchmarks")
+    w()
+    w("| Index | Regime | Conf | RSI | ATR% | IV Rank | Condition |")
+    w("|-------|--------|------|-----|------|---------|-----------|")
+
+    # Collect benchmark data from both markets
+    benchmarks = []
+    if us_data:
+        for d in us_data:
+            if d.get("ticker") in ("SPY", "QQQ", "IWM", "DIA", "GLD", "TLT") and "regime" in d:
+                benchmarks.append(d)
+    if india_data:
+        for d in india_data:
+            if d.get("ticker") in ("NIFTY", "BANKNIFTY") and "regime" in d:
+                benchmarks.append(d)
+
+    for d in benchmarks:
+        ivr = f"{d['iv_rank']:.0f}%" if d.get("iv_rank") else "—"
+        r = d["regime"]
+        if r == 4:
+            condition = "EXPLOSIVE — no income"
+        elif r == 3:
+            condition = "TRENDING — avoid income"
+        elif r == 2:
+            cond_parts = ["HIGH VOL MR"]
+            if d["rsi"] < 32:
+                cond_parts.append("approaching oversold")
+            condition = " — ".join(cond_parts)
+        elif r == 1:
+            cond_parts = ["CALM"]
+            if d["rsi"] < 30:
+                cond_parts.append("oversold = opportunity")
+            elif d["rsi"] < 40:
+                cond_parts.append("building")
+            condition = " — ".join(cond_parts)
+        else:
+            condition = "—"
+        regime_fmt = f"**R{r}**" if r == 4 else f"R{r}"
+        w(f"| {d['ticker']} | {regime_fmt} | {d['confidence']:.0%} | {d['rsi']:.1f} | {d['atr_pct']:.2f} | {ivr} | {condition} |")
+
+    w()
+
+    # Market narrative
+    us_r4 = sum(1 for d in (us_data or []) if d.get("regime") == 4)
+    india_r4 = sum(1 for d in (india_data or []) if d.get("regime") == 4)
+    us_r1 = sum(1 for d in (us_data or []) if d.get("regime") == 1)
+
+    w("### Market Narrative")
+    w()
+    if india_r4 >= 2:
+        w("**India is in distress.** Both major indices (NIFTY, BANKNIFTY) are R4 — explosive, momentum-driven selling. "
+          "This is not a pullback; it is a regime that persists until selling exhausts itself. "
+          "Income structures on indices will face max-loss events. Cash is the correct position.")
+        w()
+    if us_r4 >= 3:
+        w("**US is in crisis.** Multiple sectors in R4. Broad-based liquidation underway. "
+          "100% cash until regime transitions begin.")
+        w()
+    elif us_r4 >= 1:
+        w(f"**US is correcting but not crashing.** {us_r4} sector(s) in R4, but {us_r1} in R1 — "
+          f"select income opportunities exist in decoupled sectors.")
+        w()
+    else:
+        w("**US is stable.** No R4 regimes detected. Standard income deployment appropriate.")
+        w()
+
+    spy = next((d for d in (us_data or []) if d.get("ticker") == "SPY" and "regime" in d), None)
+    gld = next((d for d in (us_data or []) if d.get("ticker") == "GLD" and "regime" in d), None)
+    if spy and gld:
+        if spy["regime"] >= 2 and gld.get("iv_rank", 0) and gld["iv_rank"] > 60:
+            w(f"**Notable:** GLD IV Rank at {gld['iv_rank']:.0f}% (68th+ percentile) — gold volatility is at extremes. "
+              f"When GLD transitions from R{gld['regime']} to R2, premium will be 2-3× normal. This is the single highest-premium "
+              f"opportunity in the current universe. Set regime transition alert.")
+            w()
+
+    nifty = next((d for d in (india_data or []) if d.get("ticker") == "NIFTY" and "regime" in d), None)
+    tcs = next((d for d in (india_data or []) if d.get("ticker") == "TCS" and "regime" in d), None)
+    if nifty and tcs and nifty["regime"] == 4 and tcs["regime"] == 1:
+        w(f"**Notable:** TCS is R1 (calm) while NIFTY is R4 (explosive). IT services are stabilizing before the "
+          f"broader market — consistent with historical pattern where export-oriented, dollar-earning businesses "
+          f"recover first. TCS is the first deployment candidate for India capital.")
+        w()
+
+    # ── ADDITIONAL MACRO INDICATORS ──
+    w("### Macro Indicators")
+    w()
+
+    # Black Swan
+    try:
+        bs = ma.black_swan.alert()
+        w(f"**Black Swan Alert:** {bs.alert_level}")
+        w(f"- Composite score: {bs.composite_score:.2f}")
+        if hasattr(bs, 'indicators') and bs.indicators:
+            for ind in bs.indicators[:5]:
+                if hasattr(ind, 'name') and hasattr(ind, 'value'):
+                    w(f"- {ind.name}: {ind.value}")
+        w()
+    except Exception:
+        w("**Black Swan:** Unavailable (requires market data)")
+        w()
+
+    # Macro context
+    try:
+        ctx = ma.context.assess()
+        w(f"**Market Context:** {ctx.environment_label}")
+        w(f"- Trading allowed: {'Yes' if ctx.trading_allowed else '**NO**'}")
+        w(f"- Position size factor: {ctx.position_size_factor}")
+        if hasattr(ctx, 'tradeable') and ctx.tradeable:
+            w(f"- Options strategies available: {', '.join(ctx.tradeable.options_strategies[:5]) if ctx.tradeable.options_strategies else 'None'}")
+        w()
+    except Exception:
+        pass
+
+    # Rate risk on key instruments
+    try:
+        from income_desk.features.rate_risk import assess_rate_risk
+        rate_tickers = ["TLT", "GLD", "XLF"] if us_data else []
+        if rate_tickers:
+            w("**Interest Rate Sensitivity:**")
+            w()
+            w("| Ticker | Rate Sensitivity | Impact per 100bp | Recommendation |")
+            w("|--------|-----------------|------------------|----------------|")
+            for rt in rate_tickers:
+                try:
+                    rr = assess_rate_risk(rt)
+                    w(f"| {rt} | {rr.rate_sensitivity} | {rr.impact_per_100bp:.1%} | {rr.recommendation} |")
+                except Exception:
+                    pass
+            w()
+    except Exception:
+        pass
+
+    # Macro calendar (upcoming events)
+    try:
+        cal = ma.macro.calendar()
+        if hasattr(cal, 'events') and cal.events:
+            upcoming = [e for e in cal.events[:5]]
+            if upcoming:
+                w("**Upcoming Macro Events:**")
+                w()
+                for e in upcoming:
+                    w(f"- {e}")
+                w()
+    except Exception:
+        pass
+
+    w("---")
     w()
 
     # ── India Section ──
