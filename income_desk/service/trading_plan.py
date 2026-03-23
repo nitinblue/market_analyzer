@@ -192,8 +192,8 @@ class TradingPlanService:
                 expiry_note=expiry_note,
             ))
 
-        # 10. Cap at max trades
-        plan_trades = plan_trades[:cfg.max_trades_per_plan]
+        # 10. Cap at max trades (respect both global limit and verdict-based limit)
+        plan_trades = plan_trades[:min(cfg.max_trades_per_plan, max_positions)]
 
         # 11. Assign ranks
         for i, pt in enumerate(plan_trades):

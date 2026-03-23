@@ -412,6 +412,61 @@ class TestRoleClassification:
         assert len(resistances) == 2
 
 
+class TestStraddleClusterSplit:
+    """Regression: levels straddling entry must not be merged into one cluster."""
+
+    def test_support_not_lost_when_clustered_near_entry(self):
+        """swing_support at 647.17 + pivot_s2 at 649.73 with entry 648.57.
+
+        Without the fix, the weighted average (~648.87) > entry causes the
+        entire cluster (including real swing support) to be classified as
+        RESISTANCE.  With the fix, they stay in separate clusters.
+        """
+        raw = [
+            (647.17, LevelSource.SWING_SUPPORT),
+            (649.73, LevelSource.PIVOT_S2),
+        ]
+        weights = {"swing_support": 1.0, "pivot_s2": 0.5}
+        entry = 648.57
+        clusters = _cluster_levels(raw, proximity_pct=0.5, source_weights=weights,
+                                   max_strength_denom=3.0, entry_price=entry)
+        # Must produce 2 clusters — one below entry, one above
+        assert len(clusters) == 2
+        prices = [c[0] for c in clusters]
+        assert prices[0] < entry  # swing_support cluster below entry
+        assert prices[1] >= entry  # pivot_s2 cluster above entry
+
+    def test_same_side_levels_still_cluster(self):
+        """Two levels both below entry that are close should still merge."""
+        raw = [
+            (95.0, LevelSource.SMA_50),
+            (95.3, LevelSource.EMA_21),
+        ]
+        weights = {"sma_50": 0.7, "ema_21": 0.5}
+        clusters = _cluster_levels(raw, proximity_pct=0.5, source_weights=weights,
+                                   max_strength_denom=3.0, entry_price=100.0)
+        assert len(clusters) == 1
+        assert len(clusters[0][1]) == 2
+
+    def test_straddle_split_end_to_end(self):
+        """Full pipeline: swing_support near entry survives as support."""
+        snap = _make_technicals(price=648.57, support=647.17, resistance=660.0,
+                                atr=5.0)
+        # Override pivot_points to add pivot_s2 at 649.73
+        from income_desk.models.technicals import PivotPoints
+        snap.pivot_points = PivotPoints(
+            pp=655.0, r1=660.0, r2=665.0, r3=670.0,
+            s1=650.0, s2=649.73, s3=645.0, period="daily",
+        )
+        result = compute_levels(snap, entry_price=648.57)
+        support_sources = set()
+        for lvl in result.support_levels:
+            support_sources.update(lvl.sources)
+        assert LevelSource.SWING_SUPPORT in support_sources, (
+            "swing_support must remain classified as support, not lost to resistance cluster"
+        )
+
+
 # ===========================================================================
 # TestStopLoss — Stage 4
 # ===========================================================================

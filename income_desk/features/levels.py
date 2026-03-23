@@ -150,10 +150,16 @@ def _cluster_levels(
     proximity_pct: float,
     source_weights: dict[str, float],
     max_strength_denom: float,
+    entry_price: float | None = None,
 ) -> list[tuple[float, list[LevelSource], float]]:
     """Merge levels within proximity_pct into clusters.
 
     Returns list of (price, sources, strength) sorted by price ascending.
+
+    When *entry_price* is provided, clusters are never allowed to span across
+    the entry price.  This prevents a support source slightly below entry from
+    being averaged with a resistance source slightly above entry (or vice-versa)
+    and then misclassified in ``_classify_levels``.
     """
     if not raw:
         return []
@@ -166,7 +172,19 @@ def _cluster_levels(
 
     for price, source in sorted_levels[1:]:
         cluster_avg = sum(p for p, _ in current_cluster) / len(current_cluster)
-        if cluster_avg > 0 and abs(price - cluster_avg) / cluster_avg * 100 <= proximity_pct:
+        within_proximity = (
+            cluster_avg > 0
+            and abs(price - cluster_avg) / cluster_avg * 100 <= proximity_pct
+        )
+        # Never merge levels across the entry price boundary.
+        straddles_entry = False
+        if within_proximity and entry_price is not None:
+            prev_price = current_cluster[0][0]
+            straddles_entry = (
+                (prev_price < entry_price and price >= entry_price)
+                or (prev_price >= entry_price and price < entry_price)
+            )
+        if within_proximity and not straddles_entry:
             current_cluster.append((price, source))
         else:
             clusters.append(current_cluster)
@@ -428,7 +446,7 @@ def compute_levels(
 
     # Stage 2: cluster
     weights = cfg.source_weights
-    clustered = _cluster_levels(raw, cfg.confluence_proximity_pct, weights, cfg.max_strength_denominator)
+    clustered = _cluster_levels(raw, cfg.confluence_proximity_pct, weights, cfg.max_strength_denominator, entry_price=entry)
 
     # Stage 3: classify
     supports, resistances = _classify_levels(clustered, entry)

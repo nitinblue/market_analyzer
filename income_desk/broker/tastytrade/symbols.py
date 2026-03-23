@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 # Pattern: .TICKER YYMMDD C|P STRIKE
 _STREAMER_RE = re.compile(
-    r"^\.([A-Z]+)(\d{6})([CP])(\d+)$"
+    r"^\.([A-Z]+)(\d{6})([CP])(\d+\.?\d*)$"
 )
 
 
@@ -38,7 +38,8 @@ class ParsedSymbol:
     @property
     def strike_key(self) -> str:
         """Short key: ``580P`` or ``600C``."""
-        return f"{int(self.strike)}{self.option_type[0].upper()}"
+        s = str(int(self.strike)) if self.strike == int(self.strike) else f"{self.strike:g}"
+        return f"{s}{self.option_type[0].upper()}"
 
     @property
     def cache_key(self) -> str:
@@ -65,8 +66,12 @@ def build_streamer_symbol(
     """
     exp_str = expiration.strftime("%y%m%d")
     opt_char = "C" if option_type == "call" else "P"
-    strike_int = int(strike)
-    return f".{ticker}{exp_str}{opt_char}{strike_int}"
+    # Format strike: no decimal for whole numbers, decimal for fractions
+    if strike == int(strike):
+        strike_str = str(int(strike))
+    else:
+        strike_str = f"{strike:g}"
+    return f".{ticker}{exp_str}{opt_char}{strike_str}"
 
 
 def parse_streamer_symbol(symbol: str) -> ParsedSymbol | None:
@@ -148,7 +153,11 @@ def occ_to_streamer(occ: str) -> str | None:
     strike_raw = occ[13:21]
     try:
         strike = int(strike_raw) / 1000
-        return f".{ticker}{exp_str}{opt_char}{int(strike)}"
+        if strike == int(strike):
+            strike_fmt = str(int(strike))
+        else:
+            strike_fmt = f"{strike:g}"
+        return f".{ticker}{exp_str}{opt_char}{strike_fmt}"
     except ValueError:
         return None
 
