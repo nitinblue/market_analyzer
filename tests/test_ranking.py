@@ -50,6 +50,7 @@ from income_desk.models.ranking import (
     ScoreBreakdown,
     StrategyType,
     TradeRankingResult,
+    WatchItem,
 )
 from income_desk.models.technicals import (
     BollingerBands,
@@ -1223,3 +1224,180 @@ class TestScoreBreakdown:
             days_to_earnings=60,
         )
         assert breakdown.macro_penalty == pytest.approx(0.06)
+
+
+# =============================================
+# TestWatchItems
+# =============================================
+
+
+class TestWatchItems:
+    """Regime transition watch items for high-IVR tickers in non-income regimes."""
+
+    def test_r3_high_ivr_creates_watch_item(self):
+        items = TradeRankingService._build_watch_items(
+            ticker_regime={"GLD": 3},
+            iv_rank_map={"GLD": 77.5},
+        )
+        assert len(items) == 1
+        assert items[0].ticker == "GLD"
+        assert items[0].current_regime == 3
+        assert items[0].target_regime == 2
+        assert items[0].iv_rank == 77.5
+        assert "R3" in items[0].trigger
+        assert "R2" in items[0].trigger
+        assert "77.5%" in items[0].rationale
+
+    def test_r4_high_ivr_creates_watch_item(self):
+        items = TradeRankingService._build_watch_items(
+            ticker_regime={"VIX": 4},
+            iv_rank_map={"VIX": 55.0},
+        )
+        assert len(items) == 1
+        assert items[0].ticker == "VIX"
+        assert items[0].current_regime == 4
+        assert items[0].target_regime == 2
+        assert "R4" in items[0].trigger
+        assert "post-crash" in items[0].rationale
+
+    def test_r1_not_watch(self):
+        """R1 is already income-friendly — no watch item."""
+        items = TradeRankingService._build_watch_items(
+            ticker_regime={"SPY": 1},
+            iv_rank_map={"SPY": 80.0},
+        )
+        assert len(items) == 0
+
+    def test_r2_not_watch(self):
+        """R2 is already income-friendly — no watch item."""
+        items = TradeRankingService._build_watch_items(
+            ticker_regime={"QQQ": 2},
+            iv_rank_map={"QQQ": 90.0},
+        )
+        assert len(items) == 0
+
+    def test_r3_low_ivr_not_watch(self):
+        """R3 with low IVR — not worth watching (no premium)."""
+        items = TradeRankingService._build_watch_items(
+            ticker_regime={"AAPL": 3},
+            iv_rank_map={"AAPL": 30.0},
+        )
+        assert len(items) == 0
+
+    def test_r4_low_ivr_not_watch(self):
+        """R4 with IVR ≤ 40 — not worth watching."""
+        items = TradeRankingService._build_watch_items(
+            ticker_regime={"TLT": 4},
+            iv_rank_map={"TLT": 35.0},
+        )
+        assert len(items) == 0
+
+    def test_r3_boundary_ivr_50_not_watch(self):
+        """IVR must be > 50, not >= 50."""
+        items = TradeRankingService._build_watch_items(
+            ticker_regime={"GLD": 3},
+            iv_rank_map={"GLD": 50.0},
+        )
+        assert len(items) == 0
+
+    def test_r4_boundary_ivr_40_not_watch(self):
+        """IVR must be > 40, not >= 40."""
+        items = TradeRankingService._build_watch_items(
+            ticker_regime={"GLD": 4},
+            iv_rank_map={"GLD": 40.0},
+        )
+        assert len(items) == 0
+
+    def test_no_iv_rank_map_returns_empty(self):
+        items = TradeRankingService._build_watch_items(
+            ticker_regime={"GLD": 3},
+            iv_rank_map=None,
+        )
+        assert items == []
+
+    def test_ticker_missing_from_iv_rank_map(self):
+        items = TradeRankingService._build_watch_items(
+            ticker_regime={"GLD": 3},
+            iv_rank_map={"SPY": 80.0},
+        )
+        assert len(items) == 0
+
+    def test_multiple_tickers_sorted_by_ivr(self):
+        items = TradeRankingService._build_watch_items(
+            ticker_regime={"GLD": 3, "SLV": 3, "TLT": 4},
+            iv_rank_map={"GLD": 77.5, "SLV": 60.0, "TLT": 55.0},
+        )
+        assert len(items) == 3
+        # Sorted by IVR descending
+        assert items[0].ticker == "GLD"
+        assert items[1].ticker == "SLV"
+        assert items[2].ticker == "TLT"
+
+    def test_watch_items_on_ranking_result(self):
+        """Watch items appear on the TradeRankingResult when iv_rank_map provided."""
+        opp = MagicMock()
+        opp.technical_service = MagicMock()
+        opp.technical_service.snapshot.return_value = _make_technicals()
+        opp.macro_service = MagicMock()
+        opp.macro_service.calendar.return_value = MagicMock(events_next_7_days=[])
+        # GLD in R3 — momentum and breakout assessors return R3
+        opp.assess_zero_dte.side_effect = lambda t, **kw: _make_zero_dte(ticker=t, regime_id=3)
+        opp.assess_leap.side_effect = lambda t, **kw: _make_leap(ticker=t)
+        opp.assess_breakout.side_effect = lambda t, **kw: _make_breakout(ticker=t, regime_id=3)
+        opp.assess_momentum.side_effect = lambda t, **kw: _make_momentum(ticker=t, regime_id=3)
+        _stub_new_assess_methods(opp)
+
+        levels = MagicMock()
+        levels.analyze.return_value = _make_levels()
+
+        bs = MagicMock()
+        bs.alert.return_value = BlackSwanAlert(
+            as_of_date=date(2026, 2, 22),
+            alert_level=AlertLevel.NORMAL,
+            composite_score=0.0,
+            circuit_breakers=[], indicators=[], triggered_breakers=0,
+            action="normal", summary="ok",
+        )
+
+        svc = TradeRankingService(
+            opportunity_service=opp, levels_service=levels, black_swan_service=bs,
+        )
+        result = svc.rank(
+            ["GLD"],
+            as_of=date(2026, 2, 22),
+            iv_rank_map={"GLD": 77.5},
+        )
+        assert len(result.watch_items) == 1
+        assert result.watch_items[0].ticker == "GLD"
+        assert result.watch_items[0].iv_rank == 77.5
+
+    def test_no_watch_items_without_iv_rank_map(self):
+        """Without iv_rank_map, watch_items is empty."""
+        opp = MagicMock()
+        opp.technical_service = MagicMock()
+        opp.technical_service.snapshot.return_value = _make_technicals()
+        opp.macro_service = MagicMock()
+        opp.macro_service.calendar.return_value = MagicMock(events_next_7_days=[])
+        opp.assess_zero_dte.side_effect = lambda t, **kw: _make_zero_dte(ticker=t, regime_id=3)
+        opp.assess_leap.side_effect = lambda t, **kw: _make_leap(ticker=t)
+        opp.assess_breakout.side_effect = lambda t, **kw: _make_breakout(ticker=t)
+        opp.assess_momentum.side_effect = lambda t, **kw: _make_momentum(ticker=t)
+        _stub_new_assess_methods(opp)
+
+        levels = MagicMock()
+        levels.analyze.return_value = _make_levels()
+
+        bs = MagicMock()
+        bs.alert.return_value = BlackSwanAlert(
+            as_of_date=date(2026, 2, 22),
+            alert_level=AlertLevel.NORMAL,
+            composite_score=0.0,
+            circuit_breakers=[], indicators=[], triggered_breakers=0,
+            action="normal", summary="ok",
+        )
+
+        svc = TradeRankingService(
+            opportunity_service=opp, levels_service=levels, black_swan_service=bs,
+        )
+        result = svc.rank(["GLD"], as_of=date(2026, 2, 22))
+        assert result.watch_items == []

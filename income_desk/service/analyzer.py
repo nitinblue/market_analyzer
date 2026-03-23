@@ -110,6 +110,7 @@ class MarketAnalyzer:
             levels_service=self.levels,
             black_swan_service=self.black_swan,
             data_service=data_service,
+            market_metrics=market_metrics,
         )
 
         # --- NEW workflow services ---

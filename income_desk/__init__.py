@@ -408,6 +408,7 @@ from income_desk.models.ranking import (
     ScoreBreakdown,
     StrategyType,
     TradeRankingResult,
+    WatchItem,
 )
 from income_desk.features.black_swan import compute_black_swan_alert
 

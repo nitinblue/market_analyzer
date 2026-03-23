@@ -18,6 +18,7 @@ from income_desk.models.black_swan import AlertLevel
 from income_desk.models.macro import MacroEventType
 from income_desk.models.opportunity import Verdict
 from income_desk.models.ranking import RankedEntry, StrategyType
+from income_desk.models.quotes import MarketMetrics
 from income_desk.models.trading_plan import (
     DailyTradingPlan,
     DayVerdict,
@@ -156,6 +157,16 @@ class TradingPlanService:
                 list(ticker_legs.items()), include_greeks=False,
             )
 
+        # 8b. Prefetch IV rank metrics for all tickers
+        ticker_metrics: dict[str, MarketMetrics] = {}
+        for tk in tickers:
+            try:
+                m = self.analyzer.quotes.get_metrics(tk)
+                if m is not None:
+                    ticker_metrics[tk] = m
+            except Exception as e:
+                logger.debug("Metrics fetch failed for %s: %s", tk, e)
+
         # 9. Convert ranked entries to PlanTrades
         plan_trades: list[PlanTrade] = []
         slippage = cfg.fill_slippage_pct
@@ -177,6 +188,11 @@ class TradingPlanService:
             # Expiry note
             expiry_note = _expiry_note_for_trade(entry.trade_spec, all_near_expiries)
 
+            # IV rank + quality warning
+            ivr, ivr_warning = self._iv_rank_warning(
+                entry.ticker, entry.strategy_type, ticker_metrics,
+            )
+
             plan_trades.append(PlanTrade(
                 rank=0,  # Re-ranked after filtering
                 ticker=entry.ticker,
@@ -187,6 +203,8 @@ class TradingPlanService:
                 direction=entry.direction,
                 trade_spec=entry.trade_spec,
                 max_entry_price=max_price,
+                iv_rank=ivr,
+                iv_rank_warning=ivr_warning,
                 rationale=entry.rationale,
                 risk_notes=entry.risk_notes,
                 expiry_note=expiry_note,
@@ -359,6 +377,37 @@ class TradingPlanService:
             logger.warning("Broker quote fetch for max_entry failed: %s", e)
             return None
 
+    # Strategy types that depend on premium richness (theta harvesting)
+    _INCOME_STRATEGIES: set[StrategyType] = {
+        StrategyType.IRON_CONDOR,
+        StrategyType.IRON_BUTTERFLY,
+        StrategyType.CALENDAR,
+        StrategyType.RATIO_SPREAD,
+        StrategyType.ZERO_DTE,
+    }
+
+    @staticmethod
+    def _iv_rank_warning(
+        ticker: str,
+        strategy: StrategyType,
+        metrics: dict[str, MarketMetrics],
+    ) -> tuple[float | None, str | None]:
+        """Return (iv_rank, warning) for a plan trade.
+
+        Warns when IV rank is too low for income/theta strategies.
+        """
+        m = metrics.get(ticker)
+        if m is None or m.iv_rank is None:
+            return None, None
+        ivr = m.iv_rank
+        if strategy not in TradingPlanService._INCOME_STRATEGIES:
+            return ivr, None
+        if ivr < 15:
+            return ivr, f"IVR {ivr:.0f}% \u2014 premium too thin for income"
+        if ivr < 25:
+            return ivr, f"IVR {ivr:.0f}% \u2014 thin premium, consider wider wings or different ticker"
+        return ivr, None
+
     def _collect_data_warnings(self, trades: list[PlanTrade]) -> list[str]:
         """Surface broker/data issues that affect plan quality."""
         warnings: list[str] = []
@@ -386,6 +435,15 @@ class TradingPlanService:
         if quote_svc.has_broker:
             source = quote_svc.source
             warnings.append(f"Data source: {source}")
+
+        # IV rank warnings for income trades with thin premium
+        ivr_warnings = [
+            f"{t.ticker}: {t.iv_rank_warning}"
+            for t in trades
+            if t.iv_rank_warning is not None
+        ]
+        if ivr_warnings:
+            warnings.append("Low IV rank: " + "; ".join(ivr_warnings))
 
         return warnings
 

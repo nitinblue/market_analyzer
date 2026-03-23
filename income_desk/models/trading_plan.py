@@ -39,6 +39,8 @@ class PlanTrade(BaseModel):
     direction: str
     trade_spec: TradeSpec | None
     max_entry_price: float | None = None
+    iv_rank: float | None = None
+    iv_rank_warning: str | None = None  # e.g., "IVR 17% — thin premium for income"
     rationale: str
     risk_notes: list[str]
     expiry_note: str | None = None

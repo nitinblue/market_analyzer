@@ -38,9 +38,11 @@ from income_desk.models.ranking import (
     RankingFeedback,
     StrategyType,
     TradeRankingResult,
+    WatchItem,
 )
 
 if TYPE_CHECKING:
+    from income_desk.broker.base import MarketMetricsProvider
     from income_desk.data.service import DataService
     from income_desk.service.black_swan import BlackSwanService
     from income_desk.service.levels import LevelsService
@@ -179,12 +181,14 @@ class TradeRankingService:
         black_swan_service: BlackSwanService,
         data_service: DataService | None = None,
         weight_provider: WeightProvider | None = None,
+        market_metrics: MarketMetricsProvider | None = None,
     ) -> None:
         self.opportunity = opportunity_service
         self.levels = levels_service
         self.black_swan = black_swan_service
         self.data_service = data_service
         self.weight_provider = weight_provider or ConfigWeightProvider()
+        self._market_metrics = market_metrics
 
     def rank(
         self,
@@ -210,6 +214,14 @@ class TradeRankingService:
         """
         as_of = as_of or date.today()
         strategies = strategies or [s for s in StrategyType if s in _ASSESS_METHODS]
+
+        # 0. Auto-fetch IV rank if metrics provider available and map not passed
+        if iv_rank_map is None and self._market_metrics is not None:
+            try:
+                metrics = self._market_metrics.get_metrics(tickers)
+                iv_rank_map = {t: m.iv_rank for t, m in metrics.items() if m.iv_rank is not None}
+            except Exception:
+                logger.debug("Failed to fetch market metrics for IV rank", exc_info=True)
 
         # 1. Black swan gate check
         black_swan_level = AlertLevel.NORMAL
@@ -242,6 +254,7 @@ class TradeRankingService:
         # 2. For each ticker x strategy, run assessment
         entries: list[RankedEntry] = []
         opp_results: dict[int, OpportunityResult] = {}  # keyed by id(entry) for debug
+        ticker_regime: dict[str, int] = {}  # first regime_id seen per ticker (for watch items)
         total_assessed = 0
 
         for ticker in tickers:
@@ -294,6 +307,8 @@ class TradeRankingService:
                     result: OpportunityResult = assess_fn(ticker, **kwargs)
 
                     regime_id = _extract_regime_id(result)
+                    if ticker not in ticker_regime:
+                        ticker_regime[ticker] = regime_id
                     phase_id = _extract_phase_id(result)
                     days_to_earnings = _extract_days_to_earnings(result)
 
@@ -390,6 +405,9 @@ class TradeRankingService:
 
         total_actionable = sum(1 for e in entries if e.verdict != Verdict.NO_GO)
 
+        # 5. Build regime transition watch items
+        watch_items = self._build_watch_items(ticker_regime, iv_rank_map)
+
         # Generate summary
         summary = self._build_summary(entries, total_assessed, total_actionable, black_swan_level)
 
@@ -404,6 +422,7 @@ class TradeRankingService:
             total_assessed=total_assessed,
             total_actionable=total_actionable,
             summary=summary,
+            watch_items=watch_items,
         )
 
     def record_feedback(self, feedback: RankingFeedback) -> None:
@@ -428,6 +447,54 @@ class TradeRankingService:
             logger.info("Recorded ranking feedback: %s/%s", feedback.ticker, feedback.strategy_type)
         except Exception:
             logger.warning("Failed to record ranking feedback", exc_info=True)
+
+    @staticmethod
+    def _build_watch_items(
+        ticker_regime: dict[str, int],
+        iv_rank_map: dict[str, float | None] | None,
+    ) -> list[WatchItem]:
+        """Identify tickers in non-income regimes (R3/R4) with elevated IV rank.
+
+        These are worth watching because a regime transition would unlock
+        exceptional premium-selling opportunities.
+        """
+        if not iv_rank_map:
+            return []
+
+        items: list[WatchItem] = []
+        for ticker, regime_id in ticker_regime.items():
+            ivr = iv_rank_map.get(ticker)
+            if ivr is None:
+                continue
+
+            if regime_id == 3 and ivr > 50:
+                items.append(WatchItem(
+                    ticker=ticker,
+                    current_regime=3,
+                    target_regime=2,
+                    iv_rank=ivr,
+                    trigger="R3 \u2192 R2 transition",
+                    rationale=(
+                        f"IVR {ivr:.1f}% \u2014 when vol stays high but trend exhausts, "
+                        "premium will be exceptional for income strategies"
+                    ),
+                ))
+            elif regime_id == 4 and ivr > 40:
+                items.append(WatchItem(
+                    ticker=ticker,
+                    current_regime=4,
+                    target_regime=2,
+                    iv_rank=ivr,
+                    trigger="R4 \u2192 R2 transition",
+                    rationale=(
+                        f"IVR {ivr:.1f}% \u2014 post-crash recovery is the highest "
+                        "premium cycle for income strategies"
+                    ),
+                ))
+
+        # Sort by IV rank descending — highest premium opportunity first
+        items.sort(key=lambda w: w.iv_rank or 0, reverse=True)
+        return items
 
     @staticmethod
     def _build_summary(

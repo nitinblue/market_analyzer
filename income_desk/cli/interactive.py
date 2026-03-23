@@ -833,6 +833,11 @@ Requires --broker connection."""
                         # Chase limit
                         if t.max_entry_price is not None:
                             print(f"     Chase limit: ${t.max_entry_price:.2f}")
+                        # IV rank warning
+                        if t.iv_rank_warning:
+                            print(f"     {_styled(t.iv_rank_warning, 'yellow')}")
+                        elif t.iv_rank is not None:
+                            print(f"     IVR {t.iv_rank:.0f}%")
                         # Expiry note
                         if t.expiry_note:
                             print(f"     {_styled(f'NOTE: {t.expiry_note}', 'yellow')}")

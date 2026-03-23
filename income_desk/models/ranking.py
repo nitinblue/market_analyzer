@@ -66,6 +66,17 @@ class RankedEntry(BaseModel):
     data_gaps: list[DataGap] = []   # Known gaps in this analysis
 
 
+class WatchItem(BaseModel):
+    """Ticker worth watching for regime transition into income-friendly territory."""
+
+    ticker: str
+    current_regime: int
+    target_regime: int  # The regime that would make this tradeable
+    iv_rank: float | None = None
+    trigger: str  # e.g., "R3 → R2 transition"
+    rationale: str  # e.g., "IVR 77.5% — extraordinary premium when regime turns"
+
+
 class TradeRankingResult(BaseModel):
     """Complete ranking result for a set of tickers."""
 
@@ -79,6 +90,7 @@ class TradeRankingResult(BaseModel):
     total_assessed: int
     total_actionable: int                                 # verdict != NO_GO
     summary: str
+    watch_items: list[WatchItem] = []  # Tickers with high IVR in non-income regimes
     commentary: list[str] = []      # Step-by-step calculation trace (populated when debug=True)
     data_gaps: list[DataGap] = []   # Known gaps in this analysis
 
