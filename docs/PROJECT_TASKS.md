@@ -2,11 +2,19 @@
 
 > Single source of truth for what's being worked on and what comes next.
 > Update this file as tasks are completed or added.
-> Last updated: 2026-03-21
+> Last updated: 2026-03-22
 
 ---
 
 ## Recently Completed
+
+### March 2026 — Hedging Domain + CSV Import + Research Report (2026-03-22)
+
+- **Hedging domain** — 10 modules: `models` (HedgeType, HedgeStatus, HedgeSpec), `universe` (HedgeUniverse, instrument costs), `resolver` (HedgeResolver with hierarchy), `direct` (same-ticker direct hedges), `futures_hedge` (ES/NQ/GC spreads), `proxy` (SPY/QQQ/GLD alternatives), `comparison` (compare hedge costs), `portfolio` (hedge portfolio for multi-position), `monitoring` (MonitoredHedge lifecycle), `trade_maintenance` (primary hedge for small accounts). 152 tests, all passing.
+- **CSV trade import** — 7 broker format parsers: Fidelity, TastyTrade, Zerodha, Dhan, IBKR, Schwab, Alpaca; unified `PositionImporter` API in `broker/adapters/csv_importer.py`; real-world position recovery for small accounts
+- **Research report generator** — `scripts/research_report.py`: position-holder section (regime-aligned adjustments, exit notes, hedge recommendations) + new position ideas section (regime-filtered, IV-gated opportunity scoring); freemium model ready for eTrading
+- **India hedging vision** — `docs/INDIA_HEDGING_VISION.md`: dual-market P&L decomposition, rupee carry/currency risk, NIFTY-specific hedging with BANKNIFTY, same-ticker hedge priorities for India accounts
+- **Architecture evolution plan** — TradingDesk facade (Phase 1a): unified risk API across desks, broker session plugging, desk selection for new trades
 
 ### March 2026 — OSS Infrastructure + Desk Management + Demo Portfolio + 6 Brokers + PyPI (2026-03-21)
 
@@ -123,19 +131,20 @@ None. All known gaps are DONE per SYSTEMATIC_GAPS.md (2376 tests passing as of 2
 
 ### P2 — Nice to Have (Library Quality)
 
-Most P1 items from the March 20 review were completed on March 21. Simulation layer, Alpaca integration, 6-broker stack, demo portfolio, desk management, and PyPI publication all shipped 2026-03-21. Remaining backlog:
+Hedging domain, CSV import, research report, and India vision shipped 2026-03-22. Remaining:
 
 | # | Task | Why |
 |---|------|-----|
-| P2-0 | **Republish to PyPI** — v0.3.1 now pending with latest features (Traders, desk_key bug fix, sim enhancements) | Income-desk 0.3.0 live on PyPI; next release bundles final session changes |
-| P2-1 | Multi-factor setup scoring — volume profile, relative strength, IV/RV spread in breakout/momentum/mean_reversion assessors | Current assessors use basic indicators; need multi-factor for stronger signal |
-| P2-2 | Richer LEAP/earnings assessors — earnings growth rate for LEAP scoring, vol crush magnitude history | leap/earnings assessors are thin; need deeper fundamental integration |
-| P2-3 | ML regime validation — track regime predictions vs actual price behavior; auto-retrain HMM | Track whether R2 actually mean-reverted, R3 actually trended |
-| P2-4 | POP calibration from actual outcomes — `calibrate_pop_factors(outcomes)` exists; requires eTrading to send closed trade outcomes | The live feedback loop is not running |
-| P2-5 | Documentation site — ReadTheDocs or GitHub Pages from existing doc files | OSS infrastructure is in place; auto-generated API docs would reduce onboarding friction |
-| P2-6 | More broker integrations — Webull, E*Trade, Robinhood (low priority; existing 6 cover most user cases) | Community request; patterns established with BYOD adapters |
-| P2-7 | Full IBKR TWS wiring — skeleton exists; full TWS API integration | IBKR is the preferred broker for institutional users |
-| P2-8 | Stock screener OHLCV period mismatch — eTrading calls `get_ohlcv(ticker, period='1y')` but MA expects `days=` param. Dividend yield double-division (yfinance ratio × 100 again). | eTrading must fix: use `days=365` and remove dividend yield multiplication |
+| P2-1 | **India crash sentinel** — India-specific crash detection using NIFTY/BANKNIFTY + INR volatility | Current sentinel is US-focused; India desks need local indicators |
+| P2-2 | **Regime transition alerts** — persistent "alert when R4→R2" subscriptions in eTrading | Traders want continuous monitoring, not just batch scanning |
+| P2-3 | **Phased deployment planner API** — schedule trades over multiple hours/days to reduce slippage | All-at-once entry is risky in thin India markets |
+| P2-4 | **India delayed data via eTrading backend** — Zerodha/Dhan real-time→eTrading with 15m lag for web UI | Regulatory constraint; need graceful degradation strategy |
+| P2-5 | **TradingDesk facade (Phase 1a)** — unified risk API across desks, desk selection for new trades | Architecture evolution; enables multi-desk risk consolidation |
+| P2-6 | **Hedge cost tracker** — track P&L of all hedges in portfolio, cost vs benefit | eTrading needs to know if hedges are working |
+| P2-7 | **Hedge roll automation** — auto-detect when hedge expires/breaks, suggest replacement | Manual hedge rolls are tedious and miss windows |
+| P2-8 | ML regime validation — track regime predictions vs actual price behavior; auto-retrain HMM | Track whether R2 actually mean-reverted, R3 actually trended |
+| P2-9 | POP calibration from actual outcomes — `calibrate_pop_factors(outcomes)` exists; requires eTrading to send closed trade outcomes | The live feedback loop is not running |
+| P2-10 | Documentation site — ReadTheDocs or GitHub Pages from existing doc files | OSS infrastructure is in place; auto-generated API docs would reduce onboarding friction |
 
 ### P0 — Critical / Blocking eTrading
 

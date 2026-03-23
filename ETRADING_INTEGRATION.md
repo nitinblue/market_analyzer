@@ -29,6 +29,10 @@
 22. [Simulation Layer — Offline Market Data (March 21, 2026)](#22-simulation-layer--offline-market-data-march-21-2026)
 23. [Demo Portfolio — eTrading Notes (March 21, 2026)](#23-demo-portfolio--etrading-notes-march-21-2026)
 24. [Hedging Domain Integration](#24-hedging-domain-integration)
+25. [Module Rename — market_analyzer → income_desk (March 22, 2026)](#25-module-rename--market_analyzer--income_desk-march-22-2026)
+26. [CSV Trade Import — Multi-Broker Position Consolidation (March 22, 2026)](#26-csv-trade-import--multi-broker-position-consolidation-march-22-2026)
+27. [Trade Maintenance as Primary Hedge (Small Accounts) (March 22, 2026)](#27-trade-maintenance-as-primary-hedge-small-accounts-march-22-2026)
+28. [Research Report as Freemium Content](#28-research-report-as-freemium-content)
 
 ---
 
@@ -3317,3 +3321,151 @@ For the recommendation engine to work:
 - Pass current regime to `recommend_trade_maintenance()` ✓
 - When result.action is not DO_NOTHING, show adjustment recommendation card ✓
 - Log maintenance action execution for performance calibration ✓
+
+---
+
+## 28. Research Report as Freemium Content
+
+**File:** `scripts/research_report.py` — position-focused research report generator for eTrading freemium content model.
+
+### Sections
+
+**1. Position-Holder Summary**
+
+For each open position, show:
+- Regime alignment (entry regime vs current regime)
+- Current health (P&L%, tested sides, DTE, urgency)
+- Adjustment recommendation (via `recommend_trade_maintenance()`)
+- Hedge suggestion if applicable
+
+**2. New Position Ideas**
+
+Regime-filtered, IV-gated opportunity scoring:
+- Filter by regime (R1: income only, R2: income+defined-risk, R3: directional debit only, R4: NO NEW)
+- Gate by IV rank (R1/R2 require IV ≥ 30%, R3 requires IV ≤ 70%)
+- Score by quality composite (40% POP + 30% EV + 30% R:R)
+- Rank by regime alignment and trade quality
+
+### API
+
+```python
+from income_desk.scripts.research_report import generate_research_report
+
+report = generate_research_report(
+    broker_positions=[...],        # List of open PortfolioPosition
+    account_nlv=50000,
+    tickers_to_scan=["SPY", "QQQ", "GLD", "IWM"],
+    include_hedges=True,           # Show hedge recommendations
+    debug=False,                   # Include calculation traces
+)
+
+# Returns ResearchReport
+# report.position_holder_summary → [PositionSection] (one per position)
+# report.new_ideas → [OpportunitySection] (ranked list)
+# report.generated_at → datetime
+# report.markdown() → pretty print for CLI
+# report.json() → Pydantic.model_dump() for HTTP
+```
+
+### Data Structure
+
+**PositionSection:**
+```python
+{
+    "ticker": "SPY",
+    "structure": "Iron Condor",
+    "status": "tested_on_put",
+    "current_pnl_pct": -0.10,
+    "regime_mismatch": "entered_R2, now_R3",
+    "adjustment_recommendation": {
+        "action": "convert_to_diagonal",
+        "urgency": "soon",
+        "rationale": "...",
+        "trade_spec": TradeSpec(...)
+    },
+    "hedge_option": {
+        "type": "protective_call_spread",
+        "cost_pct": 0.0045,  # 0.45% of position
+        "max_protection": 0.85  # Reduces 20% loss to 15%
+    }
+}
+```
+
+**OpportunitySection:**
+```python
+{
+    "ticker": "SPY",
+    "structure": "Iron Condor",
+    "regime_id": 2,
+    "iv_rank": 0.55,
+    "quality_score": 0.72,  # composite
+    "pop_estimate": 0.68,
+    "ev_dollars": 42.0,
+    "risk_reward": 3.0,
+    "entry_notes": "Strike placement at 1.0 ATR width"
+}
+```
+
+### eTrading Integration
+
+1. **Daily auto-generation**
+   - Cron job at 08:00 ET calls `generate_research_report()`
+   - Pass all current positions from broker position sync
+   - Cache result in eTrading DB with timestamp
+
+2. **Freemium rendering**
+   - **Free tier:** Show conclusions only (quality score 0.72, structure type, urgency)
+   - **Paid tier:** Every number is a link to API call trace (POP calculation, regime features, IV rank context, Greeks, etc.)
+
+3. **Position-holder page**
+   - Renders current positions with health status
+   - Shows adjustment recommendation card with execute button
+   - Links to hedge suggestion modal
+
+4. **Ideas page**
+   - Renders ranked opportunities filtered by regime
+   - Free tier: conclusions only
+   - Paid tier: expand each idea to show POP model inputs, IV surface context, regime features, break-even analysis
+
+5. **Weekly digest email**
+   - Text summary of all current positions + top 3 ideas
+   - Portfolio snapshot (total delta, theta, vega, expected P&L)
+   - HTML version for mobile viewing
+
+### Config
+
+```python
+from income_desk.config import ResearchReportSettings
+
+report_config = ResearchReportSettings(
+    scan_universe=["SPY", "QQQ", "GLD", "IWM", "TLT"],
+    max_ideas=10,
+    position_holder_include_hedges=True,
+    opportunity_min_quality_score=0.50,
+    freemium_hide_details=True,  # Strip API traces for free users
+    generation_time="08:00:00",  # Daily at 8 AM ET
+)
+```
+
+### Data eTrading Must Provide
+
+| Input | Source | Used for |
+|-------|--------|----------|
+| Current broker positions | Position sync API | Position-holder summary section |
+| Account NLV | Account balance API | Normalize sizing, hedge recommendation |
+| Tickers to scan | User watchlist or config | New ideas section |
+| Current regime per ticker | `ma.regime.detect(ticker)` | Filter ideas by regime |
+| IV rank per ticker | `ma.quotes.get_metrics(ticker).iv_rank` | Filter by IV, quality scoring |
+| Technical data (ATR, levels) | `ma.technicals.*` | Entry notes, hedge sizing |
+
+### Performance Tracking (Post-Trade)
+
+eTrading should log:
+- Did the position-holder recommendation execute? (Y/N, and if so, outcome P&L)
+- Did any of the new ideas rank high enough to trade? (Which idea IDs, what was the trade result)
+- Did recommended hedges prevent losses? (Hedge cost vs loss reduction)
+
+Feed this back to `calibrate_report_generation()` over time to improve:
+- Regime filtering (are R2-scored ideas actually mean-reverting?)
+- Quality score weights (are POP/EV/R:R ratios calibrated to actual outcomes?)
+- Hedge recommendations (are they cost-effective?)

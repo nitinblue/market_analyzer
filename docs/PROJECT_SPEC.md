@@ -119,7 +119,7 @@ This library handles real money. Every output must be trustworthy or explicitly 
 
 ---
 
-## 4. Regime Model
+## 4.5. Regime Model
 
 | Regime | Name | Primary Strategy | Avoid |
 |--------|------|-----------------|-------|
@@ -671,7 +671,7 @@ Parquet cache with staleness checks. "Cache before fetch, but never serve stale 
 
 ---
 
-## 23. Desk Management / Capital Allocation
+## 20. Desk Management / Capital Allocation
 
 Structured capital deployment via 6 pure functions. Hierarchy: account → asset class → risk type → desks.
 
@@ -701,7 +701,7 @@ Structured capital deployment via 6 pure functions. Hierarchy: account → asset
 
 ---
 
-## 24. Demo Portfolio System
+## 21. Demo Portfolio System
 
 Paper-trading simulation without a broker connection. Enables forward testing with the full MA analysis stack.
 
@@ -741,7 +741,7 @@ Intended for forward testing, education, and live capital deployment (when broke
 
 ---
 
-## 25. Assignment Workflow
+## 22. Assignment Workflow
 
 **American vs European options:**
 
@@ -766,7 +766,7 @@ Intended for forward testing, education, and live capital deployment (when broke
 
 ---
 
-## 26. BYOD Adapters
+## 23. BYOD Adapters
 
 For users without supported brokers. All implement `MarketDataProvider` ABC.
 
@@ -781,7 +781,7 @@ CSV format: `ticker, expiration, strike, option_type, bid, ask, delta, gamma, th
 
 ---
 
-## 27. Simulated Market Data Layer
+## 24. Simulated Market Data Layer
 
 Offline market data simulation for development, testing, and integration testing with eTrading. Four preset scenarios: `calm`, `volatile`, `crash`, `india`.
 
@@ -804,7 +804,7 @@ Offline market data simulation for development, testing, and integration testing
 
 ---
 
-## 20. CLI Commands
+## 25. CLI Commands
 
 Entry points:
 ```bash
@@ -891,7 +891,7 @@ analyzer-plot                   # Regime charts
 
 ---
 
-## 14. Data Trust Framework
+## 26. Data Trust Framework
 
 Every MA output carries a 2-dimensional trust assessment: **data quality** (how accurate and fresh?) and **context quality** (were all inputs provided?).
 
@@ -958,7 +958,7 @@ eTrading should gate execution on `FitnessCategory.LIVE_EXECUTION in report.fit_
 
 ---
 
-## 15. Monitoring Action with Closing TradeSpec
+## 27. Monitoring Action with Closing TradeSpec
 
 `MonitoringAction` extended to produce executable `closing_trade_spec: TradeSpec | None`:
 
@@ -979,7 +979,7 @@ eTrading should gate execution on `FitnessCategory.LIVE_EXECUTION in report.fit_
 
 ---
 
-## 16. Position Stress Monitoring
+## 28. Position Stress Monitoring
 
 Service in `service/stress_monitoring.py`. Stresses open positions on 13 scenarios:
 
@@ -1003,7 +1003,196 @@ Service in `service/stress_monitoring.py`. Stresses open positions on 13 scenari
 
 ---
 
-## 17. Setup
+## 14. Hedging Domain
+
+Complete hedging analysis and portfolio protection for small accounts ($30–200K). 10-module package in `income_desk/hedging/`:
+
+### Hedging Types (3-tier resolver)
+
+**1. Direct (Same-Ticker)**
+- Protective puts: `BTO P strike` on short call position
+- Collars: `STO C / BTO P` on equity long
+- Cost-optimized strikes using skew
+- Best for: single large position ($5–20K)
+
+**2. Futures (Index-Based)**
+- ES/NQ/GC spreads for portfolio-level hedge
+- Long futures: counter directional moves in portfolio
+- Short futures: capitalize on portfolio beta
+- Best for: multi-position portfolio (cost < 0.5% annually)
+
+**3. Proxy (Alternative Underlier)**
+- QQQ instead of AAPL/MSFT for tech exposure
+- SPY instead of individual large-cap stocks
+- GLD instead of mining stocks
+- Best for: when direct hedge unavailable/too expensive
+
+### Resolver Pattern
+
+`HedgeResolver(account_nlv, account_type, tickers)` → ranked list of hedge options:
+
+```python
+result = HedgeResolver(account_nlv=50000, account_type="small").resolve(
+    tickers=["SPY"],  # positions to hedge
+    hedge_cost_budget_pct=0.025,  # Max 0.25% per month
+    preferred_types=["direct", "proxy"],
+)
+# Returns [
+#   HedgeComparison(type="direct", annual_cost_pct=0.20, max_loss_reduction=0.95),
+#   HedgeComparison(type="proxy", annual_cost_pct=0.05, max_loss_reduction=0.85),
+# ]
+```
+
+### Trade Maintenance (Primary Hedge for Small Accounts)
+
+For accounts < $200K, **defensive trade adjustments are the primary hedge** against being assigned or blown through on core positions:
+
+- **Tested position?** Roll out or close rather than buying protective puts.
+- **Regime changed?** Convert IC to diagonal rather than buying a separate put spread.
+- **Expiring + losing?** Close full position and redeploy capital rather than hedging the loss.
+
+Service: `income_desk/hedging/trade_maintenance.py` — `recommend_trade_maintenance()`:
+
+```python
+recommendation = recommend_trade_maintenance(
+    trade_spec=TradeSpec(...),        # Original short IC
+    current_price=572.0,              # Market price now
+    entry_regime_id=2,                # Regime when entered
+    current_regime_id=3,              # Regime now
+    dte_remaining=20,
+    entry_premium=1.50,               # Credit collected
+    account_nlv=50000,
+)
+# recommendation.action = "convert_to_diagonal"
+# recommendation.urgency = "soon"
+# recommendation.trade_spec = TradeSpec with closing + rolling legs
+```
+
+### Hedging Models
+
+| Module | Purpose |
+|--------|---------|
+| `models.py` | HedgeType, HedgeStatus, HedgeSpec, HedgeComparison, MonitoredHedge |
+| `universe.py` | HedgeUniverse — cost/effectiveness for ES, NQ, GC, SPY, QQQ, GLD proxies |
+| `resolver.py` | HedgeResolver — 3-tier hierarchy (direct → futures → proxy) with cost ranking |
+| `direct.py` | Same-ticker protective puts/collars with skew-optimal strikes |
+| `futures_hedge.py` | ES/NQ/GC spreads; portfolio-level beta hedging |
+| `proxy.py` | Alternative underliers (QQQ/SPY/GLD) as cost-effective alternatives |
+| `comparison.py` | HedgeComparison — annual cost %, max loss reduction, P&L impact |
+| `portfolio.py` | Multi-position hedge; aggregated cost/benefit |
+| `monitoring.py` | MonitoredHedge lifecycle — track hedge performance, roll triggers |
+| `trade_maintenance.py` | Primary hedge for small accounts — adjustments, rolls, closes |
+
+### Data eTrading Must Track
+
+| Field | When | Used for |
+|-------|------|----------|
+| `hedge_id` | At hedge entry | Link hedge to protected position |
+| `hedge_cost_per_month` | At hedge entry | Track cumulative cost |
+| `hedge_effectiveness` | Monthly P&L review | Assess if hedge paying for itself |
+| `roll_trigger` (premium/price) | At monitoring | Know when to roll/close hedge |
+| `position_hedge_tie` | At entry | Know which hedge protects which position |
+
+---
+
+## 29. Research Report Generator
+
+**File:** `scripts/research_report.py` — generates position-focused research and opportunity scoring.
+
+Freemium content model for eTrading: free tier shows conclusions only, paid tier links every number to API call traces.
+
+### Sections
+
+**1. Position-Holder Summary**
+
+For each open position (from broker state):
+- **Regime alignment** — entered in R2, now R3: "regime mismatch"
+- **Exit notes** — from original TradeSpec: "Close ≤21 DTE", "TP 50%", "SL 2x credit"
+- **Health check** — current P&L%, tested sides, days to expiration, urgency flag
+- **Adjustment recommendation** — if position is stressed (via `recommend_trade_maintenance()`)
+- **Hedge suggestion** — if unhedged and portfolio concentration > 20%
+
+**Example Output:**
+```
+SPY Iron Condor (Short P570 / Short C580) | Entry: 2026-03-15
+
+Regime: Entered R2 (mean revert), now R3 (trending) — MISMATCH
+Status: Tested on the put side (-$150, 10% of credit)
+Days: 20 | Time: Medium
+Exit Notes: TP 50% | SL 2x credit | Close ≤21 DTE
+
+Recommendation: CONVERT TO DIAGONAL
+  Close: BTC 1x P570 ($0.30 bid)
+  Open: STO 1x C575 4/24 ($1.10 bid)
+  Net: -$0.30 debit
+  Urgency: SOON (decide within 2 days)
+
+Hedge Option: Buy 1x QQQ call spread (ES/$5K exposure)
+  Cost: $45/month (0.09% of account)
+  Max Protection: Reduces 20% port loss to 15%
+```
+
+**2. New Position Ideas**
+
+Regime-filtered, IV-gated opportunity scoring:
+
+- **Regime filter** — R1: income (IC, calendar) only; R2: income + defined-risk; R3: directional debit spreads; R4: NO NEW TRADES
+- **IV rank gate** — R1/R2 require IV rank ≥ 30%; R3 requires IV rank ≤ 70%; R4 blocked
+- **Ticker filter** — limit to user watchlist + top 20 by liquidity
+- **Scoring** — composite of trade quality (POP + EV + R:R) and regime alignment
+
+**Example Output:**
+```
+NEW OPPORTUNITY SCAN (R2 — High Vol Mean Reverting)
+
+Ranked by Quality Score (composite: 40% POP + 30% EV + 30% R:R):
+
+1. SPY Iron Condor 3/27
+   IV Rank: 55% | POP: 68% | EV: $42 | R:R: 3:1 | Score: 0.72
+   Strike Placement: 1.0 ATR put, 1.0 ATR call
+   Expiry: 11 DTE | Max Profit: $140 | Max Loss: $360
+
+2. QQQ Iron Butterfly 3/27
+   IV Rank: 60% | POP: 64% | EV: $38 | R:R: 2.2:1 | Score: 0.68
+   Entry Notes: Tight wings, high IV crush upside
+   Expiry: 11 DTE | Max Profit: $95 | Max Loss: $205
+
+3. GLD Calendar 4/24 / 3/27
+   IV Rank: 42% | POP: 58% | EV: $25 | R:R: 1.5:1 | Score: 0.61
+   Vol Advantage: 6% front-back spread
+```
+
+### Implementation
+
+```python
+from income_desk.scripts.research_report import generate_research_report
+
+report = generate_research_report(
+    broker_positions=[...],        # Current positions from eTrading
+    account_nlv=50000,
+    tickers_to_scan=["SPY", "QQQ", "GLD", "IWM"],
+    include_hedges=True,
+    debug=False,
+)
+
+# report.position_holder_summary → [PositionSection]
+# report.new_ideas → [OpportunitySection]
+# report.generated_at → datetime
+# report.markdown() → pretty print for UI
+# report.json() → payload for eTrading frontend
+```
+
+### eTrading Integration
+
+1. **Daily auto-generation** — cron job at 08:00 ET calls `generate_research_report()`
+2. **Store JSON** — eTrading backend caches report for freemium UI
+3. **Position holder page** — renders current position details + adjustment recommendation
+4. **Ideas page** — freemium tier shows conclusions (score 0.72), paid tier adds API call traces
+5. **Weekly digest email** — text version sent to trader + portfolio snapshot
+
+---
+
+## 30. Setup
 
 ```bash
 # Python 3.12 required (hmmlearn has no 3.14 wheels)
@@ -1029,7 +1218,7 @@ pip install -e ".[tastytrade]"   # Adds tastytrade>=9.0 for broker integration
 
 ---
 
-## 21. Systematic Trading Readiness
+## 31. Systematic Trading Readiness
 
 MA's end state: enable a fully systematic trading system where no human decisions are needed during a trading day. eTrading executes; MA decides.
 
@@ -1079,7 +1268,7 @@ A trade should only reach the broker after all 5 gates pass:
 
 ---
 
-## 22. Key Model Files
+## 32. Key Model Files
 
 | File | Key Classes |
 |------|-------------|

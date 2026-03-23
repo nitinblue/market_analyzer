@@ -1,17 +1,18 @@
 # income_desk — Project State
 
-> Current implementation state as of 2026-03-21.
+> Current implementation state as of 2026-03-22.
 > Update this file when major features are completed.
 
 ---
 
 ## Test Suite
 
-- **Total tests: 2376** (as of 2026-03-21, collected by pytest)
+- **Total tests: 2554+** (as of 2026-03-22, collected by pytest)
 - All passing: yes (confirmed by `pytest -v`)
 - Test locations:
-  - `tests/` — unit tests (~2300+ tests)
-  - `tests/functional/` — functional integration tests (45+ tests, 8 modules)
+  - `tests/` — unit tests (~2450+ tests)
+  - `tests/functional/` — functional integration tests (50+ tests, 8 modules)
+  - Hedging domain tests (152 tests, 10 modules)
   - Simulation refresh layer tests (comprehensive)
   - Trader runner tests (Trader-US.py, Trader-IND.py)
 
@@ -23,6 +24,11 @@ Commits in reverse chronological order since 2026-03-01:
 
 | Commit | Description |
 |--------|-------------|
+| (2026-03-22) | **Hedging domain (10 modules, 152 tests)** — models, universe, resolver, direct, futures_hedge, proxy, comparison, portfolio, monitoring, trade_maintenance; trade maintenance as primary hedge for small accounts |
+| (2026-03-22) | **CSV trade import (7 broker formats)** — real Fidelity/TastyTrade/Zerodha/Dhan/IBKR/Schwab/Alpaca format parsers in broker/adapters/csv_importer.py; PositionImporter unified API |
+| (2026-03-22) | **Research report generator** — research_report.py with position-holder section + new position ideas section; regime-filtered, IV-gated opportunity scoring |
+| (2026-03-22) | **India hedging vision documented** — INDIA_HEDGING_VISION.md; dual-market P&L, currency risk, NIFTY-specific hedging strategies |
+| (2026-03-22) | **Architecture evolution plan** — TradingDesk facade (Phase 1a), unified risk API contract, broker session plugging |
 | (2026-03-21) | **Package published to PyPI as `income-desk` v0.3.1** — Trader runners (Trader-US.py, Trader-IND.py), trade-ready sim presets, desk_key bug fix |
 | (2026-03-21) | feat: simulated market data layer (calm/volatile/crash/india presets, --sim flag, 2376 tests) |
 | (2026-03-21) | feat: simulation refresh service (capture live data for offline use, --sim snapshot) |
