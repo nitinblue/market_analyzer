@@ -361,6 +361,8 @@ from income_desk.models.opportunity import (
     RiskProfile,
     StructureProfile,
     StructureType,
+    ALL_OPTION_STRUCTURES,
+    INCOME_STRUCTURES,
     TradeSpec,
     Verdict,
     ZeroDTEOpportunity,
@@ -755,6 +757,28 @@ from income_desk.features.decision_audit import (
     audit_trade,
     audit_portfolio,
     audit_risk,
+)
+
+# Operations reporting — business ops dashboards
+from income_desk.ops_reporting import (
+    BookedRecord,
+    BrokerAccountStatus,
+    CapitalUtilization,
+    ClosedTradeRecord,
+    DailyOpsSummary,
+    DecisionRecord,
+    DeskUtilization,
+    PeriodPnL,
+    PlatformMetrics,
+    PnLRollup,
+    RejectionBreakdown,
+    ShadowRecord,
+    StrategyAttribution,
+    TickerAttribution,
+    compute_capital_utilization,
+    compute_daily_ops_summary,
+    compute_platform_metrics,
+    compute_pnl_rollup,
 )
 
 __all__ = [
@@ -1280,4 +1304,23 @@ __all__ = [
     "compute_structure_risk",
     "compute_trade_pnl",
     "evaluate_circuit_breakers",
+    # Operations reporting — business ops dashboards
+    "BookedRecord",
+    "BrokerAccountStatus",
+    "CapitalUtilization",
+    "ClosedTradeRecord",
+    "DailyOpsSummary",
+    "DecisionRecord",
+    "DeskUtilization",
+    "PeriodPnL",
+    "PlatformMetrics",
+    "PnLRollup",
+    "RejectionBreakdown",
+    "ShadowRecord",
+    "StrategyAttribution",
+    "TickerAttribution",
+    "compute_capital_utilization",
+    "compute_daily_ops_summary",
+    "compute_platform_metrics",
+    "compute_pnl_rollup",
 ]
