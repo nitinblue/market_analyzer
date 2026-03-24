@@ -680,6 +680,28 @@ from income_desk.trade_spec_factory import (
     parse_dxlink_symbol,
 )
 
+# Trade analytics — P&L, structure risk, portfolio, performance, circuit breakers
+from income_desk.trade_analytics import (
+    BreakerTripped,
+    CircuitBreakerConfig,
+    CircuitBreakerResult,
+    LegPnL,
+    LegPnLInput,
+    PerformanceLedger,
+    PnLAttribution,
+    PortfolioAnalytics,
+    PositionSnapshot,
+    StructureRisk,
+    TradePnL,
+    UnderlyingExposure,
+    compute_performance_ledger,
+    compute_pnl_attribution,
+    compute_portfolio_analytics,
+    compute_structure_risk,
+    compute_trade_pnl,
+    evaluate_circuit_breakers,
+)
+
 # Trade analytics (public API for eTrading)
 from income_desk.trade_lifecycle import (
     AggregatedGreeks,
@@ -1239,4 +1261,23 @@ __all__ = [
     "PortfolioRateRisk",
     "assess_rate_risk",
     "assess_portfolio_rate_risk",
+    # Trade analytics — P&L, structure risk, portfolio, performance, circuit breakers
+    "BreakerTripped",
+    "CircuitBreakerConfig",
+    "CircuitBreakerResult",
+    "LegPnL",
+    "LegPnLInput",
+    "PerformanceLedger",
+    "PnLAttribution",
+    "PortfolioAnalytics",
+    "PositionSnapshot",
+    "StructureRisk",
+    "TradePnL",
+    "UnderlyingExposure",
+    "compute_performance_ledger",
+    "compute_pnl_attribution",
+    "compute_portfolio_analytics",
+    "compute_structure_risk",
+    "compute_trade_pnl",
+    "evaluate_circuit_breakers",
 ]
