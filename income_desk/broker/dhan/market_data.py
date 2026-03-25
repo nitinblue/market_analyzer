@@ -145,9 +145,12 @@ _LOT_SIZES: dict[str, int] = {
 _SEGMENT_NSE_FNO = "NSE_FNO"
 _SEGMENT_NSE_EQ = "NSE_EQ"
 _SEGMENT_BSE_EQ = "BSE_EQ"
+_SEGMENT_IDX_I = "IDX_I"
 
-# Index underlying price segment (indices trade on NSE_EQ or IDX_I)
-_INDEX_SEGMENT = "IDX_I"
+# Tickers that are indices (not equities) — determines segment for API calls.
+# Index option chains use IDX_I segment; stock option chains use NSE_FNO.
+# Index underlying prices use IDX_I; stock prices use NSE_EQ.
+_INDEX_TICKERS = {"NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "MIDCPNIFTY"}
 
 
 def _safe_float(val, default: float = 0.0) -> float:
@@ -290,6 +293,11 @@ class DhanMarketData(MarketDataProvider):
         if scrip_code is None:
             return []
 
+        # Index option chains use IDX_I segment; stock options use NSE_FNO.
+        # Using NSE_FNO for indices returns a different instrument (wrong strikes).
+        is_index = ticker.upper() in _INDEX_TICKERS
+        chain_segment = _SEGMENT_IDX_I if is_index else _SEGMENT_NSE_FNO
+
         # Dhan requires expiry — fetch expiry list first if not provided
         target_expiry_str: str | None = None
         if expiration:
@@ -298,7 +306,7 @@ class DhanMarketData(MarketDataProvider):
             try:
                 exp_response = self._client.expiry_list(
                     under_security_id=scrip_code,  # int, not str
-                    under_exchange_segment=_SEGMENT_NSE_FNO,
+                    under_exchange_segment=chain_segment,
                 )
                 # Response: {data: {data: ["2026-03-27", ...], status: "success"}}
                 exp_outer = exp_response.get("data", {}) if isinstance(exp_response, dict) else {}
@@ -323,7 +331,7 @@ class DhanMarketData(MarketDataProvider):
         try:
             response = self._client.option_chain(
                 under_security_id=scrip_code,  # int, not str
-                under_exchange_segment=_SEGMENT_NSE_FNO,
+                under_exchange_segment=chain_segment,
                 expiry=target_expiry_str,
             )
         except Exception as e:
@@ -481,10 +489,11 @@ class DhanMarketData(MarketDataProvider):
         if scrip_code is None:
             return None
 
-        # Indices use IDX_I segment, equities use NSE_EQ
-        _INDEX_TICKERS = {"NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "MIDCPNIFTY"}
+        # Indices use IDX_I segment, equities use NSE_EQ.
+        # Only try the correct segment — trying both burns rate-limit quota
+        # and the second attempt often fails with 429 Too Many Requests.
         is_index = ticker.upper() in _INDEX_TICKERS
-        segments = [_INDEX_SEGMENT, _SEGMENT_NSE_EQ] if is_index else [_SEGMENT_NSE_EQ, _INDEX_SEGMENT]
+        segments = [_SEGMENT_IDX_I] if is_index else [_SEGMENT_NSE_EQ]
 
         for segment in segments:
             try:
