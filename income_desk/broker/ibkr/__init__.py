@@ -37,7 +37,9 @@ def connect_ibkr(
     host: str = "127.0.0.1",
     port: int = 7497,
     client_id: int = 1,
-) -> tuple[IBKRMarketData | None, None, IBKRAccount | None, None]:
+    *,
+    exclude_account: bool = False,
+) -> tuple:
     """Connect to Interactive Brokers via ib_insync.
 
     Requires TWS or IB Gateway running at the specified host:port.
@@ -76,9 +78,9 @@ def connect_ibkr(
             f"Error: {exc}"
         ) from exc
 
-    return (
-        IBKRMarketData(ib),
-        None,  # IBKR metrics come via market data (modelGreeks)
-        IBKRAccount(ib),
-        None,  # No watchlist provider
-    )
+    md = IBKRMarketData(ib)
+
+    if exclude_account:
+        return (md, None, None)  # 3-tuple: data only (no metrics/watchlist for IBKR)
+
+    return (md, None, IBKRAccount(ib), None)  # 4-tuple: backwards compat

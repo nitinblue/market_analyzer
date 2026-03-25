@@ -48,6 +48,123 @@ def _populate_instrument_fields(ticker: str) -> dict:
     return {}
 
 
+def _populate_market_fields(ticker: str) -> dict:
+    """Return ALL market-specific kwargs for TradeSpec construction.
+
+    Pulls currency, lot_size, timezone, settlement, exercise_style from
+    MarketRegistry so that TradeSpec is never constructed with US defaults
+    for India instruments (or any other non-US market).
+    """
+    try:
+        from income_desk.registry import MarketRegistry
+        reg = MarketRegistry()
+        inst = reg.get_instrument(ticker)
+        if inst is None:
+            return {}
+        market = reg.get_market(inst.market)
+        result: dict = {
+            "currency": market.currency if market else "USD",
+            "lot_size": inst.lot_size or 100,
+            "settlement": inst.settlement,
+            "exercise_style": inst.exercise_style,
+        }
+        if market:
+            result["entry_window_timezone"] = market.timezone
+        return result
+    except (KeyError, ImportError):
+        return {}
+
+
+def _market_timezone(ticker: str) -> str:
+    """Return the market timezone for a ticker, defaulting to US/Eastern."""
+    try:
+        from income_desk.registry import MarketRegistry
+        reg = MarketRegistry()
+        inst = reg.get_instrument(ticker)
+        if inst:
+            market = reg.get_market(inst.market)
+            if market:
+                return market.timezone
+    except (KeyError, ImportError):
+        pass
+    return "US/Eastern"
+
+
+def _market_force_close_time(ticker: str) -> time:
+    """Return the force-close time for a ticker's market."""
+    try:
+        from income_desk.registry import MarketRegistry
+        reg = MarketRegistry()
+        inst = reg.get_instrument(ticker)
+        if inst:
+            market = reg.get_market(inst.market)
+            if market and market.force_close_time:
+                return market.force_close_time
+    except (KeyError, ImportError):
+        pass
+    return time(15, 45)  # US default
+
+
+def _market_close_label(ticker: str) -> str:
+    """Return a human-readable close time label like '3:15 PM IST' or '3:45 PM ET'."""
+    try:
+        from income_desk.registry import MarketRegistry
+        reg = MarketRegistry()
+        inst = reg.get_instrument(ticker)
+        if inst:
+            market = reg.get_market(inst.market)
+            if market and market.force_close_time:
+                ft = market.force_close_time
+                tz_abbr = {
+                    "Asia/Kolkata": "IST",
+                    "US/Eastern": "ET",
+                    "America/New_York": "ET",
+                }.get(market.timezone, market.timezone)
+                hour = ft.hour % 12 or 12
+                am_pm = "AM" if ft.hour < 12 else "PM"
+                minute_str = f":{ft.minute:02d}" if ft.minute else ""
+                return f"{hour}{minute_str} {am_pm} {tz_abbr}"
+    except (KeyError, ImportError):
+        pass
+    return "3:45 PM ET"
+
+
+def _is_india_instrument(ticker: str) -> bool:
+    """Return True if ticker belongs to INDIA market."""
+    inst = _get_instrument_info(ticker)
+    return inst is not None and inst.market == "INDIA"
+
+
+def _entry_window_for_market(
+    ticker: str,
+    strategy: str = "income",
+) -> tuple[time, time, str]:
+    """Return (start, end, timezone) entry window for a ticker's market and strategy.
+
+    Entry windows from CLAUDE.md:
+    - 0DTE: 09:45-14:00 (US) / 09:30-14:00 (India)
+    - Income: 10:00-15:00 (US) / 09:45-14:30 (India)
+    - Default: 10:00-15:00 (US) / 09:30-15:00 (India)
+    """
+    tz = _market_timezone(ticker)
+
+    if _is_india_instrument(ticker):
+        if strategy == "zero_dte":
+            return time(9, 30), time(14, 0), tz
+        elif strategy == "income":
+            return time(9, 45), time(14, 30), tz
+        else:
+            return time(9, 30), time(15, 0), tz
+    else:
+        # US defaults
+        if strategy == "zero_dte":
+            return time(9, 45), time(14, 0), tz
+        elif strategy == "income":
+            return time(10, 0), time(15, 0), tz
+        else:
+            return time(10, 0), time(15, 0), tz
+
+
 def action_from_role(role: str) -> LegAction:
     """Derive BTO/STO from a leg role string.
 
@@ -507,7 +624,7 @@ def build_single_expiry_trade_spec(
     if exp_pt is None:
         return None
 
-    inst_fields = _populate_instrument_fields(ticker)
+    mkt = _populate_market_fields(ticker)
 
     if structure_type == "iron_condor":
         legs, wing_width = build_iron_condor_legs(
@@ -520,7 +637,7 @@ def build_single_expiry_trade_spec(
             ticker=ticker, legs=legs, underlying_price=price,
             target_dte=exp_pt.days_to_expiry, target_expiration=exp_pt.expiration,
             wing_width_points=wing_width,
-            max_risk_per_spread=f"${wing_width * 100:.0f} - credit received",
+            max_risk_per_spread=f"Wing {wing_width:.0f} pts - credit received",
             spec_rationale=rationale,
             structure_type=StructureType.IRON_CONDOR,
             order_side=OrderSide.CREDIT,
@@ -528,13 +645,13 @@ def build_single_expiry_trade_spec(
             stop_loss_pct=2.0,
             exit_dte=21,
             max_profit_desc="Credit received",
-            max_loss_desc=f"Wing width (${wing_width:.0f}) minus credit",
+            max_loss_desc=f"Wing width ({wing_width:.0f} pts) minus credit",
             exit_notes=["Close at 50% of credit received",
                         "Close if short strike tested on either side",
                         "Close at 21 DTE to avoid gamma risk"],
             entry_window_start=time(10, 0),
             entry_window_end=time(15, 0),
-            **inst_fields,
+            **mkt,
         )
 
     if structure_type == "iron_butterfly":
@@ -547,7 +664,7 @@ def build_single_expiry_trade_spec(
             ticker=ticker, legs=legs, underlying_price=price,
             target_dte=exp_pt.days_to_expiry, target_expiration=exp_pt.expiration,
             wing_width_points=wing_width,
-            max_risk_per_spread=f"${wing_width * 100:.0f} - credit received",
+            max_risk_per_spread=f"Wing {wing_width:.0f} pts - credit received",
             spec_rationale=rationale,
             structure_type=StructureType.IRON_BUTTERFLY,
             order_side=OrderSide.CREDIT,
@@ -555,13 +672,13 @@ def build_single_expiry_trade_spec(
             stop_loss_pct=2.0,
             exit_dte=14,
             max_profit_desc="Credit received (larger than IC due to ATM straddle)",
-            max_loss_desc=f"Wing width (${wing_width:.0f}) minus credit",
+            max_loss_desc=f"Wing width ({wing_width:.0f} pts) minus credit",
             exit_notes=["Close at 25% of credit received",
                         "Close if underlying moves beyond ATM strike significantly",
                         "Close at 14 DTE to avoid pin risk"],
             entry_window_start=time(10, 0),
             entry_window_end=time(15, 0),
-            **inst_fields,
+            **mkt,
         )
 
     if structure_type == "ratio_spread":
@@ -587,7 +704,7 @@ def build_single_expiry_trade_spec(
                         "Close at 21 DTE — gamma risk on naked leg"],
             entry_window_start=time(10, 0),
             entry_window_end=time(15, 0),
-            **inst_fields,
+            **mkt,
         )
 
     return None
@@ -628,7 +745,7 @@ def build_dual_expiry_trade_spec(
 
     # Market-aware assignment note for dual-expiry structures
     _assign_note = _assignment_exit_note(ticker)
-    inst_fields = _populate_instrument_fields(ticker)
+    mkt = _populate_market_fields(ticker)
 
     if structure_type == "calendar" and strategy_type == "double_calendar":
         legs = build_double_calendar_legs(price, front_pt, back_pt, atr)
@@ -696,7 +813,7 @@ def build_dual_expiry_trade_spec(
         exit_notes=exit_notes,
         entry_window_start=time(10, 0),
         entry_window_end=time(15, 0),
-        **inst_fields,
+        **mkt,
     )
 
 
@@ -915,13 +1032,14 @@ def _build_fallback_setup_trade_spec(
     regime_id: int,
     target_dte_min: int,
     target_dte_max: int,
-    inst_fields: dict,
+    inst_fields: dict | None = None,
 ) -> TradeSpec | None:
     """Fallback TradeSpec when vol_surface is None but instrument has options.
 
     Uses ATR-based strike selection and registry strike_interval for snapping.
     Target expiration is estimated from today + midpoint of DTE range.
     """
+    mkt = _populate_market_fields(ticker)
     today = date.today()
     target_dte = (target_dte_min + target_dte_max) // 2
     expiration = today + timedelta(days=target_dte)
@@ -992,7 +1110,7 @@ def _build_fallback_setup_trade_spec(
                 "Close at 50% of credit received",
                 "Close if short strike tested on either side",
             ],
-            **inst_fields,
+            **mkt,
         )
 
     if regime_id in (1, 2):
@@ -1054,7 +1172,7 @@ def _build_fallback_setup_trade_spec(
                 "Close at 50% of credit received",
                 "Close if short strike tested",
             ],
-            **inst_fields,
+            **mkt,
         )
 
     # R3: debit spread
@@ -1112,7 +1230,7 @@ def _build_fallback_setup_trade_spec(
             "Target 50% of max profit",
             "Close at 50% loss of debit paid",
         ],
-        **inst_fields,
+        **mkt,
     )
 
 
@@ -1128,15 +1246,14 @@ def build_setup_trade_spec(
 ) -> TradeSpec | None:
     """Build a suggested default TradeSpec for a setup (breakout, momentum, MR, ORB).
 
-    Income-first bias: credit spreads in R1/R2, debit spreads in R3, None in R4.
+    Income-first bias: credit spreads in R1/R2, debit spreads in R3.
+    R4: debit spreads only (directional, risk-defined) — no theta selling in R4.
 
     When vol_surface is None but the instrument has options (e.g., India F&O indices),
     falls back to ATR-based strike selection using the registry's strike_interval.
     """
-    if regime_id == 4:
-        return None
 
-    inst_fields = _populate_instrument_fields(ticker)
+    mkt = _populate_market_fields(ticker)
 
     if vol_surface is None or not vol_surface.term_structure:
         # Fallback: check if this instrument has options via registry
@@ -1145,7 +1262,7 @@ def build_setup_trade_spec(
             # India indices (NIFTY, BANKNIFTY) and 0DTE-capable instruments
             return _build_fallback_setup_trade_spec(
                 ticker, price, atr, direction, regime_id,
-                target_dte_min, target_dte_max, inst_fields,
+                target_dte_min, target_dte_max,
             )
         # For non-options instruments or unknown tickers, return None
         return None
@@ -1164,7 +1281,7 @@ def build_setup_trade_spec(
             ticker=ticker, legs=legs, underlying_price=price,
             target_dte=exp_pt.days_to_expiry, target_expiration=exp_pt.expiration,
             wing_width_points=wing_width,
-            max_risk_per_spread=f"${wing_width * 100:.0f} - credit received",
+            max_risk_per_spread=f"Wing {wing_width:.0f} pts - credit received",
             spec_rationale=rationale,
             structure_type=StructureType.IRON_CONDOR,
             order_side=OrderSide.CREDIT,
@@ -1172,11 +1289,11 @@ def build_setup_trade_spec(
             stop_loss_pct=2.0,
             exit_dte=21,
             max_profit_desc="Credit received",
-            max_loss_desc=f"Wing width (${wing_width:.0f}) minus credit",
+            max_loss_desc=f"Wing width ({wing_width:.0f} pts) minus credit",
             exit_notes=["Suggested default structure for neutral setup",
                         "Close at 50% of credit received",
                         "Close if short strike tested on either side"],
-            **inst_fields,
+            **mkt,
         )
 
     if regime_id in (1, 2):
@@ -1193,7 +1310,7 @@ def build_setup_trade_spec(
             ticker=ticker, legs=legs, underlying_price=price,
             target_dte=exp_pt.days_to_expiry, target_expiration=exp_pt.expiration,
             wing_width_points=wing_pts,
-            max_risk_per_spread=f"${wing_pts * 100:.0f} - credit received",
+            max_risk_per_spread=f"Wing {wing_pts:.0f} pts - credit received",
             spec_rationale=rationale,
             structure_type=StructureType.CREDIT_SPREAD,
             order_side=OrderSide.CREDIT,
@@ -1201,11 +1318,11 @@ def build_setup_trade_spec(
             stop_loss_pct=2.0,
             exit_dte=21,
             max_profit_desc="Credit received",
-            max_loss_desc=f"Wing width (${wing_pts:.0f}) minus credit",
+            max_loss_desc=f"Wing width ({wing_pts:.0f} pts) minus credit",
             exit_notes=["Suggested default structure for setup",
                         "Close at 50% of credit received",
                         "Close if short strike tested"],
-            **inst_fields,
+            **mkt,
         )
 
     # R3: debit spread (directional)
@@ -1231,7 +1348,7 @@ def build_setup_trade_spec(
         exit_notes=["Suggested default structure for setup",
                     "Target 50% of max profit",
                     "Close at 50% loss of debit paid"],
-        **inst_fields,
+        **mkt,
     )
 
 
@@ -1306,7 +1423,10 @@ def build_equity_trade_spec(
         profit_desc = f"Target {target_price:.2f} (-{2.0 * atr:.2f})"
         loss_desc = f"Stop {stop_price:.2f} (+{1.5 * atr:.2f})"
 
-    inst_fields = _populate_instrument_fields(ticker)
+    mkt = _populate_market_fields(ticker)
+    # Caller-provided lot_size/currency override registry defaults
+    mkt["lot_size"] = lot_size
+    mkt["currency"] = currency
 
     return TradeSpec(
         ticker=ticker,
@@ -1331,9 +1451,7 @@ def build_equity_trade_spec(
             "Cash equity — no time decay, no expiry pressure",
         ],
         max_entry_price=price,
-        lot_size=lot_size,
-        currency=currency,
-        **inst_fields,
+        **mkt,
     )
 
 
@@ -1387,6 +1505,14 @@ def build_closing_trade_spec(
         close_side = open_trade_spec.order_side
 
     price = current_price if current_price is not None else open_trade_spec.underlying_price
+    mkt = _populate_market_fields(open_trade_spec.ticker)
+    # Explicit fields from open_trade_spec override registry defaults
+    mkt.update({
+        "currency": open_trade_spec.currency,
+        "lot_size": open_trade_spec.lot_size,
+        "settlement": open_trade_spec.settlement,
+        "exercise_style": open_trade_spec.exercise_style,
+    })
 
     return TradeSpec(
         ticker=open_trade_spec.ticker,
@@ -1398,8 +1524,5 @@ def build_closing_trade_spec(
         structure_type=open_trade_spec.structure_type,
         order_side=close_side,
         wing_width_points=open_trade_spec.wing_width_points,
-        currency=open_trade_spec.currency,
-        lot_size=open_trade_spec.lot_size,
-        settlement=open_trade_spec.settlement,
-        exercise_style=open_trade_spec.exercise_style,
+        **mkt,
     )

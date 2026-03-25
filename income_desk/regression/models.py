@@ -35,6 +35,7 @@ class SnapshotLeg(BaseModel):
     entry_vega: float | None = 0.0
     dxlink_symbol: str | None = None
     action: str | None = None
+    lot_size: int | None = None
 
 
 class SnapshotTrade(BaseModel):

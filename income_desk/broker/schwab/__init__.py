@@ -45,7 +45,9 @@ def connect_schwab(
     app_secret: str | None = None,
     token_path: str | None = None,
     callback_url: str = "https://127.0.0.1",
-) -> tuple[SchwabMarketData | None, SchwabMetrics | None, SchwabAccount | None, None]:
+    *,
+    exclude_account: bool = False,
+) -> tuple:
     """Connect to Charles Schwab API.
 
     Credentials resolved in order:
@@ -117,12 +119,13 @@ def connect_schwab(
             "Token may be expired. Re-run the OAuth setup."
         ) from exc
 
-    return (
-        SchwabMarketData(client),
-        SchwabMetrics(client),
-        SchwabAccount(client),
-        None,  # No watchlist provider
-    )
+    md = SchwabMarketData(client)
+    mm = SchwabMetrics(client)
+
+    if exclude_account:
+        return (md, mm, None)  # 3-tuple: data only (no watchlist for Schwab)
+
+    return (md, mm, SchwabAccount(client), None)  # 4-tuple: backwards compat
 
 
 def _resolve_credentials(

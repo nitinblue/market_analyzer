@@ -246,6 +246,25 @@ def _determine_direction(regime, technicals, phase) -> str:
 def _check_hard_stops(regime, vol_surface, days_to_earnings, cfg, ticker: str | None = None) -> list[HardStop]:
     stops: list[HardStop] = []
 
+    # India equity hard stop — monthly-only options have insufficient term structure
+    if ticker is not None:
+        try:
+            from income_desk.registry import MarketRegistry
+            _reg = MarketRegistry()
+            _inst = _reg.get_instrument(ticker)
+            if _inst.market == "INDIA" and _inst.asset_type == "equity":
+                stops.append(HardStop(
+                    name="india_equity_no_term_structure",
+                    description="Diagonal not viable for India equity options (monthly expiry only — insufficient term structure)",
+                ))
+            elif not _reg.strategy_available("diagonal", ticker):
+                stops.append(HardStop(
+                    name="diagonal_not_available",
+                    description=f"Diagonal spread not available for {ticker} in this market",
+                ))
+        except (KeyError, ImportError):
+            pass  # Unknown ticker — proceed with normal assessment
+
     if regime.regime == RegimeID.R4_HIGH_VOL_TREND and regime.confidence >= cfg.r4_confidence_threshold:
         stops.append(HardStop(
             name="R4 explosive moves",

@@ -605,6 +605,7 @@ def _build_leap_trade_spec(
         find_best_expiration,
         _assignment_exit_note,
         _populate_instrument_fields,
+        _populate_market_fields,
     )
 
     if vol_surface is None or not vol_surface.term_structure:
@@ -613,6 +614,7 @@ def _build_leap_trade_spec(
     price = technicals.current_price
     atr = technicals.atr
     inst_fields = _populate_instrument_fields(ticker)
+    mkt = _populate_market_fields(ticker)
 
     # Market-aware assignment note for PMCC front leg
     _assign_note = _assignment_exit_note(ticker)
@@ -653,6 +655,7 @@ def _build_leap_trade_spec(
                             "Close at 50% loss of premium paid",
                             "Consider rolling to later expiry at 180 DTE"],
                 **inst_fields,
+                **mkt,
             )
 
         elif leap_strategy == LEAPStrategy.BULL_CALL_SPREAD:
@@ -679,6 +682,7 @@ def _build_leap_trade_spec(
                             "Close at 50% loss of debit paid",
                             "Consider rolling to later expiry at 180 DTE"],
                 **inst_fields,
+                **mkt,
             )
 
         elif leap_strategy == LEAPStrategy.PROTECTIVE_PUT:
@@ -705,6 +709,7 @@ def _build_leap_trade_spec(
                             "Roll to later expiry before 90 DTE",
                             "Close if underlying recovers above entry"],
                 **inst_fields,
+                **mkt,
             )
 
         elif leap_strategy == LEAPStrategy.PMCC:
@@ -733,6 +738,7 @@ def _build_leap_trade_spec(
                             _assign_note,
                             "Monitor back leg delta — close if stock drops below back strike"],
                 **inst_fields,
+                **mkt,
             )
     except Exception:
         return None

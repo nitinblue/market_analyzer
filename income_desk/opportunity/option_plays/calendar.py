@@ -257,6 +257,25 @@ def assess_calendar(
 def _check_hard_stops(regime, vol_surface, days_to_earnings, cfg, ticker: str | None = None) -> list[HardStop]:
     stops: list[HardStop] = []
 
+    # India equity hard stop — monthly-only options have insufficient term structure
+    if ticker is not None:
+        try:
+            from income_desk.registry import MarketRegistry
+            _reg = MarketRegistry()
+            _inst = _reg.get_instrument(ticker)
+            if _inst.market == "INDIA" and _inst.asset_type == "equity":
+                stops.append(HardStop(
+                    name="india_equity_no_term_structure",
+                    description="Calendar not viable for India equity options (monthly expiry only — insufficient term structure)",
+                ))
+            elif not _reg.strategy_available("calendar", ticker):
+                stops.append(HardStop(
+                    name="calendar_not_available",
+                    description=f"Calendar spread not available for {ticker} in this market",
+                ))
+        except (KeyError, ImportError):
+            pass  # Unknown ticker — proceed with normal assessment
+
     # R4 — directional moves destroy calendar spreads regardless of confidence
     if regime.regime == RegimeID.R4_HIGH_VOL_TREND:
         stops.append(HardStop(

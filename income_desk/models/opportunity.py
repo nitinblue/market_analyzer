@@ -52,6 +52,43 @@ class StructureType(StrEnum):
     CASH_SECURED_PUT = "cash_secured_put"  # Sell put secured by full cash (wheel entry)
 
 
+# ── Convenience constants for eTrading portfolio filtering ──
+
+ALL_OPTION_STRUCTURES: list[str] = [
+    StructureType.IRON_CONDOR,
+    StructureType.IRON_MAN,
+    StructureType.IRON_BUTTERFLY,
+    StructureType.CREDIT_SPREAD,
+    StructureType.DEBIT_SPREAD,
+    StructureType.CALENDAR,
+    StructureType.DIAGONAL,
+    StructureType.RATIO_SPREAD,
+    StructureType.STRADDLE,
+    StructureType.STRANGLE,
+    StructureType.DOUBLE_CALENDAR,
+    StructureType.LONG_OPTION,
+    StructureType.PMCC,
+    StructureType.COVERED_CALL,
+    StructureType.CASH_SECURED_PUT,
+]
+"""Every option structure type — use as allowed_structures in filter_trades_with_portfolio()."""
+
+INCOME_STRUCTURES: list[str] = [
+    StructureType.IRON_CONDOR,
+    StructureType.IRON_BUTTERFLY,
+    StructureType.CREDIT_SPREAD,
+    StructureType.CALENDAR,
+    StructureType.DIAGONAL,
+    StructureType.RATIO_SPREAD,
+    StructureType.STRANGLE,
+    StructureType.DOUBLE_CALENDAR,
+    StructureType.PMCC,
+    StructureType.COVERED_CALL,
+    StructureType.CASH_SECURED_PUT,
+]
+"""Income/theta strategies only — excludes debit_spread, long_option, iron_man."""
+
+
 class OrderSide(StrEnum):
     """Net order side — credit (receive premium) or debit (pay premium)."""
 

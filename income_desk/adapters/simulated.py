@@ -66,11 +66,18 @@ class SimulatedMarketData(MarketDataProvider):
         account_nlv: float = 100_000.0,
         account_cash: float = 80_000.0,
         account_bp: float = 75_000.0,
+        *,
+        currency: str = "USD",
+        timezone: str = "US/Eastern",
+        lot_size_default: int = 100,
     ) -> None:
         self._tickers = {k.upper(): v for k, v in tickers.items()}
         self._account_nlv = account_nlv
         self._account_cash = account_cash
         self._account_bp = account_bp
+        self._currency = currency
+        self._timezone = timezone
+        self._lot_size_default = lot_size_default
 
     # ── MarketDataProvider identity ──────────────────────────────────────
 
@@ -80,15 +87,15 @@ class SimulatedMarketData(MarketDataProvider):
 
     @property
     def currency(self) -> str:
-        return "USD"
+        return self._currency
 
     @property
     def timezone(self) -> str:
-        return "US/Eastern"
+        return self._timezone
 
     @property
     def lot_size_default(self) -> int:
-        return 100
+        return self._lot_size_default
 
     @property
     def market_hours(self) -> tuple:
@@ -532,12 +539,20 @@ def create_crash_scenario() -> SimulatedMarketData:
 
 def create_india_market() -> SimulatedMarketData:
     """India market simulation (NSE instruments)."""
-    return SimulatedMarketData({
-        "NIFTY":     {"price": 26_000.0, "iv": 0.14, "iv_rank": 35},
-        "BANKNIFTY": {"price": 50_000.0, "iv": 0.18, "iv_rank": 45},
-        "RELIANCE":  {"price":  2_800.0, "iv": 0.25, "iv_rank": 40},
-        "TCS":       {"price":  3_500.0, "iv": 0.20, "iv_rank": 30},
-    })
+    return SimulatedMarketData(
+        {
+            "NIFTY":     {"price": 26_000.0, "iv": 0.14, "iv_rank": 35},
+            "BANKNIFTY": {"price": 50_000.0, "iv": 0.18, "iv_rank": 45},
+            "RELIANCE":  {"price":  2_800.0, "iv": 0.25, "iv_rank": 40},
+            "TCS":       {"price":  3_500.0, "iv": 0.20, "iv_rank": 30},
+        },
+        account_nlv=5_000_000.0,
+        account_cash=4_000_000.0,
+        account_bp=3_500_000.0,
+        currency="INR",
+        timezone="Asia/Kolkata",
+        lot_size_default=25,
+    )
 
 
 def create_ideal_income() -> SimulatedMarketData:
@@ -591,11 +606,23 @@ def create_india_trading() -> SimulatedMarketData:
     """India market with NIFTY/BANKNIFTY at tradeable levels.
 
     IV elevated on expiry week. European exercise (no early assignment).
+    Currency: INR. Timezone: Asia/Kolkata. Default lot: 25 (NIFTY).
     """
-    return SimulatedMarketData({
-        "NIFTY":     {"price": 24_500.0, "iv": 0.16, "iv_rank": 45, "atr_pct": 0.9},
-        "BANKNIFTY": {"price": 48_000.0, "iv": 0.20, "iv_rank": 55, "atr_pct": 1.2},
-        "FINNIFTY":  {"price": 22_000.0, "iv": 0.18, "iv_rank": 50, "atr_pct": 1.0},
-        "RELIANCE":  {"price":  2_700.0, "iv": 0.28, "iv_rank": 48, "atr_pct": 1.4},
-        "TCS":       {"price":  3_400.0, "iv": 0.22, "iv_rank": 35, "atr_pct": 1.1},
-    })
+    return SimulatedMarketData(
+        {
+            "NIFTY":     {"price": 22_700.0, "iv": 0.18, "iv_rank": 45, "atr_pct": 0.9},
+            "BANKNIFTY": {"price": 52_000.0, "iv": 0.22, "iv_rank": 55, "atr_pct": 1.2},
+            "FINNIFTY":  {"price": 24_100.0, "iv": 0.20, "iv_rank": 50, "atr_pct": 1.0},
+            "RELIANCE":  {"price":  1_400.0, "iv": 0.28, "iv_rank": 48, "atr_pct": 1.4},
+            "TCS":       {"price":  2_400.0, "iv": 0.22, "iv_rank": 35, "atr_pct": 1.1},
+            "HDFCBANK":  {"price":    755.0, "iv": 0.24, "iv_rank": 40, "atr_pct": 1.0},
+            "INFY":      {"price":  1_280.0, "iv": 0.26, "iv_rank": 42, "atr_pct": 1.2},
+            "SBIN":      {"price":  1_030.0, "iv": 0.30, "iv_rank": 52, "atr_pct": 1.5},
+        },
+        account_nlv=5_000_000.0,   # 50 Lakhs
+        account_cash=4_000_000.0,
+        account_bp=3_500_000.0,
+        currency="INR",
+        timezone="Asia/Kolkata",
+        lot_size_default=25,
+    )

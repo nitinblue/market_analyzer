@@ -12,6 +12,13 @@ Exports:
     compute_trend — compute trend report from history
     HistoryEntry — single feedback summary
     TrendReport — aggregated trend analysis
+    FailureRecord — a single captured failure
+    FailureLog — append-only failure log (in-memory + JSON-lines)
+    FailureSummary — aggregated failure counts
+    capture_failure — convenience: record on the default singleton log
+    default_log — return the module-level singleton FailureLog
+    FeedbackItem — a single feedback item in the channel
+    FeedbackChannel — shared feedback channel between eTrading and income_desk
 """
 from income_desk.regression.models import RegressionFeedback
 from income_desk.regression.validator import validate_snapshot
@@ -28,6 +35,17 @@ from income_desk.regression.history import (
     HistoryEntry,
     TrendReport,
 )
+from income_desk.regression.failure_log import (
+    FailureRecord,
+    FailureLog,
+    FailureSummary,
+    capture_failure,
+    default_log,
+)
+from income_desk.regression.feedback import (
+    FeedbackItem,
+    FeedbackChannel,
+)
 
 __all__ = [
     "validate_snapshot",
@@ -41,4 +59,11 @@ __all__ = [
     "compute_trend",
     "HistoryEntry",
     "TrendReport",
+    "FailureRecord",
+    "FailureLog",
+    "FailureSummary",
+    "capture_failure",
+    "default_log",
+    "FeedbackItem",
+    "FeedbackChannel",
 ]

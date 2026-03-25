@@ -79,7 +79,7 @@ def assess_earnings_play(
     if days_to_earnings is None:
         hard_stops.append(HardStop(
             name="No earnings date",
-            description="No upcoming earnings date found — cannot assess earnings play",
+            description="Earnings date unknown — cannot assess earnings play without known event date",
         ))
 
     # IV rank hard stop
@@ -272,6 +272,7 @@ def _build_earnings_trade_spec(
 ) -> TradeSpec | None:
     """Build trade spec for earnings play."""
     from income_desk.opportunity.option_plays._trade_spec_helpers import (
+        _populate_market_fields,
         build_iron_butterfly_legs,
         build_straddle_legs,
         find_best_expiration,
@@ -280,6 +281,10 @@ def _build_earnings_trade_spec(
 
     if vol_surface is None or not vol_surface.term_structure:
         return None
+
+    # Market-aware fields: currency, lot_size, settlement, exercise_style, timezone
+    mkt = _populate_market_fields(ticker)
+    currency_sym = "₹" if mkt.get("currency") == "INR" else "$"
 
     price = technicals.current_price
     atr = technicals.atr
@@ -312,6 +317,7 @@ def _build_earnings_trade_spec(
                             "Close at 50% loss if move doesn't materialize pre-earnings"],
                 entry_window_start=time(10, 0),
                 entry_window_end=time(14, 30),
+                **mkt,
             )
 
         elif strategy == EarningsPlayStrategy.IV_CRUSH_SELL:
@@ -328,12 +334,13 @@ def _build_earnings_trade_spec(
                 profit_target_pct=0.50,
                 stop_loss_pct=2.0,
                 max_profit_desc="Credit received (amplified by IV crush post-earnings)",
-                max_loss_desc=f"Wing width (${wing_width:.0f}) minus credit",
+                max_loss_desc=f"Wing width ({currency_sym}{wing_width:.0f}) minus credit",
                 exit_notes=["Close morning after earnings release",
                             "IV crush is your edge — close quickly to capture",
                             "Close if underlying gaps beyond wing strikes"],
                 entry_window_start=time(10, 0),
                 entry_window_end=time(14, 30),
+                **mkt,
             )
     except Exception:
         return None

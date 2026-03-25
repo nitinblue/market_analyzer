@@ -30,7 +30,8 @@ def connect_dhan(
     access_token: str | None = None,
     *,
     api_key: str | None = None,  # Backward-compat alias for client_id
-) -> tuple[DhanMarketData, DhanMetrics, DhanAccount, None]:
+    exclude_account: bool = False,
+) -> tuple:
     """Connect to Dhan broker and return provider 4-tuple.
 
     Credential resolution order:
@@ -51,7 +52,7 @@ def connect_dhan(
         ValueError: If credentials are missing from all sources.
     """
     try:
-        from dhanhq import DhanContext, dhanhq  # type: ignore[import]
+        from dhanhq import dhanhq  # type: ignore[import]
     except ImportError:
         raise ImportError(
             "Dhan SDK not installed. Run: pip install dhanhq\n"
@@ -62,7 +63,19 @@ def connect_dhan(
 
     # api_key is a backward-compat alias for client_id
     cid = client_id or api_key or os.environ.get("DHAN_CLIENT_ID", "")
-    token = access_token or os.environ.get("DHAN_ACCESS_TOKEN", "")
+    token = access_token or os.environ.get("DHAN_ACCESS_TOKEN", "") or os.environ.get("DHAN_TOKEN", "")
+
+    # Try to extract client_id from JWT if not provided
+    if not cid and token:
+        try:
+            import base64
+            import json
+            payload = token.split(".")[1]
+            payload += "=" * (4 - len(payload) % 4)
+            jwt_data = json.loads(base64.b64decode(payload))
+            cid = str(jwt_data.get("dhanClientId", ""))
+        except Exception:
+            pass
 
     if not cid or not token:
         # Try broker.yaml
@@ -83,24 +96,26 @@ def connect_dhan(
 
     if not cid or not token:
         raise ValueError(
-            "Dhan credentials required. Set DHAN_CLIENT_ID + DHAN_ACCESS_TOKEN "
+            "Dhan credentials required. Set DHAN_CLIENT_ID + DHAN_TOKEN "
             "or add to ~/.income_desk/broker.yaml under 'dhan:' key."
         )
 
-    ctx = DhanContext(cid, token)
-    client = dhanhq(ctx)
+    client = dhanhq(cid, token)
 
-    return (
-        DhanMarketData(client),
-        DhanMetrics(client),
-        DhanAccount(client),
-        None,  # Dhan has no watchlist API
-    )
+    md = DhanMarketData(client)
+    mm = DhanMetrics(client)
+
+    if exclude_account:
+        return (md, mm, None)  # 3-tuple: data only (watchlist is None for Dhan)
+
+    return (md, mm, DhanAccount(client), None)  # 4-tuple: backwards compat
 
 
-def connect_dhan_from_session(session: object) -> tuple[
-    DhanMarketData, DhanMetrics, DhanAccount, None
-]:
+def connect_dhan_from_session(
+    session: object,
+    *,
+    exclude_account: bool = False,
+) -> tuple:
     """Create Dhan providers from a pre-authenticated dhanhq client.
 
     For SaaS/eTrading: the platform handles authentication and passes
@@ -112,12 +127,13 @@ def connect_dhan_from_session(session: object) -> tuple[
     Returns:
         4-tuple: (MarketData, Metrics, Account, None)
     """
-    return (
-        DhanMarketData(session),
-        DhanMetrics(session),
-        DhanAccount(session),
-        None,
-    )
+    md = DhanMarketData(session)
+    mm = DhanMetrics(session)
+
+    if exclude_account:
+        return (md, mm, None)  # 3-tuple: data only
+
+    return (md, mm, DhanAccount(session), None)  # 4-tuple: backwards compat
 
 
 __all__ = [

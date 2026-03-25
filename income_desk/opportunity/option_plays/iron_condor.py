@@ -101,7 +101,7 @@ def assess_iron_condor(
         call_skew = vol_surface.skew_by_expiry[0].call_skew
 
     # --- Hard stops ---
-    hard_stops = _check_hard_stops(regime, vol_surface, days_to_earnings, front_iv, cfg)
+    hard_stops = _check_hard_stops(regime, vol_surface, days_to_earnings, front_iv, cfg, ticker=ticker)
 
     # IV rank hard stop
     if iv_rank is not None and iv_rank < 15:
@@ -201,8 +201,21 @@ def assess_iron_condor(
 # --- Internal helpers ---
 
 
-def _check_hard_stops(regime, vol_surface, days_to_earnings, front_iv, cfg) -> list[HardStop]:
+def _check_hard_stops(regime, vol_surface, days_to_earnings, front_iv, cfg, ticker: str | None = None) -> list[HardStop]:
     stops: list[HardStop] = []
+
+    # Strategy availability check
+    if ticker is not None:
+        try:
+            from income_desk.registry import MarketRegistry
+            _reg = MarketRegistry()
+            if not _reg.strategy_available("iron_condor", ticker):
+                stops.append(HardStop(
+                    name="iron_condor_not_available",
+                    description=f"Iron condor not available for {ticker} in this market",
+                ))
+        except (KeyError, ImportError):
+            pass  # Unknown ticker — proceed with normal assessment
 
     # R4 — explosive moves destroy condors regardless of confidence
     if regime.regime == RegimeID.R4_HIGH_VOL_TREND:

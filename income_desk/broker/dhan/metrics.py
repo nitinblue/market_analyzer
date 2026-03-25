@@ -72,50 +72,74 @@ class DhanMetrics(MarketMetricsProvider):
             except ValueError:
                 return None
 
+        # Fetch expiry list first (required by new SDK)
+        try:
+            exp_response = self._client.expiry_list(
+                under_security_id=scrip_code,  # int
+                under_exchange_segment=_SEGMENT_NSE_FNO,
+            )
+            exp_outer = exp_response.get("data", {}) if isinstance(exp_response, dict) else {}
+            exp_data = exp_outer.get("data", exp_outer) if isinstance(exp_outer, dict) else exp_outer
+            if not isinstance(exp_data, list) or not exp_data:
+                return None
+            today = date.today()
+            future_exp = sorted(e for e in exp_data if e >= today.strftime("%Y-%m-%d"))
+            nearest_exp = future_exp[0] if future_exp else exp_data[-1]
+        except Exception as e:
+            logger.debug("Dhan expiry_list for metrics failed on %s: %s", ticker, e)
+            return None
+
         try:
             response = self._client.option_chain(
-                under_scrip_code=scrip_code,
+                under_security_id=scrip_code,  # int
                 under_exchange_segment=_SEGMENT_NSE_FNO,
+                expiry=nearest_exp,
             )
         except Exception as e:
             logger.debug("Dhan option_chain for metrics failed on %s: %s", ticker, e)
             return None
 
-        if not response:
+        if not response or response.get("status") != "success":
             return None
 
-        entries = response.get("data", response) if isinstance(response, dict) else response
-        if not isinstance(entries, list) or not entries:
+        # Response: {data: {data: {last_price: X, oc: {strike: {ce: {}, pe: {}}}}}}
+        outer = response.get("data", {})
+        inner = outer.get("data", outer) if isinstance(outer, dict) else {}
+        if not isinstance(inner, dict):
             return None
 
-        # Filter to nearest expiry
-        today = date.today()
-        expiries = sorted(set(
-            e.get("expiryDate") or e.get("expiry_date", "")
-            for e in entries
-            if (e.get("expiryDate") or e.get("expiry_date", "")) >= today.strftime("%Y-%m-%d")
-        ))
-        if not expiries:
+        oc_data = inner.get("oc", {})
+        if not isinstance(oc_data, dict) or not oc_data:
             return None
 
-        nearest_exp = expiries[0]
-        chain_entries = [
-            e for e in entries
-            if (e.get("expiryDate") or e.get("expiry_date", "")) == nearest_exp
-        ]
+        # Convert oc dict format to flat entries for existing metrics logic
+        chain_entries = []
+        for strike_str, entry in oc_data.items():
+            chain_entries.append({
+                "strikePrice": float(strike_str),
+                "ce": entry.get("ce", {}),
+                "pe": entry.get("pe", {}),
+            })
 
-        # Get ATM underlying price from first entry (Dhan often includes it)
-        underlying_price = _safe_float(
-            chain_entries[0].get("underlyingPrice")
-            or chain_entries[0].get("underlying_price")
-            or chain_entries[0].get("underlyingLastPrice")
-            if chain_entries else 0
-        )
+        # Get ATM underlying price — prefer ticker_data for indices (chain last_price
+        # can return wrong scale for NIFTY/BANKNIFTY)
+        chain_price = _safe_float(inner.get("last_price"))
+        md = DhanMarketData(self._client)
+        ticker_price = md.get_underlying_price(ticker) or 0
 
-        if underlying_price <= 0:
-            # Try to get it from a DhanMarketData instance
-            md = DhanMarketData(self._client)
-            underlying_price = md.get_underlying_price(ticker) or 0
+        if ticker_price > 0 and chain_price > 0:
+            # If they diverge by >50%, trust ticker_data (the authoritative source)
+            ratio = max(ticker_price, chain_price) / min(ticker_price, chain_price)
+            if ratio > 1.5:
+                logger.warning(
+                    "%s: chain last_price=%.2f vs ticker_data=%.2f (ratio %.1fx) — using ticker_data",
+                    ticker, chain_price, ticker_price, ratio,
+                )
+            underlying_price = ticker_price
+        elif ticker_price > 0:
+            underlying_price = ticker_price
+        else:
+            underlying_price = chain_price
 
         # Collect all IVs (Dhan returns as %) and find ATM
         all_ivs: list[float] = []
@@ -130,7 +154,7 @@ class DhanMetrics(MarketMetricsProvider):
                 side = entry.get(side_key, {})
                 if not side or not isinstance(side, dict):
                     continue
-                raw_iv = _safe_float(side.get("iv") or side.get("impliedVolatility"))
+                raw_iv = _safe_float(side.get("implied_volatility") or side.get("iv"))
                 if raw_iv > 0:
                     iv_decimal = raw_iv / 100.0
                     all_ivs.append(iv_decimal)

@@ -679,15 +679,18 @@ class TestIndiaTradeSpec:
         for leg in result.legs:
             assert leg.strike % 100 == 0, f"Strike {leg.strike} not a multiple of 100"
 
-    def test_setup_trade_spec_nifty_r4_returns_none(self) -> None:
-        """R4 always returns None regardless of vol_surface availability."""
+    def test_setup_trade_spec_nifty_r4_returns_debit_spread(self) -> None:
+        """R4 returns a debit spread (directional, risk-defined) — not None."""
         from income_desk.opportunity.option_plays._trade_spec_helpers import build_setup_trade_spec
         result = build_setup_trade_spec(
             ticker="NIFTY", price=26000.0, atr=400.0,
             direction="bullish", regime_id=4,
             vol_surface=None,
         )
-        assert result is None
+        assert result is not None
+        assert result.structure_type == "debit_spread"
+        assert result.currency == "INR"
+        assert result.lot_size == 25
 
     def test_setup_trade_spec_unknown_ticker_no_vol_surface_returns_none(self) -> None:
         """Unknown ticker with no vol_surface returns None (not in registry)."""

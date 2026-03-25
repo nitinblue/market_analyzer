@@ -22,9 +22,12 @@ from income_desk.broker.zerodha.metrics import ZerodhaMetrics
 from income_desk.broker.zerodha.watchlist import ZerodhaWatchlist
 
 
-def connect_zerodha(api_key: str, access_token: str) -> tuple[
-    ZerodhaMarketData, ZerodhaMetrics, ZerodhaAccount, ZerodhaWatchlist
-]:
+def connect_zerodha(
+    api_key: str,
+    access_token: str,
+    *,
+    exclude_account: bool = False,
+) -> tuple:
     """Create Zerodha providers from Kite Connect credentials.
 
     Args:
@@ -36,14 +39,19 @@ def connect_zerodha(api_key: str, access_token: str) -> tuple[
     """
     md = ZerodhaMarketData(api_key=api_key, access_token=access_token)
     mm = ZerodhaMetrics(api_key=api_key, access_token=access_token, market_data=md)
-    acct = ZerodhaAccount(api_key=api_key, access_token=access_token)
     wl = ZerodhaWatchlist(api_key=api_key, access_token=access_token)
-    return md, mm, acct, wl
+
+    if exclude_account:
+        return (md, mm, wl)  # 3-tuple: data only
+
+    return (md, mm, ZerodhaAccount(api_key=api_key, access_token=access_token), wl)
 
 
-def connect_zerodha_from_session(session: object) -> tuple[
-    ZerodhaMarketData, ZerodhaMetrics, ZerodhaAccount, ZerodhaWatchlist
-]:
+def connect_zerodha_from_session(
+    session: object,
+    *,
+    exclude_account: bool = False,
+) -> tuple:
     """Create Zerodha providers from pre-authenticated KiteConnect session.
 
     For SaaS/eTrading: the platform handles OAuth login and passes
@@ -57,9 +65,12 @@ def connect_zerodha_from_session(session: object) -> tuple[
     """
     md = ZerodhaMarketData(session=session)
     mm = ZerodhaMetrics(session=session, market_data=md)
-    acct = ZerodhaAccount(session=session)
     wl = ZerodhaWatchlist(session=session)
-    return md, mm, acct, wl
+
+    if exclude_account:
+        return (md, mm, wl)  # 3-tuple: data only
+
+    return (md, mm, ZerodhaAccount(session=session), wl)  # 4-tuple: backwards compat
 
 
 def load_credentials(path: str = "zerodha_credentials.yaml") -> dict:

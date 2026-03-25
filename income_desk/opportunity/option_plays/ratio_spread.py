@@ -103,7 +103,7 @@ def assess_ratio_spread(
     direction = _determine_direction(regime, technicals, phase)
 
     # --- Hard stops ---
-    hard_stops = _check_hard_stops(regime, vol_surface, days_to_earnings, put_skew, call_skew, cfg)
+    hard_stops = _check_hard_stops(regime, vol_surface, days_to_earnings, put_skew, call_skew, cfg, ticker=ticker)
 
     if hard_stops:
         return RatioSpreadOpportunity(
@@ -231,8 +231,21 @@ def _determine_direction(regime, technicals, phase) -> str:
     return "bullish"  # Default to bullish for ratio spreads
 
 
-def _check_hard_stops(regime, vol_surface, days_to_earnings, put_skew, call_skew, cfg) -> list[HardStop]:
+def _check_hard_stops(regime, vol_surface, days_to_earnings, put_skew, call_skew, cfg, ticker: str | None = None) -> list[HardStop]:
     stops: list[HardStop] = []
+
+    # Strategy availability check
+    if ticker is not None:
+        try:
+            from income_desk.registry import MarketRegistry
+            _reg = MarketRegistry()
+            if not _reg.strategy_available("ratio_spread", ticker):
+                stops.append(HardStop(
+                    name="ratio_spread_not_available",
+                    description=f"Ratio spread not available for {ticker} in this market",
+                ))
+        except (KeyError, ImportError):
+            pass  # Unknown ticker — proceed with normal assessment
 
     # R4 at any confidence — naked leg + explosive moves = disaster
     if regime.regime == RegimeID.R4_HIGH_VOL_TREND:

@@ -229,6 +229,14 @@ from income_desk.broker.base import (
     WatchlistProvider,
 )
 
+# Broker connectors (top-level convenience imports for eTrading)
+from income_desk.broker.tastytrade import connect_tastytrade, connect_from_sessions
+from income_desk.broker.dhan import connect_dhan, connect_dhan_from_session
+from income_desk.broker.alpaca import connect_alpaca
+from income_desk.broker.schwab import connect_schwab
+from income_desk.broker.ibkr import connect_ibkr
+from income_desk.broker.zerodha import connect_zerodha
+
 # Vol surface
 from income_desk.models.vol_surface import (
     SkewSlice,
@@ -760,14 +768,15 @@ from income_desk.features.decision_audit import (
 )
 
 # Operations reporting — business ops dashboards
-from income_desk.ops_reporting import (
+# Back-office operations reporting (moved to income_desk.backoffice)
+from income_desk.backoffice import (
     BookedRecord,
     BrokerAccountStatus,
     CapitalUtilization,
     ClosedTradeRecord,
     DailyOpsSummary,
-    DecisionRecord,
     DeskUtilization,
+    OpsDecisionRecord,
     PeriodPnL,
     PlatformMetrics,
     PnLRollup,
@@ -777,9 +786,13 @@ from income_desk.ops_reporting import (
     TickerAttribution,
     compute_capital_utilization,
     compute_daily_ops_summary,
+    compute_margin_requirements,
     compute_platform_metrics,
     compute_pnl_rollup,
+    MarginRequirements,
 )
+# Backwards compat: eTrading imports DecisionRecord from income_desk directly
+from income_desk.backoffice.ops_reporting import DecisionRecord
 
 __all__ = [
     # Config
@@ -1029,6 +1042,15 @@ __all__ = [
     "MarketMetricsProvider",
     "TokenExpiredError",
     "WatchlistProvider",
+    # Broker connectors
+    "connect_tastytrade",
+    "connect_from_sessions",
+    "connect_dhan",
+    "connect_dhan_from_session",
+    "connect_alpaca",
+    "connect_schwab",
+    "connect_ibkr",
+    "connect_zerodha",
     # Market registry
     "MarketRegistry",
     "MarketInfo",
@@ -1321,6 +1343,9 @@ __all__ = [
     "TickerAttribution",
     "compute_capital_utilization",
     "compute_daily_ops_summary",
+    "compute_margin_requirements",
     "compute_platform_metrics",
     "compute_pnl_rollup",
+    # Margin requirements (broker-specific)
+    "MarginRequirements",
 ]

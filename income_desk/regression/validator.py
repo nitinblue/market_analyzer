@@ -11,6 +11,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from income_desk.regression.failure_log import capture_failure
 from income_desk.regression.models import (
     CheckFailure,
     DomainResult,
@@ -20,6 +21,29 @@ from income_desk.regression.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ── Regime-Strategy compatibility for maverick detection ──
+# Strategies that are INCOMPATIBLE with a given regime.
+# Based on CLAUDE.md trading philosophy and REGIME_STRATEGY_ALIGNMENT.
+# Key idea: theta selling in R4 is dangerous, directional in R1 is wrong.
+_THETA_STRATEGIES = frozenset({
+    "iron_condor", "iron_butterfly", "strangle", "straddle",
+    "calendar", "ratio_spread", "credit_spread", "put_spread",
+    "call_spread", "short_put", "short_call", "zero_dte",
+    "mean_reversion",
+})
+_DIRECTIONAL_STRATEGIES = frozenset({
+    "breakout", "momentum", "equity_breakout", "equity_momentum",
+    "debit_spread", "long_call", "long_put",
+})
+
+# regime_id -> set of strategy names that are BAD in that regime
+_REGIME_INCOMPATIBLE: dict[int, frozenset[str]] = {
+    # R1: Low-Vol Mean Reverting — avoid directional
+    1: _DIRECTIONAL_STRATEGIES,
+    # R4: High-Vol Trending — avoid theta selling
+    4: _THETA_STRATEGIES,
+}
 
 
 # ── Public API ──
@@ -46,16 +70,40 @@ def validate_snapshot(snapshot_path: Path) -> RegressionFeedback:
 
     feedback = RegressionFeedback(snapshot_id=snapshot_id)
 
-    # Run all domain checks
-    feedback.domains["trade_integrity"] = _check_trade_integrity(trades)
-    feedback.domains["pnl_validation"] = _check_pnl(trades)
-    feedback.domains["risk_validation"] = _check_risk(desks, portfolios)
-    feedback.domains["data_trust"] = _check_data_trust(
+    # Snapshot-level market (US/India) for lot_size defaults
+    market = raw.get("market", "US")
+
+    # Run all domain checks — log failures after each domain
+    domains: dict[str, DomainResult] = {}
+    domains["trade_integrity"] = _check_trade_integrity(trades)
+    domains["pnl_validation"] = _check_pnl(trades, market)
+    domains["risk_validation"] = _check_risk(desks, portfolios)
+    domains["data_trust"] = _check_data_trust(
         broker_connected, regime, portfolios
     )
-    feedback.domains["execution_quality"] = _check_execution_quality(trades)
-    feedback.domains["health_lifecycle"] = _check_health_lifecycle(trades)
-    feedback.domains["decision_audit"] = _check_decision_audit(trades)
+    domains["execution_quality"] = _check_execution_quality(trades)
+    domains["health_lifecycle"] = _check_health_lifecycle(trades)
+    domains["decision_audit"] = _check_decision_audit(trades)
+    domains["maverick_trades"] = _check_maverick_trades(trades, regime)
+
+    for domain_name, domain_result in domains.items():
+        feedback.domains[domain_name] = domain_result
+        if domain_result.failures:
+            for failure in domain_result.failures:
+                capture_failure(
+                    source="regression",
+                    severity=failure.severity,
+                    message=failure.message,
+                    ticker=failure.trade_id,
+                    details={
+                        "check": failure.check,
+                        "expected": str(failure.expected),
+                        "actual": str(failure.actual),
+                        "domain": domain_name,
+                        "snapshot_id": snapshot_id,
+                    },
+                    category=domain_name,
+                )
 
     # Build recommendations
     feedback.recommendations = _build_recommendations(trades, desks)
@@ -276,13 +324,47 @@ def _check_income_yield(
 # ── Domain: PnL Validation ──
 
 
-def _check_pnl(trades: list[SnapshotTrade]) -> DomainResult:
+def _get_leg_multiplier(leg: SnapshotLeg, market: str) -> int:
+    """Return the correct multiplier for a leg.
+
+    Uses the leg's ``lot_size`` if present, else falls back to market
+    defaults: 100 for US options, 1 for equity.  India lot sizes vary
+    by instrument, so they MUST be set on the leg; 100 is still the
+    fallback to avoid crashing.
+    """
+    if leg.asset_type != "option":
+        return 1
+    if leg.lot_size is not None:
+        return leg.lot_size
+    # Market-level default — US is always 100, India varies
+    return 100
+
+
+def _check_pnl(trades: list[SnapshotTrade], market: str = "US") -> DomainResult:
     """Independently compute PnL from legs and compare with stored total_pnl."""
     result = DomainResult()
 
     for trade in trades:
         if not trade.legs:
             continue
+
+        # ── Check: option legs should have explicit lot_size for non-US markets ──
+        if market != "US":
+            for leg in trade.legs:
+                if leg.asset_type == "option" and leg.lot_size is None:
+                    result.record_fail(
+                        CheckFailure(
+                            trade_id=trade.id,
+                            check="option_lot_size_present",
+                            expected="lot_size set for non-US option",
+                            actual="None (defaulting to 100)",
+                            severity="warning",
+                            message=(
+                                f"{trade.ticker}: option leg missing lot_size in "
+                                f"{market} market — multiplier may be wrong"
+                            ),
+                        )
+                    )
 
         # Shadow trades with entry_price=0 — PnL convention may differ
         if trade.is_shadow and not trade.has_entry:
@@ -293,7 +375,7 @@ def _check_pnl(trades: list[SnapshotTrade]) -> DomainResult:
                 if leg.current_price is None or leg.entry_price is None:
                     has_all_prices = False
                     continue
-                multiplier = 100 if leg.asset_type == "option" else 1
+                multiplier = _get_leg_multiplier(leg, market)
                 qty = leg.quantity
                 computed_pnl += (leg.current_price - leg.entry_price) * qty * multiplier
 
@@ -332,13 +414,15 @@ def _check_pnl(trades: list[SnapshotTrade]) -> DomainResult:
         # Real/whatif trades — compute PnL from legs
         computed_pnl = 0.0
         has_all_prices = True
+        leg_pnls: list[float] = []
         for leg in trade.legs:
             if leg.current_price is None or leg.entry_price is None:
                 has_all_prices = False
                 continue
-            multiplier = 100 if leg.asset_type == "option" else 1
+            multiplier = _get_leg_multiplier(leg, market)
             qty = leg.quantity
             leg_pnl = (leg.current_price - leg.entry_price) * qty * multiplier
+            leg_pnls.append(leg_pnl)
             computed_pnl += leg_pnl
 
         if not has_all_prices:
@@ -373,6 +457,78 @@ def _check_pnl(trades: list[SnapshotTrade]) -> DomainResult:
             )
         else:
             result.record_pass()
+
+        # ── Check: PnL sign consistency ──
+        # If ALL individual legs are losing, total should be negative.
+        # If ALL individual legs are winning, total should be positive.
+        if leg_pnls and all(lp < -0.01 for lp in leg_pnls):
+            if (trade.total_pnl or 0.0) > 0.01:
+                result.record_fail(
+                    CheckFailure(
+                        trade_id=trade.id,
+                        check="pnl_sign_consistency",
+                        expected="negative total (all legs losing)",
+                        actual=trade.total_pnl,
+                        severity="error",
+                        message=(
+                            f"{trade.ticker}: all legs are losing but "
+                            f"total_pnl={trade.total_pnl:.2f} is positive"
+                        ),
+                    )
+                )
+            else:
+                result.record_pass()
+        elif leg_pnls and all(lp > 0.01 for lp in leg_pnls):
+            if (trade.total_pnl or 0.0) < -0.01:
+                result.record_fail(
+                    CheckFailure(
+                        trade_id=trade.id,
+                        check="pnl_sign_consistency",
+                        expected="positive total (all legs winning)",
+                        actual=trade.total_pnl,
+                        severity="error",
+                        message=(
+                            f"{trade.ticker}: all legs are winning but "
+                            f"total_pnl={trade.total_pnl:.2f} is negative"
+                        ),
+                    )
+                )
+            else:
+                result.record_pass()
+
+        # ── Check: closed trade exit PnL arithmetic ──
+        if trade.trade_status == "closed":
+            exit_pnl_computed = 0.0
+            has_all_exit = True
+            for leg in trade.legs:
+                if leg.exit_price is None or leg.entry_price is None:
+                    has_all_exit = False
+                    break
+                multiplier = _get_leg_multiplier(leg, market)
+                exit_pnl_computed += (
+                    (leg.exit_price - leg.entry_price) * leg.quantity * multiplier
+                )
+
+            if has_all_exit:
+                stored_exit_pnl = trade.total_pnl or 0.0
+                exit_diff = abs(exit_pnl_computed - stored_exit_pnl)
+                if exit_diff > 5.0:
+                    result.record_fail(
+                        CheckFailure(
+                            trade_id=trade.id,
+                            check="exit_pnl_arithmetic",
+                            expected=stored_exit_pnl,
+                            actual=exit_pnl_computed,
+                            severity="warning" if exit_diff < 50.0 else "error",
+                            message=(
+                                f"{trade.ticker}: closed trade exit PnL diff "
+                                f"${exit_diff:.2f} (computed={exit_pnl_computed:.2f} "
+                                f"vs stored={stored_exit_pnl:.2f})"
+                            ),
+                        )
+                    )
+                else:
+                    result.record_pass()
 
     return result
 
@@ -434,6 +590,75 @@ def _check_risk(
                 message="No portfolio has capital — cannot trade",
             )
         )
+
+    # ── Check: total desk capital should not exceed portfolio capital ──
+    total_desk_capital = sum(d.get("capital", 0) for d in desks)
+    total_portfolio_capital = sum(p.get("capital", 0) for p in portfolios)
+    if total_portfolio_capital > 0 and total_desk_capital > total_portfolio_capital:
+        result.record_fail(
+            CheckFailure(
+                check="desk_capital_within_portfolio",
+                expected=f"desk capital <= portfolio capital ({total_portfolio_capital:.2f})",
+                actual=total_desk_capital,
+                severity="error",
+                message=(
+                    f"Total desk capital ${total_desk_capital:,.2f} exceeds "
+                    f"portfolio capital ${total_portfolio_capital:,.2f}"
+                ),
+            )
+        )
+    elif total_portfolio_capital > 0:
+        result.record_pass()
+
+    # ── Check: no desk exceeds its max_positions limit ──
+    for desk in desks:
+        desk_key = desk.get("desk_key", "unknown")
+        risk_limits = desk.get("risk_limits") or {}
+        max_positions = risk_limits.get("max_positions")
+        open_positions = desk.get("open_position_count", desk.get("position_count"))
+        if max_positions is not None and open_positions is not None:
+            if open_positions > max_positions:
+                result.record_fail(
+                    CheckFailure(
+                        check="desk_max_positions",
+                        expected=f"<= {max_positions} positions",
+                        actual=open_positions,
+                        severity="error",
+                        message=(
+                            f"{desk_key}: {open_positions} open positions "
+                            f"exceeds max_positions={max_positions}"
+                        ),
+                    )
+                )
+            else:
+                result.record_pass()
+
+    # ── Check: portfolio daily loss vs circuit breaker ──
+    for portfolio in portfolios:
+        p_name = portfolio.get("name", portfolio.get("id", "unknown"))
+        daily_pnl = portfolio.get("daily_pnl")
+        circuit_breaker = portfolio.get("circuit_breaker_threshold")
+        p_capital = portfolio.get("capital", 0)
+
+        if daily_pnl is not None and circuit_breaker is not None and p_capital > 0:
+            # circuit_breaker is a negative fraction (e.g., -0.03 for -3%)
+            threshold_dollars = circuit_breaker * p_capital
+            if daily_pnl < threshold_dollars:
+                result.record_fail(
+                    CheckFailure(
+                        check="circuit_breaker_breach",
+                        expected=f"daily loss > ${threshold_dollars:,.2f}",
+                        actual=daily_pnl,
+                        severity="error",
+                        message=(
+                            f"{p_name}: daily PnL ${daily_pnl:,.2f} breaches "
+                            f"circuit breaker at ${threshold_dollars:,.2f} "
+                            f"({circuit_breaker*100:.1f}% of ${p_capital:,.2f})"
+                        ),
+                    )
+                )
+            else:
+                result.record_pass()
 
     return result
 
@@ -646,6 +871,103 @@ def _check_decision_audit(trades: list[SnapshotTrade]) -> DomainResult:
                     message=f"{trade.ticker}: decision_lineage missing key fields",
                 )
             )
+
+    return result
+
+
+# ── Domain: Maverick Trade Detection ──
+
+
+def _check_maverick_trades(
+    trades: list[SnapshotTrade],
+    regime: dict[str, Any],
+) -> DomainResult:
+    """Detect trades that bypassed the decision pipeline or violate regime rules.
+
+    A "maverick" trade is one that:
+    1. Has NO decision_lineage and is a real trade (not shadow/whatif)
+    2. Uses a strategy incompatible with the current regime
+    3. Was opened without gate validation (no gate_result in lineage)
+    """
+    result = DomainResult()
+    regime_id = regime.get("regime_id") if regime else None
+
+    for trade in trades:
+        # ── Check 1: Real trades without decision_lineage ──
+        if trade.trade_type == "real" and trade.decision_lineage is None:
+            result.record_fail(
+                CheckFailure(
+                    trade_id=trade.id,
+                    check="maverick_no_lineage",
+                    expected="decision_lineage present on real trade",
+                    actual="None",
+                    severity="error",
+                    message=(
+                        f"{trade.ticker}: real trade has NO decision_lineage — "
+                        "opened outside the decision pipeline"
+                    ),
+                )
+            )
+        elif trade.trade_type == "real" and trade.decision_lineage is not None:
+            result.record_pass()
+
+        # ── Check 2: Strategy vs regime compatibility ──
+        if (
+            regime_id is not None
+            and trade.strategy_type
+            and trade.trade_type in ("real", "whatif")
+        ):
+            strategy_lower = trade.strategy_type.lower().replace(" ", "_")
+            incompatible = _REGIME_INCOMPATIBLE.get(regime_id, frozenset())
+            if strategy_lower in incompatible:
+                # Determine what kind of mismatch
+                if regime_id == 4:
+                    reason = "theta selling in R4 (High-Vol Trending) is dangerous"
+                elif regime_id == 1:
+                    reason = "directional strategy in R1 (Low-Vol Mean Reverting) is wrong"
+                else:
+                    reason = f"strategy '{strategy_lower}' is incompatible with R{regime_id}"
+
+                result.record_fail(
+                    CheckFailure(
+                        trade_id=trade.id,
+                        check="maverick_regime_mismatch",
+                        expected=f"strategy compatible with R{regime_id}",
+                        actual=strategy_lower,
+                        severity="error",
+                        message=(
+                            f"{trade.ticker}: {reason} — "
+                            f"strategy='{strategy_lower}', regime=R{regime_id}"
+                        ),
+                    )
+                )
+            else:
+                result.record_pass()
+
+        # ── Check 3: Real trades without gate validation ──
+        if trade.trade_type == "real" and trade.decision_lineage is not None:
+            lineage = trade.decision_lineage
+            has_gate = (
+                "gate_result" in lineage
+                or "gates" in lineage
+                or "gate_blocked_by" in lineage
+            )
+            if not has_gate:
+                result.record_fail(
+                    CheckFailure(
+                        trade_id=trade.id,
+                        check="maverick_no_gates",
+                        expected="gate_result or gates in decision_lineage",
+                        actual=list(lineage.keys()),
+                        severity="error",
+                        message=(
+                            f"{trade.ticker}: real trade has lineage but "
+                            "NO gate validation — bypassed risk gates"
+                        ),
+                    )
+                )
+            else:
+                result.record_pass()
 
     return result
 

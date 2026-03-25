@@ -43,10 +43,10 @@ class TestDhanImport:
     def test_missing_credentials_raises_value_error(self) -> None:
         """Empty credentials raise ValueError."""
         try:
-            from dhanhq import DhanContext  # noqa: F401
+            from dhanhq import dhanhq as _dhanhq_cls  # noqa: F401
             # SDK is installed — test credential validation
             from income_desk.broker.dhan import connect_dhan
-            with pytest.raises(ValueError, match="DHAN_CLIENT_ID"):
+            with pytest.raises(ValueError, match="DHAN_CLIENT_ID|DHAN_TOKEN"):
                 connect_dhan("", "")
         except ImportError:
             pytest.skip("dhanhq not installed — skipping credential validation test")
@@ -131,42 +131,53 @@ class TestDhanProviderProperties:
 # ---------------------------------------------------------------------------
 
 class TestDhanOptionChainParsing:
-    def _make_chain_client(self, entries: list) -> object:
+    def _make_chain_client(self, oc_dict: dict, last_price: float = 23500.0) -> object:
+        """Create a mock Dhan client that returns option chain in new format.
+
+        Args:
+            oc_dict: Dict of {strike_str: {ce: {...}, pe: {...}}}
+            last_price: Underlying last price to include in response.
+        """
         class MockChainClient:
-            def option_chain(self, **kwargs):
-                return {"data": entries}
+            def expiry_list(self, under_security_id, under_exchange_segment):
+                return {"status": "success", "data": {"data": ["2026-04-24"], "status": "success"}}
+
+            def option_chain(self, under_security_id, under_exchange_segment, expiry):
+                if not oc_dict:
+                    return {"status": "success", "data": {"data": {"last_price": last_price, "oc": {}}, "status": "success"}}
+                return {"status": "success", "data": {"data": {"last_price": last_price, "oc": oc_dict}, "status": "success"}}
         return MockChainClient()
 
     def test_empty_chain_for_unknown_ticker(self) -> None:
         """Unknown non-numeric ticker returns empty list."""
         from income_desk.broker.dhan.market_data import DhanMarketData
-        md = DhanMarketData(self._make_chain_client([]))
+        md = DhanMarketData(self._make_chain_client({}))
         result = md.get_option_chain("UNKNOWN_TICKER_XYZ")
         assert result == []
 
     def test_numeric_ticker_as_scrip_code(self) -> None:
         """Numeric ticker string is treated as scrip code."""
         from income_desk.broker.dhan.market_data import DhanMarketData
-        md = DhanMarketData(self._make_chain_client([]))
+        md = DhanMarketData(self._make_chain_client({}))
         # Should not raise — numeric ticker resolves to int scrip code
         result = md.get_option_chain("12345")
-        assert result == []  # Empty response from mock
+        assert result == []  # Empty oc dict from mock
 
     def test_iv_conversion_from_percentage(self) -> None:
         """Dhan returns IV as percentage (25.5) — MA stores decimal (0.255)."""
         from income_desk.broker.dhan.market_data import DhanMarketData
-        entry = {
-            "strikePrice": 26000,
-            "expiryDate": "2026-04-24",
-            "ce": {
-                "bid_price": 100, "ask_price": 110, "ltp": 105,
-                "iv": 25.5, "delta": 0.5, "gamma": 0.01,
-                "theta": -5.0, "vega": 10.0,
-                "volume": 1000, "oi": 5000,
+        oc = {
+            "26000.000000": {
+                "ce": {
+                    "top_bid_price": 100, "top_ask_price": 110, "last_price": 105,
+                    "implied_volatility": 25.5,
+                    "greeks": {"delta": 0.5, "gamma": 0.01, "theta": -5.0, "vega": 10.0},
+                    "volume": 1000, "oi": 5000,
+                },
+                "pe": {},
             },
-            "pe": {},
         }
-        md = DhanMarketData(self._make_chain_client([entry]))
+        md = DhanMarketData(self._make_chain_client(oc))
         chain = md.get_option_chain("NIFTY", expiration=date(2026, 4, 24))
         assert len(chain) == 1
         q = chain[0]
@@ -175,18 +186,18 @@ class TestDhanOptionChainParsing:
     def test_greeks_populated(self) -> None:
         """Delta/gamma/theta/vega are populated from chain response."""
         from income_desk.broker.dhan.market_data import DhanMarketData
-        entry = {
-            "strikePrice": 26000,
-            "expiryDate": "2026-04-24",
-            "ce": {
-                "bid_price": 100, "ask_price": 110, "ltp": 105,
-                "iv": 25.5, "delta": 0.52, "gamma": 0.012,
-                "theta": -4.8, "vega": 9.5,
-                "volume": 500, "oi": 2000,
+        oc = {
+            "26000.000000": {
+                "ce": {
+                    "top_bid_price": 100, "top_ask_price": 110, "last_price": 105,
+                    "implied_volatility": 25.5,
+                    "greeks": {"delta": 0.52, "gamma": 0.012, "theta": -4.8, "vega": 9.5},
+                    "volume": 500, "oi": 2000,
+                },
+                "pe": {},
             },
-            "pe": {},
         }
-        md = DhanMarketData(self._make_chain_client([entry]))
+        md = DhanMarketData(self._make_chain_client(oc))
         chain = md.get_option_chain("NIFTY", expiration=date(2026, 4, 24))
         assert len(chain) == 1
         q = chain[0]
@@ -198,15 +209,16 @@ class TestDhanOptionChainParsing:
     def test_lot_size_set_correctly(self) -> None:
         """Lot size matches _LOT_SIZES for the given ticker."""
         from income_desk.broker.dhan.market_data import DhanMarketData
-        entry = {
-            "strikePrice": 26000,
-            "expiryDate": "2026-04-24",
-            "ce": {"bid_price": 100, "ask_price": 110, "ltp": 105,
-                   "iv": 20.0, "delta": 0.5, "gamma": 0.01,
-                   "theta": -3.0, "vega": 8.0, "volume": 100, "oi": 500},
-            "pe": {},
+        oc = {
+            "26000.000000": {
+                "ce": {"top_bid_price": 100, "top_ask_price": 110, "last_price": 105,
+                       "implied_volatility": 20.0,
+                       "greeks": {"delta": 0.5, "gamma": 0.01, "theta": -3.0, "vega": 8.0},
+                       "volume": 100, "oi": 500},
+                "pe": {},
+            },
         }
-        md = DhanMarketData(self._make_chain_client([entry]))
+        md = DhanMarketData(self._make_chain_client(oc))
         chain = md.get_option_chain("NIFTY", expiration=date(2026, 4, 24))
         assert chain[0].lot_size == 25  # NIFTY lot size
 
@@ -217,17 +229,19 @@ class TestDhanOptionChainParsing:
     def test_both_call_and_put_parsed(self) -> None:
         """Both CE and PE sides are returned for each strike."""
         from income_desk.broker.dhan.market_data import DhanMarketData
-        entry = {
-            "strikePrice": 26000,
-            "expiryDate": "2026-04-24",
-            "ce": {"bid_price": 100, "ask_price": 110, "ltp": 105,
-                   "iv": 20.0, "delta": 0.5, "gamma": 0.01,
-                   "theta": -3.0, "vega": 8.0, "volume": 100, "oi": 500},
-            "pe": {"bid_price": 90, "ask_price": 95, "ltp": 92,
-                   "iv": 21.0, "delta": -0.5, "gamma": 0.01,
-                   "theta": -3.2, "vega": 8.2, "volume": 80, "oi": 400},
+        oc = {
+            "26000.000000": {
+                "ce": {"top_bid_price": 100, "top_ask_price": 110, "last_price": 105,
+                       "implied_volatility": 20.0,
+                       "greeks": {"delta": 0.5, "gamma": 0.01, "theta": -3.0, "vega": 8.0},
+                       "volume": 100, "oi": 500},
+                "pe": {"top_bid_price": 90, "top_ask_price": 95, "last_price": 92,
+                       "implied_volatility": 21.0,
+                       "greeks": {"delta": -0.5, "gamma": 0.01, "theta": -3.2, "vega": 8.2},
+                       "volume": 80, "oi": 400},
+            },
         }
-        md = DhanMarketData(self._make_chain_client([entry]))
+        md = DhanMarketData(self._make_chain_client(oc))
         chain = md.get_option_chain("NIFTY", expiration=date(2026, 4, 24))
         assert len(chain) == 2
         types = {q.option_type for q in chain}
@@ -236,32 +250,32 @@ class TestDhanOptionChainParsing:
     def test_mid_price_calculation(self) -> None:
         """Mid is (bid + ask) / 2 when both are available."""
         from income_desk.broker.dhan.market_data import DhanMarketData
-        entry = {
-            "strikePrice": 26000,
-            "expiryDate": "2026-04-24",
-            "ce": {"bid_price": 100.0, "ask_price": 110.0, "ltp": 108,
-                   "iv": 20.0, "delta": 0.5, "gamma": 0.01,
-                   "theta": -3.0, "vega": 8.0, "volume": 100, "oi": 500},
-            "pe": {},
+        oc = {
+            "26000.000000": {
+                "ce": {"top_bid_price": 100.0, "top_ask_price": 110.0, "last_price": 108,
+                       "implied_volatility": 20.0,
+                       "greeks": {"delta": 0.5, "gamma": 0.01, "theta": -3.0, "vega": 8.0},
+                       "volume": 100, "oi": 500},
+                "pe": {},
+            },
         }
-        md = DhanMarketData(self._make_chain_client([entry]))
+        md = DhanMarketData(self._make_chain_client(oc))
         chain = md.get_option_chain("NIFTY", expiration=date(2026, 4, 24))
         assert chain[0].mid == pytest.approx(105.0)
 
-    def test_expiration_filter(self) -> None:
-        """Only entries matching the requested expiration are returned."""
+    def test_expiration_passed_through(self) -> None:
+        """Expiration is set on all quotes from the chain response."""
         from income_desk.broker.dhan.market_data import DhanMarketData
-        entries = [
-            {"strikePrice": 26000, "expiryDate": "2026-04-24",
-             "ce": {"bid_price": 100, "ask_price": 110, "ltp": 105,
-                    "iv": 20.0, "delta": 0.5, "gamma": 0.01, "theta": -3.0, "vega": 8.0,
-                    "volume": 100, "oi": 500}, "pe": {}},
-            {"strikePrice": 26000, "expiryDate": "2026-05-29",
-             "ce": {"bid_price": 150, "ask_price": 160, "ltp": 155,
-                    "iv": 22.0, "delta": 0.48, "gamma": 0.009, "theta": -2.5, "vega": 10.0,
-                    "volume": 200, "oi": 800}, "pe": {}},
-        ]
-        md = DhanMarketData(self._make_chain_client(entries))
+        oc = {
+            "26000.000000": {
+                "ce": {"top_bid_price": 100, "top_ask_price": 110, "last_price": 105,
+                       "implied_volatility": 20.0,
+                       "greeks": {"delta": 0.5, "gamma": 0.01, "theta": -3.0, "vega": 8.0},
+                       "volume": 100, "oi": 500},
+                "pe": {},
+            },
+        }
+        md = DhanMarketData(self._make_chain_client(oc))
         chain = md.get_option_chain("NIFTY", expiration=date(2026, 4, 24))
         assert len(chain) == 1
         assert chain[0].expiration == date(2026, 4, 24)
@@ -269,30 +283,32 @@ class TestDhanOptionChainParsing:
     def test_iv_zero_returns_none(self) -> None:
         """IV of 0 in response maps to None (not 0.0) in OptionQuote."""
         from income_desk.broker.dhan.market_data import DhanMarketData
-        entry = {
-            "strikePrice": 26000,
-            "expiryDate": "2026-04-24",
-            "ce": {"bid_price": 5, "ask_price": 6, "ltp": 5.5,
-                   "iv": 0, "delta": 0.1, "gamma": 0.001,
-                   "theta": -0.5, "vega": 1.0, "volume": 10, "oi": 100},
-            "pe": {},
+        oc = {
+            "26000.000000": {
+                "ce": {"top_bid_price": 5, "top_ask_price": 6, "last_price": 5.5,
+                       "implied_volatility": 0,
+                       "greeks": {"delta": 0.1, "gamma": 0.001, "theta": -0.5, "vega": 1.0},
+                       "volume": 10, "oi": 100},
+                "pe": {},
+            },
         }
-        md = DhanMarketData(self._make_chain_client([entry]))
+        md = DhanMarketData(self._make_chain_client(oc))
         chain = md.get_option_chain("NIFTY", expiration=date(2026, 4, 24))
         assert chain[0].implied_volatility is None
 
     def test_missing_side_data_skipped(self) -> None:
         """Empty or missing CE/PE data does not produce a quote."""
         from income_desk.broker.dhan.market_data import DhanMarketData
-        entry = {
-            "strikePrice": 26000,
-            "expiryDate": "2026-04-24",
-            "ce": {},  # Empty — should be skipped
-            "pe": {"bid_price": 90, "ask_price": 95, "ltp": 92,
-                   "iv": 21.0, "delta": -0.5, "gamma": 0.01,
-                   "theta": -3.2, "vega": 8.2, "volume": 80, "oi": 400},
+        oc = {
+            "26000.000000": {
+                "ce": {},  # Empty — should be skipped
+                "pe": {"top_bid_price": 90, "top_ask_price": 95, "last_price": 92,
+                       "implied_volatility": 21.0,
+                       "greeks": {"delta": -0.5, "gamma": 0.01, "theta": -3.2, "vega": 8.2},
+                       "volume": 80, "oi": 400},
+            },
         }
-        md = DhanMarketData(self._make_chain_client([entry]))
+        md = DhanMarketData(self._make_chain_client(oc))
         chain = md.get_option_chain("NIFTY", expiration=date(2026, 4, 24))
         assert len(chain) == 1
         assert chain[0].option_type == "put"
@@ -302,7 +318,10 @@ class TestDhanOptionChainParsing:
         from income_desk.broker.dhan.market_data import DhanMarketData
 
         class FailingClient:
-            def option_chain(self, **kwargs):
+            def expiry_list(self, under_security_id, under_exchange_segment):
+                return {"status": "success", "data": {"data": ["2026-04-24"], "status": "success"}}
+
+            def option_chain(self, under_security_id, under_exchange_segment, expiry):
                 raise ConnectionError("Dhan API unreachable")
 
         md = DhanMarketData(FailingClient())
@@ -401,41 +420,47 @@ class TestDhanAccountBalance:
 # ---------------------------------------------------------------------------
 
 class TestDhanMetrics:
+    def _make_metrics_client(self, oc_dict: dict, last_price: float = 25950.0) -> object:
+        """Create mock client for metrics tests using new API format."""
+        class MockClient:
+            def expiry_list(self, under_security_id, under_exchange_segment):
+                return {"status": "success", "data": {"data": ["2026-04-24"], "status": "success"}}
+
+            def option_chain(self, under_security_id, under_exchange_segment, expiry):
+                return {"status": "success", "data": {"data": {"last_price": last_price, "oc": oc_dict}, "status": "success"}}
+
+            def ticker_data(self, securities):
+                return {"status": "success", "data": {"data": {"IDX_I": {"13": {"last_price": last_price}}}, "status": "success"}}
+        return MockClient()
+
     def test_metrics_iv_from_real_data(self) -> None:
         """ATM IV is correctly extracted from option chain and converted from %."""
         from income_desk.broker.dhan.metrics import DhanMetrics
 
-        class MockClient:
-            def option_chain(self, under_scrip_code, under_exchange_segment):
-                return {"data": [
-                    {
-                        "strikePrice": 25900,
-                        "expiryDate": "2026-04-24",
-                        "underlyingPrice": 25950.0,
-                        "ce": {"iv": 18.5, "oi": 100000, "volume": 5000,
-                               "bid_price": 200, "ask_price": 210, "ltp": 205,
-                               "delta": 0.52, "gamma": 0.01, "theta": -5, "vega": 10},
-                        "pe": {"iv": 19.0, "oi": 90000, "volume": 4500,
-                               "bid_price": 190, "ask_price": 200, "ltp": 195,
-                               "delta": -0.48, "gamma": 0.01, "theta": -5.5, "vega": 10.5},
-                    },
-                    {
-                        "strikePrice": 26000,
-                        "expiryDate": "2026-04-24",
-                        "ce": {"iv": 17.0, "oi": 80000, "volume": 4000,
-                               "bid_price": 150, "ask_price": 160, "ltp": 155,
-                               "delta": 0.48, "gamma": 0.01, "theta": -4.5, "vega": 9},
-                        "pe": {"iv": 20.0, "oi": 120000, "volume": 6000,
-                               "bid_price": 250, "ask_price": 260, "ltp": 255,
-                               "delta": -0.52, "gamma": 0.01, "theta": -6, "vega": 11},
-                    },
-                ]}
+        oc = {
+            "25900.000000": {
+                "ce": {"implied_volatility": 18.5, "oi": 100000, "volume": 5000,
+                       "top_bid_price": 200, "top_ask_price": 210, "last_price": 205,
+                       "greeks": {"delta": 0.52, "gamma": 0.01, "theta": -5, "vega": 10}},
+                "pe": {"implied_volatility": 19.0, "oi": 90000, "volume": 4500,
+                       "top_bid_price": 190, "top_ask_price": 200, "last_price": 195,
+                       "greeks": {"delta": -0.48, "gamma": 0.01, "theta": -5.5, "vega": 10.5}},
+            },
+            "26000.000000": {
+                "ce": {"implied_volatility": 17.0, "oi": 80000, "volume": 4000,
+                       "top_bid_price": 150, "top_ask_price": 160, "last_price": 155,
+                       "greeks": {"delta": 0.48, "gamma": 0.01, "theta": -4.5, "vega": 9}},
+                "pe": {"implied_volatility": 20.0, "oi": 120000, "volume": 6000,
+                       "top_bid_price": 250, "top_ask_price": 260, "last_price": 255,
+                       "greeks": {"delta": -0.52, "gamma": 0.01, "theta": -6, "vega": 11}},
+            },
+        }
 
-        metrics_provider = DhanMetrics(MockClient())
+        metrics_provider = DhanMetrics(self._make_metrics_client(oc))
         results = metrics_provider.get_metrics(["NIFTY"])
         assert "NIFTY" in results
         m = results["NIFTY"]
-        # ATM IV from nearest strike: (18.5 + 19.0) / 2 / 100 ≈ 0.1875
+        # ATM IV from nearest strike: ~18.5-19.0% → 0.185-0.190
         assert m.iv_30_day is not None
         assert 0.10 < m.iv_30_day < 0.35  # Reasonable range after % → decimal
 
@@ -444,7 +469,7 @@ class TestDhanMetrics:
         from income_desk.broker.dhan.metrics import DhanMetrics
 
         class FailingClient:
-            def option_chain(self, **kwargs):
+            def expiry_list(self, under_security_id, under_exchange_segment):
                 raise ConnectionError("Dhan API down")
 
         metrics_provider = DhanMetrics(FailingClient())
@@ -455,23 +480,18 @@ class TestDhanMetrics:
         """Liquidity rating of 5 assigned for very high OI (> 10M)."""
         from income_desk.broker.dhan.metrics import DhanMetrics
 
-        class HighOIClient:
-            def option_chain(self, **kwargs):
-                # Single strike with huge OI
-                entries = [{
-                    "strikePrice": 26000,
-                    "expiryDate": "2026-04-24",
-                    "underlyingPrice": 26050.0,
-                    "ce": {"iv": 20.0, "oi": 6_000_000, "volume": 100000,
-                           "bid_price": 100, "ask_price": 110, "ltp": 105,
-                           "delta": 0.5, "gamma": 0.01, "theta": -5, "vega": 10},
-                    "pe": {"iv": 21.0, "oi": 5_500_000, "volume": 90000,
-                           "bid_price": 95, "ask_price": 105, "ltp": 100,
-                           "delta": -0.5, "gamma": 0.01, "theta": -5.5, "vega": 10.5},
-                }]
-                return {"data": entries}
+        oc = {
+            "26000.000000": {
+                "ce": {"implied_volatility": 20.0, "oi": 6_000_000, "volume": 100000,
+                       "top_bid_price": 100, "top_ask_price": 110, "last_price": 105,
+                       "greeks": {"delta": 0.5, "gamma": 0.01, "theta": -5, "vega": 10}},
+                "pe": {"implied_volatility": 21.0, "oi": 5_500_000, "volume": 90000,
+                       "top_bid_price": 95, "top_ask_price": 105, "last_price": 100,
+                       "greeks": {"delta": -0.5, "gamma": 0.01, "theta": -5.5, "vega": 10.5}},
+            },
+        }
 
-        metrics_provider = DhanMetrics(HighOIClient())
+        metrics_provider = DhanMetrics(self._make_metrics_client(oc, last_price=26050.0))
         results = metrics_provider.get_metrics(["NIFTY"])
         assert "NIFTY" in results
         # Total OI = 11.5M → liquidity 5

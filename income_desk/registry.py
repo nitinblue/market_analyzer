@@ -164,15 +164,34 @@ class MarketRegistry:
     def strategy_available(
         self, strategy: str, ticker: str, market: str | None = None
     ) -> bool:
-        """Check if a strategy is available for an instrument/market."""
+        """Check if a strategy is available for an instrument/market.
+
+        Beyond the market-level matrix, applies instrument-level overrides:
+        - calendar/diagonal blocked for India equities (monthly-only expiry,
+          insufficient term structure for multi-expiry strategies).
+        """
         try:
             inst = self.get_instrument(ticker, market)
             mkt = inst.market
         except KeyError:
+            inst = None
             mkt = (market or "US").upper()
 
         key = (mkt, strategy.lower())
-        return self._strategy_matrix.get(key, False)
+        available = self._strategy_matrix.get(key, False)
+
+        # India equities have monthly-only options — calendar and diagonal
+        # require weekly expiries for meaningful term structure.
+        if (
+            available
+            and inst is not None
+            and inst.market == "INDIA"
+            and inst.asset_type == "equity"
+            and strategy.lower() in ("calendar", "diagonal")
+        ):
+            return False
+
+        return available
 
     def to_yfinance(self, ticker: str, market: str | None = None) -> str:
         """Map human ticker to yfinance symbol."""
@@ -373,7 +392,9 @@ def _build_instruments() -> dict[str, InstrumentInfo]:
         ("BHARTIARTL", 475, 10, "telecom", ["india_fno", "nifty50"], "low"),
         ("ITC", 1600, 5, "consumer_staples", ["india_fno", "nifty50", "directional"], "medium"),
         ("BAJFINANCE", 125, 50, "finance", ["india_fno", "nifty50"], "medium"),
-        ("TATAMOTORS", 1125, 5, "auto", ["india_fno", "nifty50", "directional"], "medium"),
+        # TATAMOTORS: yfinance symbol TATAMOTORS.NS returns 404 as of 2026-03.
+        # Commented out until correct yfinance alias is confirmed post-DVR merger.
+        # ("TATAMOTORS", 1125, 5, "auto", ["india_fno", "nifty50", "directional"], "medium"),
         # Mid-tier liquidity
         ("HINDUNILVR", 300, 10, "consumer_staples", ["india_fno", "nifty50"], "low"),
         ("LT", 150, 25, "industrial", ["india_fno", "nifty50"], "low"),
@@ -390,13 +411,16 @@ def _build_instruments() -> dict[str, InstrumentInfo]:
         ("ADANIPORTS", 1000, 5, "infrastructure", ["nifty50"], "low"),
         ("APOLLOHOSP", 125, 50, "healthcare", ["nifty50"], "low"),
         ("BAJAJ_AUTO", 250, 25, "auto", ["nifty50"], "low"),
+        ("BAJAJFINSV", 500, 10, "finance", ["nifty50"], "low"),
         ("BPCL", 900, 5, "energy", ["nifty50"], "low"),
+        ("BRITANNIA", 200, 25, "consumer_staples", ["nifty50"], "low"),
         ("CIPLA", 650, 10, "pharma", ["nifty50"], "low"),
         ("COALINDIA", 2100, 2, "mining", ["nifty50"], "low"),
         ("DIVISLAB", 150, 25, "pharma", ["nifty50"], "low"),
         ("DRREDDY", 125, 50, "pharma", ["nifty50"], "low"),
         ("EICHERMOT", 175, 25, "auto", ["nifty50"], "low"),
         ("GRASIM", 350, 10, "materials", ["nifty50"], "low"),
+        ("HCLTECH", 350, 10, "tech", ["nifty50"], "low"),
         ("HEROMOTOCO", 150, 25, "auto", ["nifty50"], "low"),
         ("HINDALCO", 1300, 5, "metals", ["nifty50", "directional"], "low"),
         ("INDUSINDBK", 500, 10, "finance", ["nifty50", "directional"], "low"),
@@ -411,7 +435,16 @@ def _build_instruments() -> dict[str, InstrumentInfo]:
         ("TECHM", 600, 10, "tech", ["nifty50"], "low"),
         ("ULTRACEMCO", 100, 50, "materials", ["nifty50"], "low"),
     ]
+
+    # yfinance symbol overrides for India stocks where ticker != yfinance alias
+    _india_yf_overrides: dict[str, str] = {
+        "M_M": "M&M.NS",
+        "BAJAJ_AUTO": "BAJAJ-AUTO.NS",
+        "BAJAJFINSV": "BAJAJFINSV.NS",
+    }
+
     for ticker, lot, strike_int, sector, groups, liq in india_stocks:
+        yf_sym = _india_yf_overrides.get(ticker, f"{ticker}.NS")
         instruments[ticker] = InstrumentInfo(
             ticker=ticker,
             market="INDIA",
@@ -425,7 +458,7 @@ def _build_instruments() -> dict[str, InstrumentInfo]:
             has_leaps=False,
             max_dte=90,
             asset_type="equity",
-            yfinance_symbol=f"{ticker}.NS",
+            yfinance_symbol=yf_sym,
             sector=sector,
             scan_groups=groups,
             options_liquidity=liq,

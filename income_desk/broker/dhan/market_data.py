@@ -30,20 +30,115 @@ logger = logging.getLogger(__name__)
 
 # DhanHQ under_scrip_code for common underlyings (from Dhan's security master)
 _SCRIP_CODES: dict[str, int] = {
+    # Indices
     "NIFTY": 13,
     "BANKNIFTY": 25,
     "FINNIFTY": 27,
     "SENSEX": 51,
     "MIDCPNIFTY": 442,
+    # F&O Stocks — NSE equity security IDs (from Dhan security master)
+    "RELIANCE": 2885,
+    "TCS": 11536,
+    "INFY": 1594,
+    "HDFCBANK": 1333,
+    "ICICIBANK": 4963,
+    "SBIN": 3045,
+    "WIPRO": 3787,
+    "BAJFINANCE": 317,
+    "AXISBANK": 5900,
+    "KOTAKBANK": 1922,
+    "LT": 11483,
+    "HCLTECH": 7229,
+    "TATAMOTORS": 3456,
+    "MARUTI": 10999,
+    "SUNPHARMA": 3351,
+    "ITC": 1660,
+    "HINDUNILVR": 1394,
+    "BHARTIARTL": 10604,
+    "TITAN": 3506,
+    "ASIANPAINT": 236,
+    "ULTRACEMCO": 11532,
+    "POWERGRID": 14977,
+    "NTPC": 11630,
+    "ONGC": 2475,
+    "COALINDIA": 20374,
+    "JSWSTEEL": 11723,
+    "TATASTEEL": 3499,
+    "M_M": 2031,
+    "INDUSINDBK": 5258,
+    "DIVISLAB": 10940,
+    "DRREDDY": 881,
+    "CIPLA": 694,
+    "APOLLOHOSP": 157,
+    "TECHM": 13538,
+    "BAJAJFINSV": 16669,
+    "EICHERMOT": 910,
+    "NESTLEIND": 17963,
+    "HEROMOTOCO": 1348,
+    "BPCL": 526,
+    "GRASIM": 1232,
+    "BRITANNIA": 547,
+    "TATACONSUM": 3432,
+    "HDFCLIFE": 467,
+    "HINDALCO": 1361,
+    "ADANIPORTS": 15083,
 }
 
-# NSE lot sizes (contracts per lot) for index options
+# NSE lot sizes (contracts per lot) for index + stock options
+# Stock lot sizes sourced from registry.py — must stay in sync.
 _LOT_SIZES: dict[str, int] = {
+    # Indices
     "NIFTY": 25,
     "BANKNIFTY": 15,
     "FINNIFTY": 25,
     "SENSEX": 10,
     "MIDCPNIFTY": 75,
+    # F&O Stocks
+    "RELIANCE": 250,
+    "TCS": 150,
+    "INFY": 300,
+    "HDFCBANK": 550,
+    "ICICIBANK": 700,
+    "SBIN": 1500,
+    "WIPRO": 1500,
+    "BAJFINANCE": 125,
+    "AXISBANK": 600,
+    "KOTAKBANK": 400,
+    "LT": 150,
+    "HCLTECH": 350,
+    "TATAMOTORS": 1125,
+    "MARUTI": 100,
+    "SUNPHARMA": 350,
+    "ITC": 1600,
+    "HINDUNILVR": 300,
+    "BHARTIARTL": 475,
+    "TITAN": 175,
+    "ASIANPAINT": 300,
+    "ULTRACEMCO": 100,
+    "POWERGRID": 2700,
+    "NTPC": 2800,
+    "ONGC": 3850,
+    "COALINDIA": 2100,
+    "JSWSTEEL": 675,
+    "TATASTEEL": 1100,
+    "M_M": 350,
+    "INDUSINDBK": 500,
+    "DIVISLAB": 150,
+    "DRREDDY": 125,
+    "CIPLA": 650,
+    "APOLLOHOSP": 125,
+    "TECHM": 600,
+    "BAJAJFINSV": 500,
+    "EICHERMOT": 175,
+    "NESTLEIND": 50,
+    "HEROMOTOCO": 150,
+    "BPCL": 900,
+    "GRASIM": 350,
+    "BRITANNIA": 200,
+    "TATACONSUM": 550,
+    "HDFCLIFE": 1100,
+    "HINDALCO": 1300,
+    "ADANIPORTS": 1000,
 }
 
 # Dhan exchange segment constants
@@ -195,47 +290,80 @@ class DhanMarketData(MarketDataProvider):
         if scrip_code is None:
             return []
 
+        # Dhan requires expiry — fetch expiry list first if not provided
+        target_expiry_str: str | None = None
+        if expiration:
+            target_expiry_str = expiration.strftime("%Y-%m-%d")
+        else:
+            try:
+                exp_response = self._client.expiry_list(
+                    under_security_id=scrip_code,  # int, not str
+                    under_exchange_segment=_SEGMENT_NSE_FNO,
+                )
+                # Response: {data: {data: ["2026-03-27", ...], status: "success"}}
+                exp_outer = exp_response.get("data", {}) if isinstance(exp_response, dict) else {}
+                exp_list = exp_outer.get("data", exp_outer) if isinstance(exp_outer, dict) else exp_outer
+                if isinstance(exp_list, list) and exp_list:
+                    today = date.today()
+                    future_exp = sorted(e for e in exp_list if e >= today.strftime("%Y-%m-%d"))
+                    if future_exp:
+                        target_expiry_str = future_exp[0]
+                    else:
+                        target_expiry_str = exp_list[-1]
+            except Exception as e:
+                logger.warning("Dhan expiry_list failed for %s: %s", ticker, e)
+                return []
+
+        if not target_expiry_str:
+            logger.warning("No expiry available for %s", ticker)
+            return []
+
+        expiration = _parse_expiry(target_expiry_str) or expiration
+
         try:
             response = self._client.option_chain(
-                under_scrip_code=scrip_code,
+                under_security_id=scrip_code,  # int, not str
                 under_exchange_segment=_SEGMENT_NSE_FNO,
+                expiry=target_expiry_str,
             )
         except Exception as e:
             logger.warning("Dhan option_chain failed for %s: %s", ticker, e)
             return []
 
-        if not response:
+        if not response or response.get("status") != "success":
+            logger.warning("Dhan option_chain returned non-success for %s", ticker)
             return []
 
-        # Dhan may return the data under "data" key or at top level
-        entries = response.get("data", response) if isinstance(response, dict) else response
-        if not isinstance(entries, list):
+        # Response structure: {data: {data: {last_price: X, oc: {strike: {ce: {}, pe: {}}}}}}
+        outer = response.get("data", {})
+        inner = outer.get("data", outer) if isinstance(outer, dict) else {}
+        if not isinstance(inner, dict):
             logger.warning("Unexpected Dhan option_chain response structure for %s", ticker)
+            return []
+
+        # Extract underlying price — cross-validate chain vs ticker_data for indices
+        chain_ltp = _safe_float(inner.get("last_price"))
+        ticker_ltp = self.get_underlying_price(ticker) or 0
+        if chain_ltp > 0 and ticker_ltp > 0:
+            ratio = max(chain_ltp, ticker_ltp) / min(chain_ltp, ticker_ltp)
+            if ratio > 1.5:
+                logger.warning(
+                    "%s option chain last_price=%.2f vs ticker_data=%.2f (%.1fx divergence)",
+                    ticker, chain_ltp, ticker_ltp, ratio,
+                )
+        oc_data = inner.get("oc", {})
+        if not isinstance(oc_data, dict):
+            logger.warning("No 'oc' dict in Dhan option_chain for %s", ticker)
             return []
 
         lot_size = _LOT_SIZES.get(ticker.upper(), 1)
         ticker_upper = ticker.upper()
 
-        # Collect all expirations if filtering to nearest
-        all_expiries: list[date] = []
-        if expiration is None:
-            today = date.today()
-            for entry in entries:
-                exp_date = _parse_expiry(entry.get("expiryDate") or entry.get("expiry_date"))
-                if exp_date and exp_date >= today:
-                    all_expiries.append(exp_date)
-            if all_expiries:
-                expiration = min(all_expiries)
-
         results: list[OptionQuote] = []
 
-        for entry in entries:
-            strike = _safe_float(entry.get("strikePrice") or entry.get("strike_price"))
-            exp_date = _parse_expiry(entry.get("expiryDate") or entry.get("expiry_date"))
-
-            if exp_date is None:
-                continue
-            if expiration is not None and exp_date != expiration:
+        for strike_str, entry in oc_data.items():
+            strike = _safe_float(strike_str)
+            if strike <= 0:
                 continue
 
             for side_key, opt_type in (("ce", "call"), ("pe", "put")):
@@ -243,9 +371,9 @@ class DhanMarketData(MarketDataProvider):
                 if not side_data or not isinstance(side_data, dict):
                     continue
 
-                bid = _safe_float(side_data.get("bid_price") or side_data.get("bidPrice"))
-                ask = _safe_float(side_data.get("ask_price") or side_data.get("askPrice"))
-                ltp = _safe_float(side_data.get("ltp") or side_data.get("last_price"))
+                bid = _safe_float(side_data.get("top_bid_price"))
+                ask = _safe_float(side_data.get("top_ask_price"))
+                ltp = _safe_float(side_data.get("last_price"))
 
                 # Mid: prefer bid/ask midpoint, fall back to LTP
                 if bid > 0 and ask > 0:
@@ -255,25 +383,28 @@ class DhanMarketData(MarketDataProvider):
 
                 # Dhan returns IV as percentage (e.g. 25.5 means 25.5%)
                 # MA convention: decimal (0.255)
-                raw_iv = _safe_float(side_data.get("iv") or side_data.get("impliedVolatility"))
+                raw_iv = _safe_float(side_data.get("implied_volatility"))
                 implied_volatility = raw_iv / 100.0 if raw_iv > 0 else None
+
+                # Greeks are nested under "greeks" key
+                greeks = side_data.get("greeks", {})
 
                 results.append(OptionQuote(
                     ticker=ticker_upper,
                     strike=strike,
                     option_type=opt_type,
-                    expiration=exp_date,
+                    expiration=expiration,
                     bid=bid,
                     ask=ask,
                     mid=round(mid, 2),
                     last=ltp if ltp > 0 else None,
                     implied_volatility=implied_volatility,
-                    delta=_safe_float(side_data.get("delta")) or None,
-                    gamma=_safe_float(side_data.get("gamma")) or None,
-                    theta=_safe_float(side_data.get("theta")) or None,
-                    vega=_safe_float(side_data.get("vega")) or None,
+                    delta=_safe_float(greeks.get("delta")) or None,
+                    gamma=_safe_float(greeks.get("gamma")) or None,
+                    theta=_safe_float(greeks.get("theta")) or None,
+                    vega=_safe_float(greeks.get("vega")) or None,
                     volume=_safe_int(side_data.get("volume")),
-                    open_interest=_safe_int(side_data.get("oi") or side_data.get("openInterest")),
+                    open_interest=_safe_int(side_data.get("oi")),
                     lot_size=lot_size,
                 ))
 
@@ -341,35 +472,40 @@ class DhanMarketData(MarketDataProvider):
         return {}
 
     def get_underlying_price(self, ticker: str) -> float | None:
-        """Get current price of underlying (index or equity) via market_quote.
+        """Get current price of underlying (index or equity) via ticker_data.
 
-        Uses NSE_FNO segment for index futures as proxy, falls back to IDX_I.
+        Uses NSE_EQ for equities, IDX_I for indices.
+        Dhan ticker_data response: {data: {data: {SEGMENT: {scrip_id: {last_price: X}}}}}
         """
         scrip_code = self._resolve_scrip_code(ticker)
         if scrip_code is None:
             return None
 
-        # Try NSE_FNO first (works for index options underlyings)
-        for segment in (_SEGMENT_NSE_FNO, _INDEX_SEGMENT, _SEGMENT_NSE_EQ):
+        # Indices use IDX_I segment, equities use NSE_EQ
+        _INDEX_TICKERS = {"NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX", "MIDCPNIFTY"}
+        is_index = ticker.upper() in _INDEX_TICKERS
+        segments = [_INDEX_SEGMENT, _SEGMENT_NSE_EQ] if is_index else [_SEGMENT_NSE_EQ, _INDEX_SEGMENT]
+
+        for segment in segments:
             try:
-                response = self._client.market_quote(
-                    security_id=str(scrip_code),
-                    exchange_segment=segment,
+                response = self._client.ticker_data(
+                    {segment: [scrip_code]}
                 )
-                if not response:
+                if not isinstance(response, dict) or response.get("status") != "success":
                     continue
-                data = response.get("data", response) if isinstance(response, dict) else None
-                if data:
-                    ltp = _safe_float(
-                        data.get("ltp")
-                        or data.get("last_price")
-                        or data.get("lastTradedPrice")
-                    )
-                    if ltp > 0:
-                        return ltp
+                # Response: {data: {data: {NSE_EQ: {1333: {last_price: 755.85}}}}}
+                outer = response.get("data", {})
+                inner = outer.get("data", outer) if isinstance(outer, dict) else {}
+                if isinstance(inner, dict):
+                    seg_data = inner.get(segment, {})
+                    if isinstance(seg_data, dict):
+                        item = seg_data.get(str(scrip_code), seg_data.get(scrip_code, {}))
+                        if isinstance(item, dict):
+                            ltp = _safe_float(item.get("last_price"))
+                            if ltp > 0:
+                                return ltp
             except Exception as e:
-                logger.debug("Dhan market_quote failed for %s on %s: %s", ticker, segment, e)
-                continue
+                logger.debug("Dhan ticker_data failed for %s on %s: %s", ticker, segment, e)
 
         return None
 
@@ -387,10 +523,15 @@ class DhanMarketData(MarketDataProvider):
         if scrip_code is None:
             return pd.DataFrame()
 
+        today = date.today()
         try:
-            response = self._client.intraday_daily_minute_charts(
+            # Use intraday_minute_data with today's date range
+            response = self._client.intraday_minute_data(
                 security_id=str(scrip_code),
                 exchange_segment=_SEGMENT_NSE_EQ,
+                instrument_type="EQUITY",
+                from_date=today.strftime("%Y-%m-%d"),
+                to_date=today.strftime("%Y-%m-%d"),
             )
         except AttributeError:
             # Older SDK versions may not have this method

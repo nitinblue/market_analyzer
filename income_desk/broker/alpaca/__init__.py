@@ -34,7 +34,9 @@ def connect_alpaca(
     api_key: str | None = None,
     api_secret: str | None = None,
     paper: bool = True,
-) -> tuple[AlpacaMarketData | None, AlpacaMetrics | None, AlpacaAccount | None, None]:
+    *,
+    exclude_account: bool = False,
+) -> tuple:
     """Connect to Alpaca. Works with free tier (no funding needed).
 
     Credentials resolved in order:
@@ -84,12 +86,13 @@ def connect_alpaca(
     stock_data = StockHistoricalDataClient(key, secret)
     option_data = OptionHistoricalDataClient(key, secret)
 
-    return (
-        AlpacaMarketData(stock_data, option_data),
-        AlpacaMetrics(stock_data),
-        AlpacaAccount(trading),
-        None,  # No watchlist provider for Alpaca
-    )
+    md = AlpacaMarketData(stock_data, option_data)
+    mm = AlpacaMetrics(stock_data)
+
+    if exclude_account:
+        return (md, mm, None)  # 3-tuple: data only (no watchlist for Alpaca)
+
+    return (md, mm, AlpacaAccount(trading), None)  # 4-tuple: backwards compat
 
 
 def _resolve_credentials(

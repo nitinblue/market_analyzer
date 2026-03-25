@@ -274,8 +274,17 @@ def assess_mean_reversion(
         verdict = Verdict.NO_GO
 
     # --- Trade spec ---
+    # If direction is neutral but verdict is GO/CAUTION, infer direction
+    # from the nearest oversold/overbought signal for spec construction.
+    spec_direction = direction
+    if spec_direction == "neutral" and verdict != Verdict.NO_GO:
+        if rsi <= 50 or bb_pct_b <= 0.5:
+            spec_direction = "bullish"
+        else:
+            spec_direction = "bearish"
+
     trade_spec = None
-    if verdict != Verdict.NO_GO and direction in ("bullish", "bearish"):
+    if verdict != Verdict.NO_GO and spec_direction in ("bullish", "bearish"):
         from income_desk.opportunity.option_plays._trade_spec_helpers import (
             build_equity_trade_spec,
             build_setup_trade_spec,
@@ -287,13 +296,13 @@ def assess_mean_reversion(
             inst = MarketRegistry().get_instrument(ticker)
             trade_spec = build_equity_trade_spec(
                 ticker, technicals.current_price, technicals.atr,
-                direction, "mean_reversion", int(regime.regime),
+                spec_direction, "mean_reversion", int(regime.regime),
                 lot_size=inst.lot_size, currency="INR",
             )
         else:
             trade_spec = build_setup_trade_spec(
                 ticker, technicals.current_price, technicals.atr,
-                direction, int(regime.regime), vol_surface,
+                spec_direction, int(regime.regime), vol_surface,
             )
 
     summary_parts = [f"{verdict.upper()}: {ticker}"]

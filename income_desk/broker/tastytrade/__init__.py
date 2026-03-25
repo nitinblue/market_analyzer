@@ -29,7 +29,9 @@ logger = logging.getLogger(__name__)
 def connect_tastytrade(
     config_path: str = "tastytrade_broker.yaml",
     is_paper: bool = False,
-) -> tuple[TastyTradeMarketData, TastyTradeMetrics, TastyTradeAccount, TastyTradeWatchlist]:
+    *,
+    exclude_account: bool = False,
+) -> tuple:
     """Convenience: authenticate and return MarketData + Metrics + Account + Watchlist.
 
     Loads credentials from YAML + env vars.  For standalone / local usage.
@@ -47,18 +49,22 @@ def connect_tastytrade(
     if not session.connect():
         raise ConnectionError("Failed to authenticate with TastyTrade")
 
-    return (
-        TastyTradeMarketData(session),
-        TastyTradeMetrics(session),
-        TastyTradeAccount(session),
-        TastyTradeWatchlist(session),
-    )
+    md = TastyTradeMarketData(session)
+    mm = TastyTradeMetrics(session)
+    wl = TastyTradeWatchlist(session)
+
+    if exclude_account:
+        return (md, mm, wl)  # 3-tuple: data only
+
+    return (md, mm, TastyTradeAccount(session), wl)  # 4-tuple: backwards compat
 
 
 def connect_from_sessions(
     sdk_session,
     data_session=None,
-) -> tuple[TastyTradeMarketData, TastyTradeMetrics, TastyTradeAccount, TastyTradeWatchlist]:
+    *,
+    exclude_account: bool = False,
+) -> tuple:
     """Create providers from pre-authenticated tastytrade SDK sessions.
 
     SaaS pattern: the caller (eTrading) owns authentication and passes
@@ -76,9 +82,12 @@ def connect_from_sessions(
     from income_desk.broker.tastytrade.watchlist import TastyTradeWatchlist
 
     wrapper = ExternalBrokerSession(sdk_session, data_session or sdk_session)
-    return (
-        TastyTradeMarketData(wrapper),
-        TastyTradeMetrics(wrapper),
-        TastyTradeAccount(wrapper),
-        TastyTradeWatchlist(wrapper),
-    )
+
+    md = TastyTradeMarketData(wrapper)
+    mm = TastyTradeMetrics(wrapper)
+    wl = TastyTradeWatchlist(wrapper)
+
+    if exclude_account:
+        return (md, mm, wl)  # 3-tuple: data only
+
+    return (md, mm, TastyTradeAccount(wrapper), wl)  # 4-tuple: backwards compat

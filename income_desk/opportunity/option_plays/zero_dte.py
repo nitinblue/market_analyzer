@@ -58,7 +58,7 @@ def assess_zero_dte(
 
     # --- Hard stops ---
     hard_stops = _check_hard_stops(
-        regime, technicals, macro, days_to_earnings, today, cfg,
+        regime, technicals, macro, days_to_earnings, today, cfg, ticker=ticker,
     )
 
     # --- Scoring signals ---
@@ -143,8 +143,22 @@ def _check_hard_stops(
     days_to_earnings: int | None,
     today: date,
     cfg,
+    ticker: str | None = None,
 ) -> list[HardStop]:
     stops: list[HardStop] = []
+
+    # 0DTE availability — India stocks have no weekly expiry
+    if ticker is not None:
+        try:
+            from income_desk.registry import MarketRegistry
+            _inst = MarketRegistry().get_instrument(ticker)
+            if not _inst.has_0dte:
+                stops.append(HardStop(
+                    name="zero_dte_not_available",
+                    description=f"0DTE options not available for {ticker} (no weekly expiry)",
+                ))
+        except (KeyError, ImportError):
+            pass  # Unknown ticker — proceed with normal assessment
 
     # Earnings blackout
     if days_to_earnings is not None and days_to_earnings <= cfg.earnings_blackout_days:
@@ -664,6 +678,9 @@ def _build_trade_spec(
         LegAction, LegSpec, OrderSide, StructureType, TradeSpec,
     )
     from income_desk.opportunity.option_plays._trade_spec_helpers import (
+        _entry_window_for_market,
+        _market_close_label,
+        _populate_market_fields,
         build_credit_spread_legs,
         build_debit_spread_legs,
         build_inverse_iron_condor_legs,
@@ -673,6 +690,12 @@ def _build_trade_spec(
         find_best_expiration,
         snap_strike,
     )
+
+    # Market-aware fields: currency, lot_size, settlement, exercise_style, timezone
+    mkt = _populate_market_fields(ticker)
+    ew_start, ew_end, ew_tz = _entry_window_for_market(ticker, "zero_dte")
+    close_label = _market_close_label(ticker)
+    currency_sym = "₹" if mkt.get("currency") == "INR" else "$"
 
     price = technicals.current_price
     atr = technicals.atr
@@ -717,20 +740,21 @@ def _build_trade_spec(
                 ticker=ticker, legs=legs, underlying_price=price,
                 target_dte=dte, target_expiration=exp_date,
                 wing_width_points=wing_width,
-                max_risk_per_spread=f"Net debit (wing width ${wing_width * 100:.0f} minus debit)",
+                max_risk_per_spread=f"Net debit (wing width {currency_sym}{wing_width * mkt.get('lot_size', 100):.0f} minus debit)",
                 spec_rationale=rationale,
                 structure_type=StructureType.IRON_MAN,
                 order_side=OrderSide.DEBIT,
                 profit_target_pct=1.0,
                 stop_loss_pct=1.0,
                 exit_dte=0,
-                max_profit_desc=f"Wing width (${wing_width:.0f}) minus debit paid",
+                max_profit_desc=f"Wing width ({currency_sym}{wing_width:.0f}) minus debit paid",
                 max_loss_desc="Net debit paid",
-                exit_notes=["0DTE: close by 3PM ET if no breakout",
+                exit_notes=[f"0DTE: close by {close_label} if no breakout",
                             "Profit when underlying moves past long strikes",
                             "Max loss = net debit if price stays within range"],
-                entry_window_start=time(9, 45),
-                entry_window_end=time(14, 0),
+                entry_window_start=ew_start,
+                entry_window_end=ew_end,
+                **mkt,
             )
 
         elif zero_dte_strategy == ZeroDTEStrategy.IRON_CONDOR:
@@ -784,12 +808,13 @@ def _build_trade_spec(
                     stop_loss_pct=2.0,
                     exit_dte=0,
                     max_profit_desc="Credit received",
-                    max_loss_desc=f"Wing width (${wing_width_pts:.0f}) minus credit",
-                    exit_notes=["0DTE: close by 3PM ET or at 50% profit",
+                    max_loss_desc=f"Wing width ({currency_sym}{wing_width_pts:.0f}) minus credit",
+                    exit_notes=[f"0DTE: close by {close_label} or at 50% profit",
                                 "Close if price breaks ORB range on either side",
                                 "Short strikes at ORB edges — range break = stop"],
-                    entry_window_start=time(9, 45),
-                    entry_window_end=time(14, 0),
+                    entry_window_start=ew_start,
+                    entry_window_end=ew_end,
+                    **mkt,
                 )
             else:
                 legs, wing_width = build_iron_condor_legs(
@@ -806,11 +831,12 @@ def _build_trade_spec(
                     stop_loss_pct=2.0,
                     exit_dte=0,
                     max_profit_desc="Credit received",
-                    max_loss_desc=f"Wing width (${wing_width:.0f}) minus credit",
-                    exit_notes=["0DTE: close by 3PM ET or at 50% profit",
+                    max_loss_desc=f"Wing width ({currency_sym}{wing_width:.0f}) minus credit",
+                    exit_notes=[f"0DTE: close by {close_label} or at 50% profit",
                                 "Close if short strike tested on either side"],
-                    entry_window_start=time(9, 45),
-                    entry_window_end=time(14, 0),
+                    entry_window_start=ew_start,
+                    entry_window_end=ew_end,
+                    **mkt,
                 )
 
         elif zero_dte_strategy == ZeroDTEStrategy.CREDIT_SPREAD:
@@ -848,11 +874,12 @@ def _build_trade_spec(
                 stop_loss_pct=2.0,
                 exit_dte=0,
                 max_profit_desc="Credit received",
-                max_loss_desc=f"Wing width (${wing_pts:.0f}) minus credit",
-                exit_notes=["0DTE: close by 3PM ET or at 50% profit",
+                max_loss_desc=f"Wing width ({currency_sym}{wing_pts:.0f}) minus credit",
+                exit_notes=[f"0DTE: close by {close_label} or at 50% profit",
                             "Close if short strike tested"],
-                entry_window_start=time(9, 45),
-                entry_window_end=time(14, 0),
+                entry_window_start=ew_start,
+                entry_window_end=ew_end,
+                **mkt,
             )
 
         elif zero_dte_strategy == ZeroDTEStrategy.STRADDLE_STRANGLE:
@@ -880,11 +907,12 @@ def _build_trade_spec(
                 exit_dte=0,
                 max_profit_desc="Credit received",
                 max_loss_desc="UNDEFINED — loss beyond short strikes is unlimited without wings",
-                exit_notes=["0DTE: close by 3PM ET or at 50% profit",
+                exit_notes=[f"0DTE: close by {close_label} or at 50% profit",
                             "Close immediately if short strike tested",
                             "UNDEFINED RISK: consider adding wings for defined risk"],
-                entry_window_start=time(9, 45),
-                entry_window_end=time(14, 0),
+                entry_window_start=ew_start,
+                entry_window_end=ew_end,
+                **mkt,
             )
 
         elif zero_dte_strategy == ZeroDTEStrategy.DIRECTIONAL_SPREAD:
@@ -910,11 +938,12 @@ def _build_trade_spec(
                 exit_dte=0,
                 max_profit_desc="Spread width minus debit paid",
                 max_loss_desc="Net debit paid",
-                exit_notes=["0DTE: close by 3PM ET",
+                exit_notes=[f"0DTE: close by {close_label}",
                             "Target 50% of max profit or ORB extension levels",
                             "Close at 50% loss of debit paid"],
-                entry_window_start=time(9, 45),
-                entry_window_end=time(14, 0),
+                entry_window_start=ew_start,
+                entry_window_end=ew_end,
+                **mkt,
             )
     except Exception:
         return None
