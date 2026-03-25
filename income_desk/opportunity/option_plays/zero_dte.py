@@ -69,8 +69,14 @@ def assess_zero_dte(
     raw_confidence = sum(s.weight for s in signals if s.favorable)
     confidence = min(1.0, raw_confidence * regime_mult)
 
+    # Non-blocking hard stops apply a confidence penalty instead of blocking
+    for hs in hard_stops:
+        if not hs.blocking:
+            confidence = max(0.0, confidence - 0.10)
+
     # --- Verdict ---
-    if hard_stops:
+    blocking_stops = [s for s in hard_stops if s.blocking]
+    if blocking_stops:
         verdict = Verdict.NO_GO
     elif confidence >= cfg.go_threshold:
         verdict = Verdict.GO
@@ -199,6 +205,26 @@ def _check_hard_stops(
                 f"— explosive moves, short-gamma 0DTE is too dangerous."
             ),
         ))
+
+    # Physical settlement + American exercise — assignment risk if ITM at close
+    # Non-blocking: penalizes confidence rather than vetoing the trade.
+    if ticker is not None:
+        try:
+            from income_desk.registry import MarketRegistry
+            _reg = MarketRegistry()
+            inst = _reg.get_instrument(ticker)
+            if inst and inst.exercise_style == "american" and inst.settlement == "physical":
+                stops.append(HardStop(
+                    name="physical_settlement_0dte",
+                    blocking=False,
+                    description=(
+                        f"0DTE on {ticker} has physical settlement with American exercise "
+                        f"— assignment risk if ITM at close. "
+                        f"Consider cash-settled alternative (e.g., SPX instead of SPY)."
+                    ),
+                ))
+        except (KeyError, ImportError):
+            pass
 
     return stops
 

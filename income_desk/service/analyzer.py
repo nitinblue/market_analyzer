@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from income_desk.models.regime import RegimeConfig
 from income_desk.service.fundamental import FundamentalService
@@ -161,3 +161,82 @@ class MarketAnalyzer:
             metrics_provider=market_metrics,
         )
         self.plan = TradingPlanService(analyzer=self)
+
+
+def create_user_analyzer(
+    broker: str,
+    session: Any,
+    data_service: DataService | None = None,
+) -> MarketAnalyzer:
+    """Create a MarketAnalyzer with per-user broker data providers.
+
+    SaaS factory: eTrading authenticates the user, gets a broker session,
+    passes it here. ID routes to the right connect_*_from_session() and
+    returns a fully configured MarketAnalyzer.
+
+    Args:
+        broker: "tastytrade", "dhan", "zerodha", "schwab", "alpaca", "ibkr"
+        session: Pre-authenticated broker SDK session
+        data_service: Shared DataService (yfinance). Created if not passed.
+
+    Returns:
+        MarketAnalyzer with user's broker providers + shared DataService
+
+    Raises:
+        ValueError: If broker name is not recognised.
+        NotImplementedError: If broker has no ``_from_session`` connector yet.
+    """
+    _SUPPORTED: dict[str, str] = {
+        "tastytrade": "tastytrade",
+        "dhan": "dhan",
+        "zerodha": "zerodha",
+    }
+    _PLANNED: set[str] = {"schwab", "alpaca", "ibkr"}
+
+    name = broker.lower().strip()
+
+    if name in _PLANNED:
+        raise NotImplementedError(
+            f"Broker '{broker}' does not have a connect_from_session() "
+            f"connector yet. Contributions welcome — add it under "
+            f"income_desk/broker/{name}/ following the tastytrade pattern."
+        )
+
+    if name not in _SUPPORTED:
+        raise ValueError(
+            f"Unknown broker '{broker}'. "
+            f"Supported: {sorted(set(_SUPPORTED) | _PLANNED)}"
+        )
+
+    # --- Route to the correct connector ---
+    if name == "tastytrade":
+        from income_desk.broker.tastytrade import connect_from_sessions
+
+        market_data, metrics, watchlist = connect_from_sessions(
+            session, exclude_account=True,
+        )
+    elif name == "dhan":
+        from income_desk.broker.dhan import connect_dhan_from_session
+
+        market_data, metrics, watchlist = connect_dhan_from_session(
+            session, exclude_account=True,
+        )
+    elif name == "zerodha":
+        from income_desk.broker.zerodha import connect_zerodha_from_session
+
+        market_data, metrics, watchlist = connect_zerodha_from_session(
+            session, exclude_account=True,
+        )
+
+    # --- DataService: reuse shared or create new ---
+    if data_service is None:
+        from income_desk.data.service import DataService as _DS
+
+        data_service = _DS()
+
+    return MarketAnalyzer(
+        data_service=data_service,
+        market_data=market_data,
+        market_metrics=metrics,
+        watchlist_provider=watchlist,
+    )

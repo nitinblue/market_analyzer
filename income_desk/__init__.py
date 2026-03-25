@@ -103,7 +103,7 @@ from income_desk.models.exit_plan import (
 )
 
 # Services
-from income_desk.service.analyzer import MarketAnalyzer
+from income_desk.service.analyzer import MarketAnalyzer, create_user_analyzer
 from income_desk.service.regime_service import RegimeService
 from income_desk.service.technical import TechnicalService
 from income_desk.service.phase import PhaseService
@@ -158,6 +158,7 @@ from income_desk.macro_research import (
     IndiaResearchContext,
     MacroRegime,
     MacroResearchReport,
+    MarketIndex,
     RESEARCH_ASSETS,
     RegimeClassification,
     SentimentDashboard,
@@ -356,7 +357,12 @@ from income_desk.models.transparency import (
 from income_desk.features.data_trust import (
     compute_context_quality,
     compute_data_trust,
+    compute_position_trust,
+    compute_ticker_trust,
     compute_trust_report,
+    LegTrustInput,
+    PositionTrust,
+    TickerTrust,
 )
 from income_desk.models.opportunity import (
     BreakoutOpportunity,
@@ -704,12 +710,18 @@ from income_desk.trade_analytics import (
     StructureRisk,
     TradePnL,
     UnderlyingExposure,
+    MarkedPosition,
+    MarkedPositions,
+    PositionInput,
+    PriceResult,
     compute_performance_ledger,
     compute_pnl_attribution,
     compute_portfolio_analytics,
     compute_structure_risk,
     compute_trade_pnl,
     evaluate_circuit_breakers,
+    get_current_prices,
+    mark_positions_to_market,
 )
 
 # Trade analytics (public API for eTrading)
@@ -793,6 +805,17 @@ from income_desk.backoffice import (
 )
 # Backwards compat: eTrading imports DecisionRecord from income_desk directly
 from income_desk.backoffice.ops_reporting import DecisionRecord
+
+# Pipeline validation (regression)
+from income_desk.regression.pipeline_validation import (
+    SanityIssue,
+    HealthCheck,
+    PipelineHealthReport,
+    PipelineTestResult,
+    validate_trade_data_sanity,
+    validate_pipeline_health,
+    validate_full_pipeline,
+)
 
 __all__ = [
     # Config
@@ -1348,4 +1371,12 @@ __all__ = [
     "compute_pnl_rollup",
     # Margin requirements (broker-specific)
     "MarginRequirements",
+    # Pipeline validation (regression)
+    "SanityIssue",
+    "HealthCheck",
+    "PipelineHealthReport",
+    "PipelineTestResult",
+    "validate_trade_data_sanity",
+    "validate_pipeline_health",
+    "validate_full_pipeline",
 ]

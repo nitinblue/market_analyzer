@@ -365,6 +365,112 @@ class TestTrustReport:
         assert "context_gaps" in d
 
 
+from income_desk.features.data_trust import (
+    TickerTrust,
+    compute_ticker_trust,
+    PositionTrust,
+    compute_position_trust,
+    LegTrustInput,
+)
+
+
+class TestTickerTrust:
+    def test_broker_with_all_data_is_high(self):
+        t = compute_ticker_trust(
+            "SPY",
+            has_broker_quote=True,
+            has_greeks=True,
+            has_iv=True,
+            has_option_chain=True,
+        )
+        assert t.trust_level == "HIGH"
+        assert t.data_source == "broker_live"
+        assert t.fit_for == "execution"
+        assert t.has_greeks is True
+        assert t.has_iv is True
+        assert t.has_option_chain is True
+
+    def test_broker_quote_only_is_medium(self):
+        t = compute_ticker_trust("AAPL", has_broker_quote=True)
+        assert t.trust_level == "MEDIUM"
+        assert t.data_source == "broker_live"
+        assert t.fit_for == "research"
+
+    def test_yfinance_only_is_low(self):
+        t = compute_ticker_trust("GLD", has_ohlcv=True)
+        assert t.trust_level == "LOW"
+        assert t.data_source == "yfinance_delayed"
+        assert t.fit_for == "research"
+
+    def test_no_data_is_none(self):
+        t = compute_ticker_trust("XYZ", has_ohlcv=False)
+        assert t.trust_level == "NONE"
+        assert t.data_source == "none"
+        assert t.fit_for == "display_only"
+
+    def test_ticker_stored(self):
+        t = compute_ticker_trust("QQQ")
+        assert t.ticker == "QQQ"
+
+
+class TestPositionTrust:
+    def test_position_all_legs_marked(self):
+        legs = [
+            LegTrustInput(has_current_price=True, has_greeks=True, price_source="broker_live"),
+            LegTrustInput(has_current_price=True, has_greeks=True, price_source="broker_live"),
+        ]
+        p = compute_position_trust(legs, last_marked="2026-03-24T10:00:00")
+        assert p.overall_trust == "HIGH"
+        assert p.pnl_reliable is True
+        assert p.greeks_reliable is True
+        assert p.stale_legs == 0
+        assert p.total_legs == 2
+        assert "All legs marked from broker" in p.message
+
+    def test_position_stale_legs(self):
+        legs = [
+            LegTrustInput(has_current_price=True, has_greeks=True, price_source="broker_live"),
+            LegTrustInput(has_current_price=False, has_greeks=False, price_source="none"),
+            LegTrustInput(has_current_price=True, has_greeks=False, price_source="yfinance_delayed"),
+            LegTrustInput(has_current_price=True, has_greeks=True, price_source="broker_live"),
+        ]
+        p = compute_position_trust(legs)
+        assert p.stale_legs == 1
+        assert p.total_legs == 4
+        assert p.pnl_reliable is False
+        assert p.overall_trust == "NONE"
+        assert "1/4 legs stale" in p.message
+
+    def test_position_mixed_sources_pnl_reliable(self):
+        legs = [
+            LegTrustInput(has_current_price=True, has_greeks=True, price_source="broker_live"),
+            LegTrustInput(has_current_price=True, has_greeks=False, price_source="yfinance_delayed"),
+        ]
+        p = compute_position_trust(legs)
+        assert p.pnl_reliable is True
+        assert p.greeks_reliable is False
+        assert p.overall_trust == "LOW"
+
+    def test_position_no_greeks_anywhere(self):
+        legs = [
+            LegTrustInput(has_current_price=True, has_greeks=False, price_source="yfinance_delayed"),
+            LegTrustInput(has_current_price=True, has_greeks=False, price_source="yfinance_delayed"),
+        ]
+        p = compute_position_trust(legs)
+        assert p.greeks_reliable is False
+        assert "no Greeks" in p.message
+
+    def test_empty_legs(self):
+        p = compute_position_trust([])
+        assert p.overall_trust == "NONE"
+        assert p.total_legs == 0
+
+    def test_last_marked_passthrough(self):
+        legs = [LegTrustInput(has_current_price=True, price_source="broker_live")]
+        p = compute_position_trust(legs, last_marked="2026-03-24T15:00:00")
+        assert p.last_marked == "2026-03-24T15:00:00"
+
+
 from income_desk.models.transparency import CalculationMode
 
 

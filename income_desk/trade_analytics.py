@@ -2,17 +2,25 @@
 
 Pure-computation functions for eTrading to call instead of doing calculations
 inline. Every function is stateless: no I/O, no broker calls, no side effects.
+
+Mark-to-market functions (get_current_prices, mark_positions_to_market) are the
+exception — they accept optional broker/data providers for price fetching.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
+    from income_desk.broker.base import MarketDataProvider
+    from income_desk.data import DataService
     from income_desk.models.feedback import TradeOutcome
     from income_desk.models.opportunity import LegSpec
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -1084,4 +1092,196 @@ def evaluate_circuit_breakers(
         breakers_tripped=tripped,
         can_open_new=can_open_new,
         resume_conditions=resume,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Models — Mark-to-Market
+# ---------------------------------------------------------------------------
+
+
+class PriceResult(BaseModel):
+    """Current price for a single ticker with provenance."""
+
+    ticker: str
+    price: float
+    source: str  # "broker_live", "yfinance_delayed", "unavailable"
+    trust: str  # "HIGH", "LOW", "NONE"
+
+
+class PositionInput(BaseModel):
+    """Input for marking a single position to market."""
+
+    trade_id: str
+    ticker: str
+    entry_price: float
+    quantity: int
+    multiplier: int = 100  # 100 for options, 1 for equity
+    structure_type: str = ""
+
+
+class MarkedPosition(BaseModel):
+    """A single position after mark-to-market."""
+
+    trade_id: str
+    ticker: str
+    entry_price: float
+    current_price: float
+    pnl: float
+    pnl_pct: float
+    data_source: str
+    trust: str
+
+
+class MarkedPositions(BaseModel):
+    """Aggregate result of marking all positions to market."""
+
+    positions: list[MarkedPosition]
+    total_pnl: float
+    tickers_marked: int
+    tickers_failed: int
+    overall_trust: str  # worst trust across all positions
+
+
+# ---------------------------------------------------------------------------
+# Functions — Mark-to-Market
+# ---------------------------------------------------------------------------
+
+_TRUST_ORDER = {"NONE": 0, "LOW": 1, "HIGH": 2}
+
+
+def get_current_prices(
+    tickers: list[str],
+    market_data: MarketDataProvider | None = None,
+    data_service: DataService | None = None,
+) -> dict[str, PriceResult]:
+    """Fetch current prices for a list of tickers.
+
+    Resolution order per ticker:
+    1. ``market_data.get_underlying_price()`` → broker_live / HIGH
+    2. ``data_service.get_ohlcv()`` last Close → yfinance_delayed / LOW
+    3. Fallback → price=0 / unavailable / NONE
+    """
+    results: dict[str, PriceResult] = {}
+
+    for ticker in tickers:
+        # Already resolved (duplicate in list)
+        if ticker in results:
+            continue
+
+        # 1. Try broker live price
+        if market_data is not None:
+            try:
+                price = market_data.get_underlying_price(ticker)
+                if price is not None and price > 0:
+                    results[ticker] = PriceResult(
+                        ticker=ticker,
+                        price=price,
+                        source="broker_live",
+                        trust="HIGH",
+                    )
+                    continue
+            except Exception:
+                logger.debug("Broker price fetch failed for %s", ticker)
+
+        # 2. Try yfinance delayed (last close)
+        if data_service is not None:
+            try:
+                df = data_service.get_ohlcv(ticker)
+                if df is not None and not df.empty:
+                    last_close = float(df["Close"].iloc[-1])
+                    if last_close > 0:
+                        results[ticker] = PriceResult(
+                            ticker=ticker,
+                            price=last_close,
+                            source="yfinance_delayed",
+                            trust="LOW",
+                        )
+                        continue
+            except Exception:
+                logger.debug("yfinance price fetch failed for %s", ticker)
+
+        # 3. Unavailable
+        results[ticker] = PriceResult(
+            ticker=ticker,
+            price=0,
+            source="unavailable",
+            trust="NONE",
+        )
+
+    return results
+
+
+def mark_positions_to_market(
+    positions: list[PositionInput],
+    market_data: MarketDataProvider | None = None,
+    data_service: DataService | None = None,
+) -> MarkedPositions:
+    """Mark a list of positions to market using best-available prices.
+
+    PnL = (current_price - entry_price) * quantity * multiplier.
+    For equity (multiplier=1) this simplifies to (current - entry) * quantity.
+    """
+    if not positions:
+        return MarkedPositions(
+            positions=[],
+            total_pnl=0.0,
+            tickers_marked=0,
+            tickers_failed=0,
+            overall_trust="NONE",
+        )
+
+    # Collect unique tickers and fetch prices once
+    unique_tickers = list({p.ticker for p in positions})
+    prices = get_current_prices(unique_tickers, market_data, data_service)
+
+    marked: list[MarkedPosition] = []
+    total_pnl = 0.0
+    tickers_failed = 0
+    worst_trust = "HIGH"
+
+    failed_tickers: set[str] = set()
+    seen_tickers: set[str] = set()
+
+    for pos in positions:
+        pr = prices[pos.ticker]
+        pnl = (pr.price - pos.entry_price) * pos.quantity * pos.multiplier
+        pnl_pct = (
+            ((pr.price - pos.entry_price) / pos.entry_price * 100.0)
+            if pos.entry_price != 0
+            else 0.0
+        )
+
+        marked.append(
+            MarkedPosition(
+                trade_id=pos.trade_id,
+                ticker=pos.ticker,
+                entry_price=pos.entry_price,
+                current_price=pr.price,
+                pnl=pnl,
+                pnl_pct=pnl_pct,
+                data_source=pr.source,
+                trust=pr.trust,
+            )
+        )
+        total_pnl += pnl
+
+        # Track worst trust
+        if _TRUST_ORDER.get(pr.trust, 0) < _TRUST_ORDER.get(worst_trust, 0):
+            worst_trust = pr.trust
+
+        # Track failed tickers (count unique)
+        if pr.source == "unavailable" and pos.ticker not in failed_tickers:
+            failed_tickers.add(pos.ticker)
+        seen_tickers.add(pos.ticker)
+
+    tickers_marked = len(seen_tickers) - len(failed_tickers)
+    tickers_failed = len(failed_tickers)
+
+    return MarkedPositions(
+        positions=marked,
+        total_pnl=total_pnl,
+        tickers_marked=tickers_marked,
+        tickers_failed=tickers_failed,
+        overall_trust=worst_trust,
     )

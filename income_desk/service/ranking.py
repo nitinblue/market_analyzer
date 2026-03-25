@@ -167,6 +167,31 @@ def _extract_trade_spec(result: OpportunityResult) -> TradeSpec | None:
     return getattr(result, "trade_spec", None)
 
 
+_SETTLEMENT_BONUS = 0.05  # Cash-settled bonus for 0DTE
+_SETTLEMENT_PENALTY = 0.05  # Physical-settled penalty for 0DTE
+
+
+def _apply_settlement_adjustment(ticker: str, composite: float) -> float:
+    """Adjust composite score based on settlement type for 0DTE strategies.
+
+    Cash-settled / European instruments (SPX, NIFTY) get a small bonus;
+    physically-settled / American instruments (SPY, QQQ) get a penalty.
+    This naturally sorts cash-settled higher for 0DTE.
+    """
+    try:
+        from income_desk.registry import MarketRegistry
+        inst = MarketRegistry().get_instrument(ticker)
+    except (KeyError, ImportError):
+        return composite
+
+    if inst.settlement == "cash" and inst.exercise_style == "european":
+        composite = min(1.0, composite + _SETTLEMENT_BONUS)
+    elif inst.settlement == "physical" and inst.exercise_style == "american":
+        composite = max(0.0, composite - _SETTLEMENT_PENALTY)
+
+    return composite
+
+
 class TradeRankingService:
     """Rank trade ideas across tickers and strategy types.
 
@@ -330,6 +355,11 @@ class TradeRankingService:
                         weights=weights,
                     )
                     composite = composite_from_breakdown(breakdown, weights)
+
+                    # Settlement preference: cash-settled/European gets a bonus
+                    # for 0DTE; physically-settled/American gets a penalty.
+                    if strategy == StrategyType.ZERO_DTE:
+                        composite = _apply_settlement_adjustment(ticker, composite)
 
                     entry = RankedEntry(
                         rank=0,  # assigned after sorting

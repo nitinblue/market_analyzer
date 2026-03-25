@@ -46,6 +46,15 @@ from income_desk.regression.feedback import (
     FeedbackItem,
     FeedbackChannel,
 )
+from income_desk.regression.pipeline_validation import (
+    SanityIssue,
+    HealthCheck,
+    PipelineHealthReport,
+    PipelineTestResult,
+    validate_trade_data_sanity,
+    validate_pipeline_health,
+    validate_full_pipeline,
+)
 
 __all__ = [
     "validate_snapshot",
@@ -66,4 +75,11 @@ __all__ = [
     "default_log",
     "FeedbackItem",
     "FeedbackChannel",
+    "SanityIssue",
+    "HealthCheck",
+    "PipelineHealthReport",
+    "PipelineTestResult",
+    "validate_trade_data_sanity",
+    "validate_pipeline_health",
+    "validate_full_pipeline",
 ]

@@ -557,6 +557,15 @@ def compose_trade_commentary(
         None,
     )
 
+    # Capital efficiency flag: equity_long on options-eligible stock = red flag
+    if strategy in _EQUITY_STRATEGIES and market == "US":
+        avoid = True
+        avoid_reason = (
+            f"{ticker} booked as {strategy} — this stock has liquid options. "
+            f"An iron condor or credit spread would use ~10x less capital. "
+            f"Check if the options ranking pipeline evaluated {ticker}."
+        )
+
     # Key lesson — pick the lowest-scoring dimension
     worst = min(dims, key=lambda d: d.score)
     lesson = worst.narrative if worst.score < 70 else None

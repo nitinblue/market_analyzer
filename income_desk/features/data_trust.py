@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pydantic import BaseModel
+
 from income_desk.models.transparency import (
     ContextGap,
     DataSource,
@@ -10,6 +12,177 @@ from income_desk.models.transparency import (
     TrustLevel,
     TrustReport,
 )
+
+
+# ---------------------------------------------------------------------------
+# Ticker-level trust
+# ---------------------------------------------------------------------------
+
+class TickerTrust(BaseModel):
+    """Trust assessment for a single ticker's data availability."""
+
+    ticker: str
+    data_source: str  # "broker_live", "yfinance_delayed", "cached", "none"
+    trust_level: str  # "HIGH", "MEDIUM", "LOW", "NONE"
+    has_greeks: bool = False
+    has_iv: bool = False
+    has_option_chain: bool = False
+    fit_for: str = ""  # "execution", "research", "display_only"
+
+
+def compute_ticker_trust(
+    ticker: str,
+    has_broker_quote: bool = False,
+    has_greeks: bool = False,
+    has_iv: bool = False,
+    has_option_chain: bool = False,
+    has_ohlcv: bool = True,
+) -> TickerTrust:
+    """Assess data trust for a single ticker.
+
+    Logic:
+        broker_quote + greeks + iv + chain → HIGH / broker_live / execution
+        broker_quote only (no greeks)       → MEDIUM / broker_live / research
+        no broker, has ohlcv                → LOW / yfinance_delayed / research
+        nothing                             → NONE / none / display_only
+    """
+    if has_broker_quote and has_greeks and has_iv and has_option_chain:
+        return TickerTrust(
+            ticker=ticker,
+            data_source="broker_live",
+            trust_level="HIGH",
+            has_greeks=True,
+            has_iv=True,
+            has_option_chain=True,
+            fit_for="execution",
+        )
+    if has_broker_quote:
+        return TickerTrust(
+            ticker=ticker,
+            data_source="broker_live",
+            trust_level="MEDIUM",
+            has_greeks=has_greeks,
+            has_iv=has_iv,
+            has_option_chain=has_option_chain,
+            fit_for="research",
+        )
+    if has_ohlcv:
+        return TickerTrust(
+            ticker=ticker,
+            data_source="yfinance_delayed",
+            trust_level="LOW",
+            has_greeks=False,
+            has_iv=False,
+            has_option_chain=False,
+            fit_for="research",
+        )
+    return TickerTrust(
+        ticker=ticker,
+        data_source="none",
+        trust_level="NONE",
+        has_greeks=False,
+        has_iv=False,
+        has_option_chain=False,
+        fit_for="display_only",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Position-level trust
+# ---------------------------------------------------------------------------
+
+class LegTrustInput(BaseModel):
+    """Per-leg data availability for position trust computation."""
+
+    has_current_price: bool = False
+    has_greeks: bool = False
+    price_source: str = "none"  # "broker_live", "yfinance_delayed", "none"
+
+
+class PositionTrust(BaseModel):
+    """Trust assessment for a multi-leg position."""
+
+    overall_trust: str  # "HIGH", "MEDIUM", "LOW", "NONE"
+    pnl_reliable: bool
+    greeks_reliable: bool
+    stale_legs: int
+    total_legs: int
+    last_marked: str | None = None
+    message: str = ""
+
+
+def _leg_trust_level(leg: LegTrustInput) -> str:
+    """Return trust level string for one leg."""
+    if leg.has_current_price and leg.has_greeks and leg.price_source == "broker_live":
+        return "HIGH"
+    if leg.has_current_price and leg.price_source == "broker_live":
+        return "MEDIUM"
+    if leg.has_current_price:
+        return "LOW"
+    return "NONE"
+
+
+_TRUST_RANK = {"HIGH": 3, "MEDIUM": 2, "LOW": 1, "NONE": 0}
+
+
+def compute_position_trust(
+    legs: list[LegTrustInput],
+    last_marked: str | None = None,
+) -> PositionTrust:
+    """Assess data trust for a multi-leg position.
+
+    Logic:
+        - All legs broker_live + greeks → HIGH, pnl+greeks reliable
+        - All legs have prices (any source) → pnl reliable
+        - Any leg missing price → stale_legs += 1, pnl not fully reliable
+        - No greeks on any leg → greeks_reliable=False
+        - Overall trust = worst leg trust level
+    """
+    total = len(legs)
+    if total == 0:
+        return PositionTrust(
+            overall_trust="NONE",
+            pnl_reliable=False,
+            greeks_reliable=False,
+            stale_legs=0,
+            total_legs=0,
+            last_marked=last_marked,
+            message="No legs provided",
+        )
+
+    stale = sum(1 for leg in legs if not leg.has_current_price)
+    any_greeks = any(leg.has_greeks for leg in legs)
+    all_greeks = all(leg.has_greeks for leg in legs)
+    all_priced = stale == 0
+
+    # Overall trust = worst leg
+    worst = min((_leg_trust_level(leg) for leg in legs), key=lambda t: _TRUST_RANK[t])
+
+    pnl_reliable = all_priced
+    greeks_reliable = all_greeks
+
+    # Build message
+    if worst == "HIGH":
+        message = "All legs marked from broker"
+    elif all_priced:
+        message = "All legs priced — mixed sources"
+    elif stale > 0:
+        message = f"{stale}/{total} legs stale — PnL estimated"
+    else:
+        message = "Position data incomplete"
+
+    if not any_greeks:
+        message += "; no Greeks available"
+
+    return PositionTrust(
+        overall_trust=worst,
+        pnl_reliable=pnl_reliable,
+        greeks_reliable=greeks_reliable,
+        stale_legs=stale,
+        total_legs=total,
+        last_marked=last_marked,
+        message=message,
+    )
 
 
 def compute_data_trust(

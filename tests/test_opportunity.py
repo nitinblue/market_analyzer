@@ -953,3 +953,67 @@ class TestConfig:
         assert cfg.go_threshold == 0.50
         assert cfg.min_fundamental_score == 0.2
         assert cfg.pe_cheap == 15.0
+
+
+# ---------------------------------------------------------------------------
+# 0DTE physical settlement / assignment risk hard stop
+# ---------------------------------------------------------------------------
+
+
+class TestZeroDTESettlementWarning:
+    """Tests for the physical_settlement_0dte non-blocking hard stop."""
+
+    def test_0dte_physical_settlement_has_warning(self):
+        """SPY = physical/american -> hard stop present but non-blocking."""
+        result = assess_zero_dte(
+            "SPY", _make_regime(regime_id=1, confidence=0.80),
+            _make_technicals(atr_pct=1.0, rsi=50.0),
+            _make_macro(),
+            fundamentals=_make_fundamentals(days_to_earnings=30),
+        )
+        settlement_stops = [s for s in result.hard_stops if s.name == "physical_settlement_0dte"]
+        assert len(settlement_stops) == 1
+        assert settlement_stops[0].blocking is False
+        assert "assignment risk" in settlement_stops[0].description.lower()
+        assert "SPX" in settlement_stops[0].description  # suggests cash-settled alternative
+        # Non-blocking: verdict should NOT be NO_GO solely from this
+        assert result.verdict in (Verdict.GO, Verdict.CAUTION)
+
+    def test_0dte_cash_settlement_no_warning(self):
+        """SPX = cash/european -> no physical_settlement hard stop."""
+        result = assess_zero_dte(
+            "SPX", _make_regime(regime_id=1, confidence=0.80),
+            _make_technicals(atr_pct=1.0, rsi=50.0),
+            _make_macro(),
+            fundamentals=_make_fundamentals(days_to_earnings=30),
+        )
+        settlement_stops = [s for s in result.hard_stops if s.name == "physical_settlement_0dte"]
+        assert len(settlement_stops) == 0
+
+    def test_0dte_india_index_no_warning(self):
+        """NIFTY = cash/european -> no physical_settlement hard stop."""
+        result = assess_zero_dte(
+            "NIFTY", _make_regime(regime_id=1, confidence=0.80),
+            _make_technicals(atr_pct=1.0, rsi=50.0),
+            _make_macro(),
+            fundamentals=_make_fundamentals(days_to_earnings=30),
+        )
+        settlement_stops = [s for s in result.hard_stops if s.name == "physical_settlement_0dte"]
+        assert len(settlement_stops) == 0
+
+    def test_physical_settlement_applies_confidence_penalty(self):
+        """Physical settlement warning reduces confidence vs identical cash-settled."""
+        result_spy = assess_zero_dte(
+            "SPY", _make_regime(regime_id=1, confidence=0.80),
+            _make_technicals(atr_pct=1.0, rsi=50.0),
+            _make_macro(),
+            fundamentals=_make_fundamentals(days_to_earnings=30),
+        )
+        result_spx = assess_zero_dte(
+            "SPX", _make_regime(regime_id=1, confidence=0.80),
+            _make_technicals(atr_pct=1.0, rsi=50.0),
+            _make_macro(),
+            fundamentals=_make_fundamentals(days_to_earnings=30),
+        )
+        # SPY confidence should be lower than SPX due to the penalty
+        assert result_spy.confidence < result_spx.confidence

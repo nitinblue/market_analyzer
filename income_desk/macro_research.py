@@ -956,11 +956,24 @@ def compute_india_context(
                 " — banking sector weakness. Credit concerns?"
             )
 
+    # If all indicators are stable/neutral, that IS useful information
     if not commentary:
-        commentary.append(
-            "India macro context data insufficient"
-            " — check data availability."
-        )
+        parts = []
+        if india_vix is not None:
+            parts.append(f"India VIX at {india_vix:.1f} (stable)")
+        if nifty_spy_corr is not None:
+            parts.append(f"NIFTY-SPY correlation {nifty_spy_corr:.2f}")
+        if usd_inr_trend == "stable":
+            parts.append("USD/INR stable")
+        if parts:
+            commentary.append(
+                "India macro stable — " + ", ".join(parts) + ". No significant divergences."
+            )
+        else:
+            commentary.append(
+                "India macro data limited — missing India VIX, NIFTY, or BANKNIFTY data."
+                " Check yfinance availability for ^INDIAVIX, ^NSEI, ^NSEBANK."
+            )
 
     return IndiaResearchContext(
         india_vix=round(india_vix, 2) if india_vix else None,
@@ -1143,11 +1156,25 @@ def compute_economic_snapshot(
 # ---------------------------------------------------------------------------
 
 
+class MarketIndex(BaseModel):
+    """Single market index with current price and change."""
+
+    ticker: str
+    name: str
+    category: str  # "us_equity", "india_equity", "commodity", "bond", "currency", "volatility"
+    current_price: float
+    change_1d_pct: float
+    change_5d_pct: float | None = None
+
+
 class MacroResearchReport(BaseModel):
     """Complete macro research report — daily/weekly/monthly."""
 
     as_of_date: date
     timeframe: str  # "daily", "weekly", "monthly"
+
+    # Market snapshot — key indices with price and change
+    market_snapshot: list[MarketIndex] = []
 
     # Regime
     regime: RegimeClassification
@@ -1194,6 +1221,48 @@ def generate_research_report(
         spy_pe: SPY P/E ratio from yfinance .info (for equity risk premium)
     """
     today = date.today()
+
+    # Market snapshot — key indices with price and change
+    _SNAPSHOT_TICKERS = {
+        # US Equity
+        "SPY": ("S&P 500", "us_equity"),
+        "QQQ": ("Nasdaq 100", "us_equity"),
+        "IWM": ("Russell 2000", "us_equity"),
+        "DIA": ("Dow Jones", "us_equity"),
+        # India Equity
+        "^NSEI": ("NIFTY 50", "india_equity"),
+        "^NSEBANK": ("Bank NIFTY", "india_equity"),
+        # Commodities
+        "GLD": ("Gold", "commodity"),
+        "SLV": ("Silver", "commodity"),
+        "USO": ("Crude Oil", "commodity"),
+        "COPX": ("Copper Miners", "commodity"),
+        # Bonds
+        "TLT": ("20Y Treasury", "bond"),
+        "^TNX": ("10Y Yield", "bond"),
+        # Currency
+        "UUP": ("US Dollar", "currency"),
+        # Volatility
+        "^VIX": ("VIX", "volatility"),
+        "^INDIAVIX": ("India VIX", "volatility"),
+    }
+    market_snapshot: list[MarketIndex] = []
+    for ticker, (name, category) in _SNAPSHOT_TICKERS.items():
+        df = data.get(ticker)
+        if df is not None and len(df) >= 2:
+            current = float(df["Close"].iloc[-1])
+            prev = float(df["Close"].iloc[-2])
+            change_1d = (current / prev - 1) * 100 if prev > 0 else 0.0
+            change_5d = None
+            if len(df) >= 6:
+                prev_5d = float(df["Close"].iloc[-6])
+                change_5d = (current / prev_5d - 1) * 100 if prev_5d > 0 else None
+            market_snapshot.append(MarketIndex(
+                ticker=ticker, name=name, category=category,
+                current_price=round(current, 2),
+                change_1d_pct=round(change_1d, 2),
+                change_5d_pct=round(change_5d, 2) if change_5d is not None else None,
+            ))
 
     # Scorecards
     scores = compute_all_scorecards(data, timeframe)
@@ -1276,11 +1345,20 @@ def generate_research_report(
     for c in india.commentary[:2]:
         note_parts.append(c)
 
+    # Add market snapshot to research note
+    if market_snapshot:
+        note_parts.append("")
+        note_parts.append("Market Snapshot:")
+        for m in market_snapshot:
+            chg_5d = f", 5d: {m.change_5d_pct:+.1f}%" if m.change_5d_pct is not None else ""
+            note_parts.append(f"  {m.name}: {m.current_price:,.2f} ({m.change_1d_pct:+.1f}%{chg_5d})")
+
     research_note = "\n".join(note_parts)
 
     return MacroResearchReport(
         as_of_date=today,
         timeframe=timeframe,
+        market_snapshot=market_snapshot,
         regime=regime,
         asset_scores=scores,
         correlations=correlations,

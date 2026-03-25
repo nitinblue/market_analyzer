@@ -227,10 +227,16 @@ def get_structure_profile(
 
 
 class HardStop(BaseModel):
-    """A condition that forces a NO_GO verdict."""
+    """A condition that forces a NO_GO verdict (or a penalty warning).
+
+    When ``blocking=True`` (default), triggers NO_GO.
+    When ``blocking=False``, acts as a warning — surfaces the risk without
+    blocking the trade, but applies a confidence penalty.
+    """
 
     name: str
     description: str
+    blocking: bool = True
 
 
 class OpportunitySignal(BaseModel):
