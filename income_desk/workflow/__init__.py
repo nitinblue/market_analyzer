@@ -105,6 +105,13 @@ from income_desk.workflow.expiry_day import (
     check_expiry_day,
 )
 
+# --- Stress Testing ---
+from income_desk.workflow.stress_test import (
+    StressTestRequest,
+    StressTestResponse,
+    stress_test_portfolio,
+)
+
 # --- Reporting ---
 from income_desk.workflow.daily_report import (
     DailyReportRequest,
