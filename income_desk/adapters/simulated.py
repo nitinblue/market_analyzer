@@ -101,6 +101,27 @@ class SimulatedMarketData(MarketDataProvider):
     def market_hours(self) -> tuple:
         return (time(9, 30), time(16, 0))
 
+    # ── Discovery ────────────────────────────────────────────────────────
+
+    def supported_tickers(self) -> list[str]:
+        """Return all tickers available in this simulation."""
+        return sorted(self._tickers.keys())
+
+    def ticker_info(self) -> dict[str, dict]:
+        """Return full info for all supported tickers.
+
+        Useful for eTrading / callers to know what data is available
+        before making requests.
+
+        Returns:
+            Dict of ticker -> {price, iv, iv_rank, atr_pct, ...}
+        """
+        return {k: dict(v) for k, v in self._tickers.items()}
+
+    def has_ticker(self, ticker: str) -> bool:
+        """Check if a ticker is supported in this simulation."""
+        return ticker.upper() in self._tickers
+
     # ── Price / chain ────────────────────────────────────────────────────
 
     def get_underlying_price(self, ticker: str) -> float | None:
@@ -124,14 +145,30 @@ class SimulatedMarketData(MarketDataProvider):
 
         results: list[OptionQuote] = []
         today = date.today()
-        dtes = [7, 21, 35, 60]
+
+        # Market-aware expirations
+        if self._currency == "INR":
+            # India: nearest weekly + next 2 monthlies
+            dtes = [3, 10, 30, 60]  # approximate: this week, next week, monthly, 2-month
+        else:
+            dtes = [7, 21, 35, 60]
 
         for dte in dtes:
             exp = today + timedelta(days=dte)
             if expiration and exp != expiration:
                 continue
 
-            strike_step = _get_strike_step(price)
+            # Look up lot size from registry
+            lot_size = self._lot_size_default
+            try:
+                from income_desk.registry import MarketRegistry
+                inst = MarketRegistry().get_instrument(ticker.upper())
+                if inst:
+                    lot_size = inst.lot_size
+            except (KeyError, ImportError):
+                pass
+
+            strike_step = _get_strike_step(price, ticker)
             min_strike = _round_to_step(price * 0.85, strike_step)
             max_strike = _round_to_step(price * 1.15, strike_step)
 
@@ -147,6 +184,7 @@ class SimulatedMarketData(MarketDataProvider):
                             dte=dte,
                             underlying_price=price,
                             iv=iv,
+                            lot_size=lot_size,
                         )
                     )
                 strike = round(strike + strike_step, 4)
@@ -184,19 +222,52 @@ class SimulatedMarketData(MarketDataProvider):
             results.append(quote)
         return results
 
-    def get_greeks(self, legs: list[LegSpec]) -> dict[str, dict]:
-        """Return Greeks keyed by ``"{strike}{type[0].upper()}"``."""
-        quotes = self.get_quotes(legs)
-        result: dict[str, dict] = {}
-        for leg, q in zip(legs, quotes):
-            if q is not None:
-                key = f"{leg.strike}{leg.option_type[0].upper()}"
+    def get_greeks(self, legs_or_ticker="", ticker: str = "") -> dict:
+        """Simulated Greeks from chain data.
+
+        Accepts either a list of LegSpec objects or a ticker string.
+        When called with a ticker, generates Greeks from the full chain.
+        """
+        # Handle legacy list[LegSpec] signature
+        if isinstance(legs_or_ticker, list):
+            quotes = self.get_quotes(legs_or_ticker)
+            result: dict[str, dict] = {}
+            for leg, q in zip(legs_or_ticker, quotes):
+                if q is not None:
+                    key = f"{leg.strike}{leg.option_type[0].upper()}"
+                    result[key] = {
+                        "delta": q.delta,
+                        "gamma": q.gamma,
+                        "theta": q.theta,
+                        "vega": q.vega,
+                    }
+            return result
+
+        # String ticker path
+        if isinstance(legs_or_ticker, str) and legs_or_ticker:
+            ticker = legs_or_ticker
+        if not ticker:
+            return {}
+
+        chain = self.get_option_chain(ticker)
+        result = {}
+        for q in chain:
+            if q.delta is not None:
+                key = f"{q.strike:.0f}{'C' if q.option_type == 'call' else 'P'}"
                 result[key] = {
-                    "delta": q.delta,
-                    "gamma": q.gamma,
-                    "theta": q.theta,
-                    "vega": q.vega,
+                    "delta": q.delta, "gamma": q.gamma,
+                    "theta": q.theta, "vega": q.vega,
+                    "iv": q.implied_volatility,
                 }
+        return result
+
+    def get_prices_batch(self, tickers: list[str]) -> dict[str, float]:
+        """Batch price fetch for simulated data."""
+        result = {}
+        for t in tickers:
+            p = self.get_underlying_price(t)
+            if p is not None:
+                result[t.upper()] = p
         return result
 
     # ── Mutation helpers for test scenarios ─────────────────────────────
@@ -267,15 +338,33 @@ class SimulatedAccount:
 # ── Strike / price helpers ────────────────────────────────────────────────────
 
 
-def _get_strike_step(price: float) -> float:
-    """Return realistic strike interval for a given price level."""
+def _get_strike_step(price: float, ticker: str = "") -> float:
+    """Return realistic strike interval for a given price level.
+
+    Uses registry data for India instruments (NIFTY=50, BANKNIFTY=100, etc.)
+    Falls back to US-style price-based intervals.
+    """
+    if ticker:
+        try:
+            from income_desk.registry import MarketRegistry
+            inst = MarketRegistry().get_instrument(ticker.upper())
+            if inst and inst.strike_interval:
+                return inst.strike_interval
+        except (KeyError, ImportError):
+            pass
+
+    # Price-based fallback (US and unregistered tickers)
     if price < 50:
         return 1.0
     if price < 200:
         return 2.5
     if price < 500:
         return 5.0
-    return 10.0
+    if price < 5_000:
+        return 10.0
+    if price < 20_000:
+        return 50.0
+    return 100.0  # SENSEX (74,500), BANKNIFTY (52,000)
 
 
 def _round_to_step(value: float, step: float) -> float:
@@ -290,6 +379,7 @@ def _generate_option_quote(
     dte: int,
     underlying_price: float,
     iv: float,
+    lot_size: int = 100,
 ) -> OptionQuote:
     """Generate a single realistic-looking option quote.
 
@@ -362,6 +452,7 @@ def _generate_option_quote(
         vega=round(vega, 4),
         volume=int(proximity * 10_000),
         open_interest=int(proximity * 50_000),
+        lot_size=lot_size,
     )
 
 
@@ -556,18 +647,30 @@ def create_india_market() -> SimulatedMarketData:
 
 
 def create_ideal_income() -> SimulatedMarketData:
-    """R1 regime, elevated IV — the ideal income trading scenario.
+    """R1/R2 regime, elevated IV — ideal income trading scenario.
 
-    IV rank 50-65%: premium is rich but not extreme.
-    All iron condors should PASS the 10-check validation gate.
-    Use for: demo portfolio, weekend testing, integration testing.
+    Comprehensive US universe for weekend testing.
     """
     return SimulatedMarketData({
-        "SPY": {"price": 560.0, "iv": 0.26, "iv_rank": 55, "atr_pct": 1.1},
-        "QQQ": {"price": 475.0, "iv": 0.30, "iv_rank": 60, "atr_pct": 1.3},
-        "IWM": {"price": 220.0, "iv": 0.28, "iv_rank": 52, "atr_pct": 1.5},
-        "GLD": {"price": 400.0, "iv": 0.25, "iv_rank": 48, "atr_pct": 1.0},
-        "TLT": {"price": 88.0,  "iv": 0.18, "iv_rank": 45, "atr_pct": 0.8},
+        # Major indices/ETFs
+        "SPY":  {"price": 565.0, "iv": 0.26, "iv_rank": 55, "atr_pct": 1.1},
+        "QQQ":  {"price": 480.0, "iv": 0.30, "iv_rank": 60, "atr_pct": 1.3},
+        "IWM":  {"price": 210.0, "iv": 0.28, "iv_rank": 52, "atr_pct": 1.5},
+        "GLD":  {"price": 295.0, "iv": 0.22, "iv_rank": 48, "atr_pct": 1.0},
+        "TLT":  {"price": 86.0,  "iv": 0.18, "iv_rank": 45, "atr_pct": 0.8},
+        "DIA":  {"price": 420.0, "iv": 0.20, "iv_rank": 42, "atr_pct": 1.0},
+        # Mega-cap tech
+        "AAPL": {"price": 230.0, "iv": 0.28, "iv_rank": 50, "atr_pct": 1.4},
+        "MSFT": {"price": 420.0, "iv": 0.25, "iv_rank": 45, "atr_pct": 1.2},
+        "AMZN": {"price": 200.0, "iv": 0.32, "iv_rank": 58, "atr_pct": 1.6},
+        "NVDA": {"price": 130.0, "iv": 0.45, "iv_rank": 65, "atr_pct": 2.5},
+        "TSLA": {"price": 275.0, "iv": 0.55, "iv_rank": 70, "atr_pct": 3.0},
+        "META": {"price": 600.0, "iv": 0.35, "iv_rank": 55, "atr_pct": 1.8},
+        "GOOGL":{"price": 170.0, "iv": 0.28, "iv_rank": 48, "atr_pct": 1.4},
+        # Sector ETFs
+        "XLF":  {"price": 48.0,  "iv": 0.22, "iv_rank": 40, "atr_pct": 1.2},
+        "XLE":  {"price": 85.0,  "iv": 0.28, "iv_rank": 52, "atr_pct": 1.8},
+        "XLK":  {"price": 220.0, "iv": 0.26, "iv_rank": 50, "atr_pct": 1.3},
     })
 
 
@@ -603,23 +706,38 @@ def create_wheel_opportunity() -> SimulatedMarketData:
 
 
 def create_india_trading() -> SimulatedMarketData:
-    """India market with NIFTY/BANKNIFTY at tradeable levels.
+    """India market — comprehensive F&O universe for weekend testing.
 
-    IV elevated on expiry week. European exercise (no early assignment).
-    Currency: INR. Timezone: Asia/Kolkata. Default lot: 25 (NIFTY).
+    Prices approximate to late March 2026. Covers indices + top F&O stocks.
     """
     return SimulatedMarketData(
         {
-            "NIFTY":     {"price": 22_700.0, "iv": 0.18, "iv_rank": 45, "atr_pct": 0.9},
-            "BANKNIFTY": {"price": 52_000.0, "iv": 0.22, "iv_rank": 55, "atr_pct": 1.2},
-            "FINNIFTY":  {"price": 24_100.0, "iv": 0.20, "iv_rank": 50, "atr_pct": 1.0},
-            "RELIANCE":  {"price":  1_400.0, "iv": 0.28, "iv_rank": 48, "atr_pct": 1.4},
-            "TCS":       {"price":  2_400.0, "iv": 0.22, "iv_rank": 35, "atr_pct": 1.1},
-            "HDFCBANK":  {"price":    755.0, "iv": 0.24, "iv_rank": 40, "atr_pct": 1.0},
-            "INFY":      {"price":  1_280.0, "iv": 0.26, "iv_rank": 42, "atr_pct": 1.2},
-            "SBIN":      {"price":  1_030.0, "iv": 0.30, "iv_rank": 52, "atr_pct": 1.5},
+            # Indices
+            "NIFTY":     {"price": 23_000.0, "iv": 0.18, "iv_rank": 45, "atr_pct": 2.1},
+            "BANKNIFTY": {"price": 52_500.0, "iv": 0.22, "iv_rank": 55, "atr_pct": 2.7},
+            "FINNIFTY":  {"price": 24_600.0, "iv": 0.20, "iv_rank": 50, "atr_pct": 2.0},
+            "SENSEX":    {"price": 74_500.0, "iv": 0.16, "iv_rank": 40, "atr_pct": 1.8},
+            "MIDCPNIFTY":{"price": 12_600.0, "iv": 0.24, "iv_rank": 48, "atr_pct": 2.2},
+            # Top F&O stocks
+            "RELIANCE":  {"price":  1_375.0, "iv": 0.28, "iv_rank": 48, "atr_pct": 2.2},
+            "TCS":       {"price":  2_410.0, "iv": 0.22, "iv_rank": 35, "atr_pct": 2.5},
+            "INFY":      {"price":  1_278.0, "iv": 0.26, "iv_rank": 42, "atr_pct": 2.8},
+            "HDFCBANK":  {"price":    762.0, "iv": 0.24, "iv_rank": 40, "atr_pct": 3.5},
+            "ICICIBANK": {"price":  1_380.0, "iv": 0.26, "iv_rank": 45, "atr_pct": 2.0},
+            "SBIN":      {"price":  1_042.0, "iv": 0.30, "iv_rank": 52, "atr_pct": 2.5},
+            "BHARTIARTL":{"price":  1_750.0, "iv": 0.24, "iv_rank": 38, "atr_pct": 1.8},
+            "ITC":       {"price":    430.0, "iv": 0.20, "iv_rank": 30, "atr_pct": 1.5},
+            "BAJFINANCE":{"price":  8_800.0, "iv": 0.32, "iv_rank": 55, "atr_pct": 2.0},
+            "AXISBANK":  {"price":  1_125.0, "iv": 0.28, "iv_rank": 48, "atr_pct": 2.2},
+            "KOTAKBANK": {"price":  1_950.0, "iv": 0.22, "iv_rank": 35, "atr_pct": 1.8},
+            "LT":        {"price":  3_400.0, "iv": 0.24, "iv_rank": 40, "atr_pct": 1.6},
+            "MARUTI":    {"price": 11_500.0, "iv": 0.22, "iv_rank": 38, "atr_pct": 1.5},
+            "SUNPHARMA": {"price":  1_700.0, "iv": 0.26, "iv_rank": 42, "atr_pct": 1.8},
+            "TITAN":     {"price":  3_200.0, "iv": 0.28, "iv_rank": 45, "atr_pct": 2.0},
+            "HINDUNILVR":{"price":  2_250.0, "iv": 0.20, "iv_rank": 30, "atr_pct": 1.4},
+            "WIPRO":     {"price":    280.0, "iv": 0.24, "iv_rank": 38, "atr_pct": 2.0},
         },
-        account_nlv=5_000_000.0,   # 50 Lakhs
+        account_nlv=5_000_000.0,
         account_cash=4_000_000.0,
         account_bp=3_500_000.0,
         currency="INR",
