@@ -7374,7 +7374,6 @@ stratified by risk category (defined / semi_defined / undefined)."""
         if isinstance(self.ma.market_data, SimulatedMarketData):
             baseline = self.ma.market_data
         else:
-            # Build from sim preset for current market
             from income_desk.adapters.simulated import create_india_trading, create_ideal_income
             baseline = create_india_trading() if self.market == "India" else create_ideal_income()
 
@@ -7391,6 +7390,69 @@ stratified by risk category (defined / semi_defined / undefined)."""
         print(f"\n  {'Ticker':>12s} {'Base':>10s} {'Stressed':>10s} {'Return':>8s} {'IV':>6s} {'->':>3s} {'IV':>6s}")
         for t, imp in sorted(result.ticker_impacts.items(), key=lambda x: x[1].return_pct):
             print(f"  {t:>12s} {imp.base_price:>10,.0f} {imp.stressed_price:>10,.0f} {imp.return_pct:>+7.1f}% {imp.base_iv:>5.0%} -> {imp.stressed_iv:>5.0%}")
+
+    def do_stress_portfolio(self, arg: str) -> None:
+        """Run all 18 macro scenarios against open positions.
+
+        Usage: stress_portfolio
+        """
+        from income_desk.workflow import stress_test_portfolio, StressTestRequest
+        from income_desk.workflow._types import OpenPosition
+
+        # Try loading demo positions
+        positions = []
+        try:
+            from income_desk.demo.portfolio import load_demo_portfolio
+            port = load_demo_portfolio()
+            if port and port.positions:
+                for pos in port.positions:
+                    positions.append(OpenPosition(
+                        trade_id=pos.position_id, ticker=pos.ticker,
+                        structure_type=getattr(pos, "structure_type", "iron_condor"),
+                        order_side=getattr(pos, "order_side", "credit"),
+                        entry_price=pos.entry_price, contracts=pos.contracts,
+                        current_mid_price=pos.entry_price * 0.7,
+                        dte_remaining=getattr(pos, "dte_remaining", 10),
+                        regime_id=pos.entry_regime_id,
+                        lot_size=getattr(pos, "lot_size", 100),
+                    ))
+        except Exception:
+            pass
+
+        if not positions:
+            print("No positions found. Book trades first with 'daily_plan'.")
+            return
+
+        capital = 5_000_000 if self.market == "India" else 100_000
+        currency = "INR" if self.market == "India" else "USD"
+
+        print(f"Running 18 scenarios against {len(positions)} positions...")
+        result = stress_test_portfolio(
+            StressTestRequest(positions=positions, capital=capital, market=self.market),
+            self.ma,
+        )
+
+        _print_header(f"PORTFOLIO STRESS TEST — {result.risk_score.upper()}")
+        print(f"  Positions: {result.total_positions} | Scenarios: {result.scenarios_run}")
+        print(f"  Portfolio at risk: {currency} {result.portfolio_at_risk:,.0f} ({result.worst_scenario_pnl_pct:+.1f}%)")
+        print(f"  Worst: {result.worst_scenario} | Best: {result.best_scenario}")
+
+        if result.scenarios_breaching_limit:
+            print(f"  BREACHING {result.risk_limit_pct:.0%} LIMIT: {result.scenarios_breaching_limit}")
+
+        rows = []
+        for sr in result.scenario_results[:10]:
+            breach = "BREACH" if sr.breaches_limit else ""
+            rows.append([sr.scenario_name[:30], f"{currency} {sr.portfolio_pnl:>+,.0f}",
+                         f"{sr.portfolio_pnl_pct:>+.1f}%", breach, sr.worst_position])
+        print()
+        print(tabulate(rows, headers=["Scenario", "P&L", "% Cap", "Breach", "Worst Pos"], tablefmt="simple"))
+
+        if result.most_vulnerable_positions:
+            print(f"\n  MOST VULNERABLE:")
+            for v in result.most_vulnerable_positions:
+                print(f"    {v['ticker']:12s} avg loss={currency} {v['avg_scenario_loss']:>+,.0f}  "
+                      f"worst={v['worst_scenario']} ({currency} {v['worst_loss']:>+,.0f})")
 
     # ── End Workflow Commands ─────────────────────────────────────────────
 

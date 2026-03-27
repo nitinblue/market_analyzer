@@ -394,6 +394,7 @@ plan = generate_daily_plan(
 | Trade entry | `validate_trade`, `size_position`, `price_trade` |
 | Positions | `monitor_positions`, `adjust_position`, `assess_overnight_risk` |
 | Portfolio risk | `aggregate_portfolio_greeks`, `check_portfolio_health` |
+| Stress testing | `stress_test_portfolio` (18 macro scenarios) |
 | Expiry | `check_expiry_day` |
 | Reporting | `generate_daily_report` |
 
@@ -427,6 +428,34 @@ sim.ticker_info()         # {"NIFTY": {"price": 23000, "iv": 0.18, ...}}
 
 ---
 
+## Portfolio Stress Testing
+
+Run all 18 macro scenarios against your portfolio in one call. Factor model with correlations, IV leverage effect, and Monte Carlo confidence intervals.
+
+```python
+from income_desk.workflow import stress_test_portfolio, StressTestRequest
+
+result = stress_test_portfolio(
+    StressTestRequest(positions=my_positions, capital=5_000_000, market="India"),
+    ma,
+)
+# result.risk_score = "safe"
+# result.worst_scenario = "black_monday" (INR -8,814 loss)
+# result.scenarios_breaching_limit = []
+```
+
+**18 scenarios:** S&P corrections (-5/-10/-20%), Black Monday, NIFTY crash, FII sell-off, RBI rate hike, commodity meltup, gold crash, rate shock, inflation/deflation, tech rotation, geopolitical shock, correlation spike.
+
+**Scenario engine** (`income_desk/scenarios/`) also available standalone for stress-testing market data:
+
+```python
+from income_desk.scenarios import apply_scenario
+stressed_sim, result = apply_scenario(baseline, "nifty_down_10")
+# stressed_sim is a new SimulatedMarketData — use with any workflow
+```
+
+---
+
 ## Daily Profitability Test
 
 Run every market day to verify the pipeline is production-ready:
@@ -453,7 +482,7 @@ Produces a **GO / CAUTION / NO-GO** verdict based on: broker connectivity, optio
 ## 90+ CLI Commands
 
 ```
-Workflows:  daily_plan, snapshot, portfolio_greeks, profitability, presets, expiry_check
+Workflows:  daily_plan, snapshot, portfolio_greeks, profitability, presets, expiry_check, scenario, stress_portfolio
 Trading:    validate, rank, screen, opportunity, entry_analysis, kelly, audit, sentinel
 Monitoring: health, monitor, exit_intelligence, adjust, assignment_risk
 Portfolio:  desk, portfolio, trade, close_trade, rebalance
