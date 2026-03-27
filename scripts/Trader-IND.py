@@ -173,10 +173,17 @@ def main():
         print(f"\nTRADES: {len(plan.proposed_trades)} proposed, {len(plan.blocked_trades)} blocked")
         for t in plan.proposed_trades:
             pop_str = f"{t.pop_pct:.0%}" if t.pop_pct else "n/a"
-            print(f"  #{t.rank} {t.ticker:<12} {t.strategy_badge:<28} "
-                  f"score={t.composite_score:.2f} POP={pop_str} "
-                  f"{t.contracts}x lot={t.lot_size} "
-                  f"risk=INR {t.max_risk or 0:,.0f}")
+            margin_per = (t.max_risk / t.contracts) if t.contracts else 0
+            print(f"\n  #{t.rank} {t.ticker} -- {t.strategy_badge} (score={t.composite_score:.2f})")
+            if t.short_put is not None:
+                print(f"     SELL PUT  {t.short_put:>8,.0f}  OI={t.short_put_oi or 0:>10,d}")
+                print(f"     BUY  PUT  {t.long_put:>8,.0f}")
+                print(f"     SELL CALL {t.short_call:>8,.0f}  OI={t.short_call_oi or 0:>10,d}")
+                print(f"     BUY  CALL {t.long_call:>8,.0f}")
+            print(f"     {t.contracts} lot(s) x {t.lot_size} | POP: {pop_str} | "
+                  f"Credit: INR {(t.net_credit_per_unit or 0) * (t.lot_size or 1) * (t.contracts or 1):,.0f}")
+            print(f"     Margin: INR {t.max_risk or 0:,.0f} (~INR {margin_per:,.0f}/lot) | "
+                  f"{(t.max_risk or 0)/args.capital:.1%} of capital")
 
         if plan.blocked_trades:
             print(f"\nBLOCKED:")
