@@ -129,9 +129,18 @@ def rank_opportunities(
             tech = ma.technicals.snapshot(ticker)
             atr_pct = tech.atr_pct if tech else 1.0
             current_price = tech.current_price if tech else 100.0
-        except Exception:
-            atr_pct = 1.0
+        except Exception as e:
+            warnings.append(f"{ticker}: technicals failed: {e}")
+            # Try broker price before falling back
             current_price = 100.0
+            if ma.market_data is not None:
+                try:
+                    bp = ma.market_data.get_underlying_price(ticker)
+                    if bp and bp > 0:
+                        current_price = bp
+                except Exception:
+                    pass
+            atr_pct = 1.0
 
         # Estimate entry credit
         entry_credit = 0.0
@@ -152,8 +161,17 @@ def rank_opportunities(
             if pop_result:
                 pop_pct = pop_result.pop_pct
                 ev = pop_result.expected_value
-        except Exception:
-            pass
+        except Exception as e:
+            warnings.append(f"{ticker}: POP estimation failed: {e}")
+
+        # If POP couldn't be estimated, block the trade (no guessing)
+        if pop_pct is None:
+            blocked.append(BlockedTrade(
+                ticker=ticker, structure=str(st),
+                reason="POP estimation failed — cannot assess profitability",
+                score=entry.composite_score,
+            ))
+            continue
 
         # POP floor
         if pop_pct is not None and pop_pct < request.min_pop:
@@ -186,8 +204,14 @@ def rank_opportunities(
 
             max_risk = risk_per * contracts
             max_profit = max_profit_per * contracts
-        except Exception:
-            pass
+        except Exception as e:
+            warnings.append(f"{ticker}: position sizing failed: {e}")
+            blocked.append(BlockedTrade(
+                ticker=ticker, structure=str(st),
+                reason=f"Position sizing failed: {e}",
+                score=entry.composite_score,
+            ))
+            continue
 
         if contracts == 0:
             blocked.append(BlockedTrade(

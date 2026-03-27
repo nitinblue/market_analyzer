@@ -196,10 +196,12 @@ def run_trader(
                 for leg, lq in zip(ts.legs, lqs):
                     if lq is None:
                         continue
-                    if leg.action.value == "STO":
-                        credit += lq.mid
+                    mid = lq.mid if lq.mid is not None else 0.0
+                    action_str = getattr(leg.action, 'value', str(leg.action))
+                    if action_str == "STO":
+                        credit += mid
                     else:
-                        credit -= lq.mid
+                        credit -= mid
                 credit = abs(round(credit, 2))
             except Exception:
                 credit = 0.0

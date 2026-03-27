@@ -88,11 +88,11 @@ def snapshot_market(
             tech = ma.technicals.snapshot(ticker)
             if tech:
                 snap.atr_pct = tech.atr_pct
-                snap.rsi = tech.rsi.value if tech.rsi else None
+                snap.rsi = getattr(tech.rsi, 'value', tech.rsi) if tech.rsi else None
                 if snap.price is None and tech.current_price:
                     snap.price = tech.current_price
-        except Exception:
-            pass
+        except Exception as e:
+            warnings.append(f"{ticker}: technicals failed: {e}")
 
         snapshots[ticker] = snap
 

@@ -71,6 +71,8 @@ class VolSurfaceService:
 
         chain_df = self.data_service.get_options_chain(ticker)
         ohlcv = self.data_service.get_ohlcv(ticker)
+        if ohlcv is None or ohlcv.empty:
+            raise ValueError(f"No OHLCV data for {ticker} — cannot compute vol surface")
         underlying_price = float(ohlcv["Close"].iloc[-1])
 
         return compute_vol_surface(chain_df, underlying_price, ticker, as_of=as_of)

@@ -48,16 +48,24 @@ def check_portfolio_health(request: HealthRequest, ma: "object") -> HealthRespon
         except Exception as e:
             warnings.append(f"{ticker}: {e}")
 
-    sentinel = assess_crash_sentinel(regime_results=regime_results, iv_ranks=iv_ranks)
-    signal = str(sentinel.signal.value).upper() if hasattr(sentinel.signal, 'value') else str(sentinel.signal).upper()
+    try:
+        sentinel = assess_crash_sentinel(regime_results=regime_results, iv_ranks=iv_ranks)
+        signal = str(sentinel.signal.value).upper() if hasattr(sentinel.signal, 'value') else str(sentinel.signal).upper()
+    except Exception as e:
+        warnings.append(f"Crash sentinel failed: {e}")
+        signal = "UNKNOWN"
 
     has_broker = ma.market_data is not None
-    trust = compute_trust_report(
-        mode="standalone", has_broker=has_broker, has_iv_rank=has_broker,
-        has_vol_surface=False, entry_credit_source="broker" if has_broker else "estimate",
-        regime_confidence=0.9,
-    )
-    trust_str = f"{trust.overall_level} ({trust.data_quality.trust_score:.0%})" if hasattr(trust, 'data_quality') else "unknown"
+    try:
+        trust = compute_trust_report(
+            mode="standalone", has_broker=has_broker, has_iv_rank=has_broker,
+            has_vol_surface=False, entry_credit_source="broker" if has_broker else "estimate",
+            regime_confidence=0.9,
+        )
+        trust_str = f"{trust.overall_level} ({trust.data_quality.trust_score:.0%})" if hasattr(trust, 'data_quality') else "unknown"
+    except Exception as e:
+        warnings.append(f"Trust report failed: {e}")
+        trust_str = "unknown"
 
     risk_pct = request.total_risk_deployed / request.capital if request.capital > 0 else 0
     safe = signal in ("GREEN", "YELLOW") and risk_pct < 0.30

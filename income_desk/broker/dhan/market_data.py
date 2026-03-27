@@ -212,6 +212,8 @@ class DhanMarketData(MarketDataProvider):
         method without a real client will raise AttributeError or return [].
         """
         self._client = client
+        self._price_cache: dict[str, tuple[float, float]] = {}
+        self._PRICE_CACHE_TTL = 5.0
 
     @property
     def provider_name(self) -> str:
@@ -289,6 +291,9 @@ class DhanMarketData(MarketDataProvider):
         """
         from income_desk.models.quotes import OptionQuote
 
+        if self._client is None:
+            return []
+
         scrip_code = self._resolve_scrip_code(ticker)
         if scrip_code is None:
             return []
@@ -308,6 +313,8 @@ class DhanMarketData(MarketDataProvider):
                     under_security_id=scrip_code,  # int, not str
                     under_exchange_segment=chain_segment,
                 )
+                if not isinstance(exp_response, dict):
+                    return []
                 # Response: {data: {data: ["2026-03-27", ...], status: "success"}}
                 exp_outer = exp_response.get("data", {}) if isinstance(exp_response, dict) else {}
                 exp_list = exp_outer.get("data", exp_outer) if isinstance(exp_outer, dict) else exp_outer
@@ -479,6 +486,9 @@ class DhanMarketData(MarketDataProvider):
         Returns dict keyed by ``"{strike}{C|P}"`` (e.g. ``"23000C"``),
         with values ``{"delta": .., "gamma": .., "theta": .., "vega": .., "iv": ..}``.
         """
+        if self._client is None:
+            return {}
+
         # Resolve ticker
         if isinstance(legs_or_ticker, str) and legs_or_ticker:
             ticker = legs_or_ticker
@@ -521,11 +531,6 @@ class DhanMarketData(MarketDataProvider):
 
         return result
 
-    # Session-level price cache: avoids hammering Dhan for the same ticker
-    # within a short window. Entries are (price, timestamp).
-    _price_cache: dict[str, tuple[float, float]] = {}
-    _PRICE_CACHE_TTL = 5.0  # seconds
-
     def get_underlying_price(self, ticker: str) -> float | None:
         """Get current price of underlying (index or equity) via ticker_data.
 
@@ -534,6 +539,9 @@ class DhanMarketData(MarketDataProvider):
         Caches results for 5 seconds to reduce API calls.
         """
         import time as _time
+
+        if self._client is None:
+            return None
 
         upper = ticker.upper()
 
@@ -586,6 +594,9 @@ class DhanMarketData(MarketDataProvider):
         Returns dict of ticker → price. Missing tickers omitted.
         """
         import time as _time
+
+        if self._client is None:
+            return {}
 
         if not tickers:
             return {}

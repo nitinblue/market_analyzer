@@ -40,8 +40,8 @@ def scan_universe(request: ScanRequest, ma: "object") -> ScanResponse:
                 ticker=ticker, regime_id=rid, regime_label=_LABELS.get(rid, f"R{rid}"),
                 confidence=r.confidence, tradeable=rid in (1, 2, 3),
             )
-        except Exception:
-            pass
+        except Exception as e:
+            warnings.append(f"{ticker}: regime detection failed: {e}")
 
     tradeable = [t for t, r in regimes.items() if r.tradeable]
     candidates = []

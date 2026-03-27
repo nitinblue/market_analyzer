@@ -56,12 +56,14 @@ def generate_daily_report(request: DailyReportRequest, ma: "object | None" = Non
     risk_pct = request.total_risk_deployed / request.capital if request.capital > 0 else 0
 
     currency = "INR" if request.market == "India" else "USD"
-    summary = (
-        f"{len(opened)} opened, {len(closed)} closed, {len(adjusted)} adjusted. "
-        f"Realized P&L: {currency} {realized:,.0f}. "
-        f"Win rate: {win_rate:.0%}. " if win_rate is not None else ""
-        f"{request.positions_open} positions open, {risk_pct:.1%} risk deployed."
-    )
+    parts = [
+        f"{len(opened)} opened, {len(closed)} closed, {len(adjusted)} adjusted.",
+        f"Realized P&L: {currency} {realized:,.0f}.",
+    ]
+    if win_rate is not None:
+        parts.append(f"Win rate: {win_rate:.0%}.")
+    parts.append(f"{request.positions_open} positions open, {risk_pct:.1%} risk deployed.")
+    summary = " ".join(parts)
 
     return DailyReportResponse(
         meta=WorkflowMeta(as_of=timestamp, market=request.market, data_source="records"),
