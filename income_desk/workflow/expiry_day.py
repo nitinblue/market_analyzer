@@ -36,7 +36,8 @@ def check_expiry_day(request: ExpiryDayRequest, ma: "object | None" = None) -> E
 
     positions = []
     for pos in request.positions:
-        is_expiry = pos.dte_remaining == 0 or (expiry_index and pos.ticker == expiry_index)
+        is_expiry = pos.dte_remaining == 0 or (expiry_index is not None and pos.ticker == expiry_index)
+        is_expiry = bool(is_expiry)  # ensure bool, not None
 
         if is_expiry:
             urgency = "close_before_close"
