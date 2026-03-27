@@ -142,12 +142,30 @@ def rank_opportunities(
                     pass
             atr_pct = 1.0
 
+        # Compute wing width from legs if trade_spec reports 0
+        wing_from_spec = ts.wing_width_points or 0.0
+        if wing_from_spec == 0 and ts.legs and len(ts.legs) >= 2:
+            strikes = sorted(set(leg.strike for leg in ts.legs))
+            if len(strikes) >= 2:
+                wing_from_spec = strikes[1] - strikes[0]
+
+        # Reject trades with degenerate legs (same strike on both sides)
+        if ts.legs and len(ts.legs) >= 2:
+            unique_strikes = set(leg.strike for leg in ts.legs)
+            if len(unique_strikes) < 2:
+                blocked.append(BlockedTrade(
+                    ticker=ticker, structure=str(st),
+                    reason=f"Degenerate trade: all legs at same strike ({unique_strikes})",
+                    score=entry.composite_score,
+                ))
+                continue
+
         # Estimate entry credit
         entry_credit = 0.0
         if ts.max_entry_price:
             entry_credit = ts.max_entry_price
-        elif ts.wing_width_points:
-            entry_credit = ts.wing_width_points * 0.28  # rough estimate
+        elif wing_from_spec > 0:
+            entry_credit = wing_from_spec * 0.28  # rough estimate
 
         # POP estimation
         pop_pct = None
@@ -162,7 +180,7 @@ def rank_opportunities(
                 pop_pct = pop_result.pop_pct
                 ev = pop_result.expected_value
         except Exception as e:
-            warnings.append(f"{ticker}: POP estimation failed: {e}")
+            warnings.append(f"{ticker}: POP estimation failed: {e} (entry={entry_credit:.4f}, regime={regime_id}, atr={atr_pct:.2f}, price={current_price:.2f}, st={st})")
 
         # If POP couldn't be estimated, block the trade (no guessing)
         if pop_pct is None:
@@ -190,9 +208,18 @@ def rank_opportunities(
             from income_desk import MarketRegistry
             _reg = MarketRegistry()
 
-            wing_width = ts.wing_width_points or 5.0
-            max_profit_per = entry_credit * lot_size
-            max_loss_per = (wing_width * lot_size) - max_profit_per
+            wing_width = wing_from_spec or ts.wing_width_points or 5.0
+            order_side = getattr(ts, "order_side", "credit")
+            order_side_str = getattr(order_side, "value", str(order_side)) if order_side else "credit"
+
+            if order_side_str == "debit":
+                # Debit spread: we pay entry_credit, max profit = wing - debit
+                max_loss_per = entry_credit * lot_size  # what we pay
+                max_profit_per = max((wing_width * lot_size) - max_loss_per, 0)
+            else:
+                # Credit spread: we receive entry_credit, max loss = wing - credit
+                max_profit_per = entry_credit * lot_size
+                max_loss_per = (wing_width * lot_size) - max_profit_per
 
             # India margin: SPAN + exposure is much higher than theoretical max loss.
             # Real SPAN margin for short options = ~15-20% of underlying notional.
