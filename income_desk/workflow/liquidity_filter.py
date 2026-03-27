@@ -315,3 +315,111 @@ def get_liquid_ic_strikes(
         "short_call_iv": short_call_q.implied_volatility,
         "fill_quality": "good",
     }
+
+
+def get_liquid_credit_spread_strikes(
+    ticker: str,
+    underlying_price: float,
+    direction: str,
+    ma: MarketAnalyzer,
+    short_distance_pct: float = 0.03,
+    min_oi: int = MIN_OI,
+) -> dict | None:
+    """Find liquid credit spread strikes from the live chain.
+
+    Args:
+        ticker: Underlying.
+        underlying_price: Current price.
+        direction: "bullish" (sell put spread) or "bearish" (sell call spread).
+        ma: MarketAnalyzer with broker.
+        short_distance_pct: How far OTM to place short strike.
+        min_oi: Minimum OI.
+
+    Returns:
+        Dict with short_strike, long_strike, option_type, net_credit, OI, or None.
+    """
+    chain = []
+    if ma.market_data is not None:
+        try:
+            chain = ma.market_data.get_option_chain(ticker)
+        except Exception:
+            return None
+
+    if not chain:
+        return None
+
+    if direction == "bullish":
+        # Bull put spread: sell OTM put, buy further OTM put
+        opt_type = "put"
+        liquid = sorted(
+            [q for q in chain if q.option_type == "put"
+             and (q.open_interest or 0) >= min_oi
+             and (q.bid or 0) > MIN_BID
+             and q.strike < underlying_price],
+            key=lambda q: q.strike, reverse=True,
+        )
+        target = underlying_price * (1 - short_distance_pct)
+    else:
+        # Bear call spread: sell OTM call, buy further OTM call
+        opt_type = "call"
+        liquid = sorted(
+            [q for q in chain if q.option_type == "call"
+             and (q.open_interest or 0) >= min_oi
+             and (q.bid or 0) > MIN_BID
+             and q.strike > underlying_price],
+            key=lambda q: q.strike,
+        )
+        target = underlying_price * (1 + short_distance_pct)
+
+    if len(liquid) < 2:
+        return None
+
+    # Short strike: first liquid beyond target
+    short_q = None
+    if direction == "bullish":
+        for q in liquid:
+            if q.strike <= target:
+                short_q = q
+                break
+    else:
+        for q in liquid:
+            if q.strike >= target:
+                short_q = q
+                break
+
+    if short_q is None:
+        short_q = liquid[0]
+
+    # Long strike: next liquid beyond short
+    long_q = None
+    if direction == "bullish":
+        for q in liquid:
+            if q.strike < short_q.strike:
+                long_q = q
+                break
+    else:
+        for q in liquid:
+            if q.strike > short_q.strike:
+                long_q = q
+                break
+
+    if long_q is None:
+        return None
+
+    short_mid = ((short_q.bid or 0) + (short_q.ask or 0)) / 2
+    long_mid = ((long_q.bid or 0) + (long_q.ask or 0)) / 2
+    net_credit = short_mid - long_mid
+    width = abs(short_q.strike - long_q.strike)
+
+    return {
+        "short_strike": short_q.strike,
+        "long_strike": long_q.strike,
+        "option_type": opt_type,
+        "width": width,
+        "net_credit_est": round(net_credit, 2),
+        "short_oi": short_q.open_interest or 0,
+        "long_oi": long_q.open_interest or 0,
+        "short_delta": short_q.delta,
+        "short_iv": short_q.implied_volatility,
+        "fill_quality": "good",
+    }

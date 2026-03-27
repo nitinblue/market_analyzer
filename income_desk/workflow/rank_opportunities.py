@@ -250,6 +250,44 @@ def rank_opportunities(
 
         # --- Liquidity verification (only propose what's actually tradeable) ---
         liquid_strikes = None
+        if st == "credit_spread" and ma.market_data is not None:
+            from income_desk.workflow.liquidity_filter import get_liquid_credit_spread_strikes
+            import time as _time
+            _time.sleep(3.5)
+            direction = entry.direction or "neutral"
+            cs = get_liquid_credit_spread_strikes(
+                ticker, current_price, direction, ma,
+                short_distance_pct=0.03 if regime_id == 1 else 0.04,
+            )
+            if cs is None:
+                blocked.append(BlockedTrade(
+                    ticker=ticker, structure=str(st),
+                    reason="No liquid credit spread strikes in broker chain",
+                    score=entry.composite_score,
+                ))
+                continue
+            entry_credit = cs["net_credit_est"]
+            wing_width = cs["width"]
+            max_profit_per = entry_credit * lot_size
+            max_profit = max_profit_per * contracts
+            # Map to IC-style fields for uniform output
+            if cs["option_type"] == "put":
+                liquid_strikes = {
+                    "short_put": cs["short_strike"], "long_put": cs["long_strike"],
+                    "short_call": 0, "long_call": 0,
+                    "short_put_oi": cs["short_oi"], "short_call_oi": 0,
+                    "net_credit_est": cs["net_credit_est"],
+                    "put_wing": cs["width"], "call_wing": 0,
+                }
+            else:
+                liquid_strikes = {
+                    "short_put": 0, "long_put": 0,
+                    "short_call": cs["short_strike"], "long_call": cs["long_strike"],
+                    "short_put_oi": 0, "short_call_oi": cs["short_oi"],
+                    "net_credit_est": cs["net_credit_est"],
+                    "put_wing": 0, "call_wing": cs["width"],
+                }
+
         if st in ("iron_condor", "iron_butterfly") and ma.market_data is not None:
             from income_desk.workflow.liquidity_filter import get_liquid_ic_strikes
             import time as _time
