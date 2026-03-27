@@ -186,6 +186,28 @@ def validate_trade_data_sanity(trade: dict) -> list[SanityIssue]:
             current_value=total_pnl,
         ))
 
+    # ── underlying_price wildly different from strike range → critical ──
+    # Catches 100× price errors (e.g. BAC at 4814 instead of ~48)
+    underlying_price = trade.get("underlying_price")
+    if underlying_price is not None and underlying_price > 0 and legs:
+        strikes = [
+            lg.get("strike") for lg in legs
+            if lg.get("strike") is not None and lg.get("strike") > 0
+        ]
+        if strikes:
+            avg_strike = sum(strikes) / len(strikes)
+            ratio = underlying_price / avg_strike if avg_strike > 0 else 0
+            if ratio > 10 or (ratio > 0 and ratio < 0.1):
+                issues.append(SanityIssue(
+                    field="underlying_price",
+                    severity="critical",
+                    message=(
+                        f"underlying_price ({underlying_price}) is {ratio:.0f}× "
+                        f"vs avg strike ({avg_strike:.0f}) — likely 100× price error"
+                    ),
+                    current_value=underlying_price,
+                ))
+
     # ── option legs without strike → critical ──
     for i, leg in enumerate(legs):
         asset_type = (leg.get("asset_type") or "").lower()

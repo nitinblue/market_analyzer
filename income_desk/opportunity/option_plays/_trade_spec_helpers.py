@@ -1175,11 +1175,12 @@ def _build_fallback_setup_trade_spec(
             **mkt,
         )
 
-    # R3: debit spread
+    # R3/R4: debit spread (directional, risk-defined)
     db_dir = direction if direction in ("bullish", "bearish") else "bullish"
     if db_dir == "bullish":
         long_strike = _snap(price)
         short_strike = _snap(price + wing_mult * atr)
+        wing_pts = short_strike - long_strike
         legs = [
             LegSpec(
                 role="long_call", action=LegAction.BUY_TO_OPEN,
@@ -1197,6 +1198,7 @@ def _build_fallback_setup_trade_spec(
     else:
         long_strike = _snap(price)
         short_strike = _snap(price - wing_mult * atr)
+        wing_pts = long_strike - short_strike
         legs = [
             LegSpec(
                 role="long_put", action=LegAction.BUY_TO_OPEN,
@@ -1214,6 +1216,7 @@ def _build_fallback_setup_trade_spec(
     return TradeSpec(
         ticker=ticker, legs=legs, underlying_price=price,
         target_dte=target_dte, target_expiration=expiration,
+        wing_width_points=wing_pts,
         spec_rationale=(
             f"ATR-based {db_dir} debit spread (no vol surface, R{regime_id}). "
             f"~{target_dte} DTE. Strike interval: {si or 'US default'}."
@@ -1258,11 +1261,14 @@ def build_setup_trade_spec(
     if vol_surface is None or not vol_surface.term_structure:
         # Fallback: check if this instrument has options via registry
         inst = _get_instrument_info(ticker)
-        if inst is not None and inst.has_0dte:
-            # India indices (NIFTY, BANKNIFTY) and 0DTE-capable instruments
+        if inst is not None and inst.max_dte > 0:
+            # Any instrument with options (India indices, India F&O stocks, US ETFs)
+            # Clamp DTE range to instrument's max_dte
+            clamped_max = min(target_dte_max, inst.max_dte)
+            clamped_min = min(target_dte_min, clamped_max)
             return _build_fallback_setup_trade_spec(
                 ticker, price, atr, direction, regime_id,
-                target_dte_min, target_dte_max,
+                clamped_min, clamped_max,
             )
         # For non-options instruments or unknown tickers, return None
         return None
@@ -1384,13 +1390,36 @@ def compute_max_entry_price_from_quotes(
 def _should_use_equity(ticker: str) -> bool:
     """Check if this ticker should use cash equity instead of options.
 
-    Returns True for India stocks (not indices) that lack weekly options,
-    meaning options liquidity is typically poor for short-term strategies.
+    India F&O stocks (RELIANCE, TCS, INFY, etc.) have monthly options
+    with reasonable liquidity on Dhan — use options-based strategies for
+    them.  Only fall back to equity for stocks with truly poor options
+    liquidity (e.g. micro-caps not in F&O).
     """
     inst = _get_instrument_info(ticker)
     if inst is None:
         return False
-    return inst.market == "INDIA" and not inst.has_0dte and inst.asset_type == "equity"
+
+    # Non-India: never force equity
+    if inst.market != "INDIA":
+        return False
+
+    # India indices (NIFTY, BANKNIFTY): always use options
+    if inst.asset_type == "index":
+        return False
+
+    # India F&O stocks: use options if they have decent liquidity
+    # (all stocks in the registry are F&O-eligible with monthly options)
+    liquidity = getattr(inst, "options_liquidity", None)
+    if liquidity in ("high", "medium"):
+        return False
+
+    # Stocks without options_liquidity info: they're in the F&O list,
+    # so default to options (the whole point of being in the registry)
+    if liquidity is None:
+        return False
+
+    # Only truly illiquid stocks fall back to equity
+    return True
 
 
 def build_equity_trade_spec(

@@ -75,11 +75,17 @@ def run_trader(
     risk_tolerance: str = "moderate",
     sim: SimulatedMarketData | None = None,
     max_trades: int = 5,
+    ma: "MarketAnalyzer | None" = None,
 ) -> TraderReport:
     """Run complete trading simulation end-to-end.
 
     This is the DEMO runner. Shows the full income-desk pipeline
     from setup to monitoring, with real validation gates and sizing.
+
+    Pass ``ma`` to use a pre-built MarketAnalyzer (e.g. with live
+    broker data).  When *ma* is provided, *sim* is only used for
+    ``iv_rank`` lookups; if *sim* is ``None`` a default is created so
+    those lookups don't crash.
     """
     from income_desk import DataService, MarketAnalyzer
     from income_desk.features.crash_sentinel import assess_crash_sentinel
@@ -95,17 +101,23 @@ def run_trader(
     from income_desk.validation import run_daily_checks
 
     # ── Phase 1: Setup ───────────────────────────────────────────────────────
-    if sim is None:
-        if market == "India":
-            sim = create_india_trading()
-        else:
-            sim = create_ideal_income()
+    if ma is None:
+        # No pre-built analyzer — fall back to simulated data
+        if sim is None:
+            if market == "India":
+                sim = create_india_trading()
+            else:
+                sim = create_ideal_income()
 
-    ma = MarketAnalyzer(
-        data_service=DataService(),
-        market_data=sim,
-        market_metrics=SimulatedMetrics(sim),
-    )
+        ma = MarketAnalyzer(
+            data_service=DataService(),
+            market_data=sim,
+            market_metrics=SimulatedMetrics(sim),
+        )
+    else:
+        # Pre-built MA (live broker). Still need a sim for iv_rank fallback.
+        if sim is None:
+            sim = create_india_trading() if market == "India" else create_ideal_income()
 
     port = create_demo_portfolio(capital, risk_tolerance, market)
 
@@ -122,7 +134,7 @@ def run_trader(
 
     # ── Phase 2: Scan & Rank ─────────────────────────────────────────────────
     if market == "India":
-        tickers = ["NIFTY", "BANKNIFTY", "FINNIFTY"]
+        tickers = ["NIFTY", "BANKNIFTY", "RELIANCE", "TCS", "INFY", "HDFCBANK"]
     else:
         tickers = ["SPY", "QQQ", "IWM", "GLD", "TLT"]
 
@@ -172,22 +184,29 @@ def run_trader(
         ticker = entry.ticker
         ts = entry.trade_spec
 
-        # Get simulated credit from quotes
-        try:
-            lqs = sim.get_quotes(ts.legs, ticker=ticker)
-            credit = 0.0
-            for leg, lq in zip(ts.legs, lqs):
-                if lq is None:
-                    continue
-                if leg.action.value == "STO":
-                    credit += lq.mid
-                else:
-                    credit -= lq.mid
-            credit = abs(round(credit, 2))
-        except Exception:
+        # Get entry price: credit for option spreads, price for equity
+        st = ts.structure_type or ""
+        if st in ("equity_long", "equity_short"):
+            # Equity trade: entry_price is the stock price, no "credit"
+            credit = ts.underlying_price or sim.get_underlying_price(ticker) or 100.0
+        elif ts.legs:
+            try:
+                lqs = sim.get_quotes(ts.legs, ticker=ticker)
+                credit = 0.0
+                for leg, lq in zip(ts.legs, lqs):
+                    if lq is None:
+                        continue
+                    if leg.action.value == "STO":
+                        credit += lq.mid
+                    else:
+                        credit -= lq.mid
+                credit = abs(round(credit, 2))
+            except Exception:
+                credit = 0.0
+        else:
             credit = 0.0
 
-        if credit < 0.50:
+        if st not in ("equity_long", "equity_short") and credit < 0.50:
             blocked.append({"ticker": ticker, "reason": f"credit too low (${credit:.2f})"})
             continue
 
@@ -247,27 +266,41 @@ def run_trader(
         pop_pct = pop.pop_pct if pop else 0.65
         ev = pop.expected_value if pop else credit * 0.3
 
-        # Size the position
-        wing_width = ts.wing_width_points or 5.0
-        max_profit_per = credit * (ts.lot_size or 100)
-        max_loss_per = (wing_width * (ts.lot_size or 100)) - max_profit_per
-        risk_per_contract = max(max_loss_per, 1.0)
+        # Hard POP floor — no trade booked below 40% POP
+        if pop and pop.pop_pct < 0.40:
+            blocked.append({"ticker": ticker, "reason": f"POP too low ({pop.pop_pct:.0%})"})
+            continue
 
-        try:
-            sz = compute_position_size(
-                pop_pct=pop_pct,
-                max_profit=max_profit_per,
-                max_loss=max_loss_per,
-                capital=capital,
-                risk_per_contract=risk_per_contract,
-                regime_id=regime_id,
-                wing_width=wing_width,
-                safety_factor=0.5,
-                max_contracts=20,
-            )
-            contracts = sz.recommended_contracts
-        except Exception:
-            contracts = 1
+        # Size the position
+        lot_size = ts.lot_size or 100
+        if st in ("equity_long", "equity_short"):
+            # Equity sizing: risk = 1.5 ATR per lot (stop distance)
+            stop_risk = 1.5 * (atr_pct / 100.0) * current_price * lot_size
+            target_profit = 2.0 * (atr_pct / 100.0) * current_price * lot_size
+            max_risk_per_trade = capital * 0.04  # 4% max risk per trade
+            contracts = max(1, int(max_risk_per_trade / stop_risk)) if stop_risk > 0 else 1
+            contracts = min(contracts, 5)  # cap
+        else:
+            wing_width = ts.wing_width_points or 5.0
+            max_profit_per = credit * lot_size
+            max_loss_per = (wing_width * lot_size) - max_profit_per
+            risk_per_contract = max(max_loss_per, 1.0)
+
+            try:
+                sz = compute_position_size(
+                    pop_pct=pop_pct,
+                    max_profit=max_profit_per,
+                    max_loss=max_loss_per,
+                    capital=capital,
+                    risk_per_contract=risk_per_contract,
+                    regime_id=regime_id,
+                    wing_width=wing_width,
+                    safety_factor=0.5,
+                    max_contracts=20,
+                )
+                contracts = sz.recommended_contracts
+            except Exception:
+                contracts = 1
 
         if contracts == 0:
             blocked.append({"ticker": ticker, "reason": "Kelly = 0 contracts"})

@@ -251,16 +251,16 @@ def run(tickers: list[str] | None = None, detail: bool = False):
     for ticker in list(ohlcv_data.keys())[:3]:
         try:
             levels = ma.levels.analyze(ticker)
-            support_count = len([l for l in levels.levels if l.role == "support"]) if hasattr(levels, 'levels') else 0
-            resist_count = len([l for l in levels.levels if l.role == "resistance"]) if hasattr(levels, 'levels') else 0
-            _test_result(f"Levels {ticker}", True,
+            support_count = len(levels.support_levels)
+            resist_count = len(levels.resistance_levels)
+            _test_result(f"Levels {ticker}", support_count + resist_count > 0,
                          f"{support_count} support, {resist_count} resistance")
 
             # Check if pivot sources are present
-            if hasattr(levels, 'levels'):
-                pivot_sources = [l for l in levels.levels if 'pivot' in str(getattr(l, 'sources', [])).lower()]
-                if pivot_sources:
-                    print(f"       Pivot-sourced levels: {len(pivot_sources)}")
+            all_levels = levels.support_levels + levels.resistance_levels
+            pivot_sources = [l for l in all_levels if any('pivot' in s.value.lower() for s in l.sources)]
+            if pivot_sources:
+                print(f"       Pivot-sourced levels: {len(pivot_sources)}")
         except Exception as e:
             _test_result(f"Levels {ticker}", False, str(e))
             failures.append(f"Levels failed for {ticker}: {e}")
@@ -328,10 +328,30 @@ def run(tickers: list[str] | None = None, detail: bool = False):
         tech = technicals["NIFTY"]
 
         try:
-            # Build dummy TradeSpec for NIFTY IC
+            # Build dummy TradeSpec for NIFTY IC with proper legs
             from income_desk.models.opportunity import TradeSpec, LegSpec, LegAction
+            price = tech.current_price
+            sp = round(price - 200, -2)
+            lp = round(price - 400, -2)
+            sc = round(price + 200, -2)
+            lc = round(price + 400, -2)
             dummy_spec = TradeSpec(
-                ticker="NIFTY", legs=[], underlying_price=tech.current_price,
+                ticker="NIFTY",
+                legs=[
+                    LegSpec(role="short_put", action=LegAction.SELL_TO_OPEN,
+                            option_type="put", strike=sp, strike_label=f"SP {sp}",
+                            expiration=date.today(), days_to_expiry=7, atm_iv_at_expiry=0.0),
+                    LegSpec(role="long_put", action=LegAction.BUY_TO_OPEN,
+                            option_type="put", strike=lp, strike_label=f"LP {lp}",
+                            expiration=date.today(), days_to_expiry=7, atm_iv_at_expiry=0.0),
+                    LegSpec(role="short_call", action=LegAction.SELL_TO_OPEN,
+                            option_type="call", strike=sc, strike_label=f"SC {sc}",
+                            expiration=date.today(), days_to_expiry=7, atm_iv_at_expiry=0.0),
+                    LegSpec(role="long_call", action=LegAction.BUY_TO_OPEN,
+                            option_type="call", strike=lc, strike_label=f"LC {lc}",
+                            expiration=date.today(), days_to_expiry=7, atm_iv_at_expiry=0.0),
+                ],
+                underlying_price=price,
                 target_dte=7, target_expiration=date.today(),
                 spec_rationale="test", wing_width_points=200.0,
                 structure_type="iron_condor", order_side="credit",

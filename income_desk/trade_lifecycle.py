@@ -203,6 +203,25 @@ def _compute_breakevens(
                 return round(puts[0].strike - entry_price, 2), round(calls[0].strike + entry_price, 2)
         return None, None
 
+    # Equity trades: use stop/target from the trade spec's exit_notes or
+    # ATR-based approximation from underlying_price ± wing_width_points
+    if st in ("equity_long", "equity_short"):
+        price = trade_spec.underlying_price or 0
+        if price > 0 and trade_spec.wing_width_points:
+            w = trade_spec.wing_width_points
+            return round(price - w, 2), round(price + w, 2)
+        return None, None
+
+    # Fallback for any structure with wing_width but empty legs (e.g. no broker)
+    if not legs and trade_spec.wing_width_points and trade_spec.underlying_price:
+        price = trade_spec.underlying_price
+        w = trade_spec.wing_width_points
+        if trade_spec.order_side == "credit":
+            return round(price - w, 2), round(price + w, 2)
+        else:
+            # Debit: breakeven is strike + debit paid
+            return round(price - w, 2), round(price + w, 2)
+
     return None, None
 
 
@@ -821,6 +840,68 @@ def estimate_pop(
             method="regime_historical",
             regime_id=regime_id,
             notes=notes,
+            data_gaps=gaps,
+        )
+
+    if st in ("equity_long", "equity_short"):
+        # Equity trade: POP based on ATR distance to stop vs target.
+        # Stop and target are encoded in the trade spec (ATR-based).
+        daily_sigma = (atr_pct / 100.0) / _atr_sigma_factor
+        if iv_rank is not None:
+            iv_factor = 0.7 + (iv_rank / 100) * 0.6
+            daily_sigma = daily_sigma * iv_factor
+        # Equity trades have no expiry — use 20-day holding period
+        holding_days = 20
+        expected_move = daily_sigma * math.sqrt(holding_days) * current_price
+        regime_factor = {1: 0.40, 2: 0.70, 3: 1.10, 4: 1.50}.get(regime_id, 1.0)
+        adjusted_move = expected_move * regime_factor
+
+        if adjusted_move <= 0:
+            return None
+
+        # Parse stop/target from exit_notes (ATR-based)
+        # Format: "Stop loss at X (1.5 ATR)", "Target at Y (2.0 ATR)"
+        stop_dist = 1.5 * (atr_pct / 100.0) * current_price
+        target_dist = 2.0 * (atr_pct / 100.0) * current_price
+
+        # POP = probability of reaching target before stop
+        # Simplified: P(move > target_dist) for directional
+        dist = target_dist / adjusted_move
+        pop = 1.0 - 0.5 * (1 + math.erf(dist / math.sqrt(2)))
+        pop = max(0.05, min(0.95, pop))
+
+        lot_size = trade_spec.lot_size or 1
+        max_profit = round(target_dist * lot_size * contracts, 2)
+        max_loss = round(stop_dist * lot_size * contracts, 2)
+        ev = pop * max_profit - (1 - pop) * max_loss
+
+        rr = round(max_loss / max_profit, 2) if max_profit > 0 else 99.0
+        quality, qscore = _trade_quality(pop, ev, rr, max_profit)
+
+        gaps: list[DataGap] = []
+        gaps.append(DataGap(
+            field="pop",
+            reason="Equity POP uses ATR-based stop/target — no options pricing",
+            impact="medium",
+            affects="POP approximation; actual fill depends on execution",
+        ))
+
+        regime_names = {1: "R1 Low-Vol MR", 2: "R2 High-Vol MR", 3: "R3 Low-Vol Trend", 4: "R4 High-Vol Trend"}
+        return POPEstimate(
+            pop_pct=round(pop, 4),
+            expected_value=round(ev, 2),
+            max_profit=max_profit,
+            max_loss=max_loss,
+            risk_reward_ratio=rr,
+            trade_quality=quality,
+            trade_quality_score=round(qscore, 3),
+            method="regime_historical",
+            regime_id=regime_id,
+            notes=(
+                f"Equity {st.replace('equity_', '')}: "
+                f"stop {stop_dist:.0f} / target {target_dist:.0f} "
+                f"({regime_names.get(regime_id, f'R{regime_id}')})"
+            ),
             data_gaps=gaps,
         )
 

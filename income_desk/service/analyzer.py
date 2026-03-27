@@ -94,7 +94,7 @@ class MarketAnalyzer:
             regime_service=self.regime,
             data_service=data_service,
         )
-        self.vol_surface = VolSurfaceService(data_service=data_service)
+        self.vol_surface = VolSurfaceService(data_service=data_service, market_data=market_data)
         self.opportunity = OpportunityService(
             regime_service=self.regime,
             technical_service=self.technicals,

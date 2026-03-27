@@ -55,6 +55,18 @@ from income_desk.regression.pipeline_validation import (
     validate_pipeline_health,
     validate_full_pipeline,
 )
+from income_desk.regression.release_readiness import (
+    ReadinessReport,
+    StageResult,
+    StageVerdict,
+    APICall,
+    run_release_readiness,
+)
+from income_desk.regression.readiness_report import (
+    generate_html,
+    write_html,
+    write_manifest,
+)
 
 __all__ = [
     "validate_snapshot",
@@ -82,4 +94,12 @@ __all__ = [
     "validate_trade_data_sanity",
     "validate_pipeline_health",
     "validate_full_pipeline",
+    "ReadinessReport",
+    "StageResult",
+    "StageVerdict",
+    "APICall",
+    "run_release_readiness",
+    "generate_html",
+    "write_html",
+    "write_manifest",
 ]

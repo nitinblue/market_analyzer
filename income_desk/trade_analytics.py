@@ -710,6 +710,55 @@ def _build_strategy_label(
 
 
 # =========================================================================
+# Function: compute_gamma_dollars
+# =========================================================================
+
+
+def compute_gamma_dollars(
+    gamma: float,
+    spot_price: float,
+    multiplier: int = 100,
+    contracts: int = 1,
+) -> float:
+    """Dollar P&L impact from a 1% move in the underlying due to gamma.
+
+    Formula: 0.5 × gamma × (spot × 0.01)² × multiplier × contracts
+    This is the second-order Taylor term: ½ Γ (ΔS)² scaled to contracts.
+
+    Args:
+        gamma: Per-share gamma (∂²V/∂S²).
+        spot_price: Current underlying price.
+        multiplier: Contract multiplier (100 US options, 25 NIFTY, etc.).
+        contracts: Number of contracts.
+
+    Returns:
+        Dollar (or INR) P&L from gamma on a 1% underlying move.
+    """
+    move = spot_price * 0.01
+    return 0.5 * gamma * move * move * multiplier * contracts
+
+
+# =========================================================================
+# Function: compute_utilization
+# =========================================================================
+
+
+def compute_utilization(current: float, limit: float) -> float:
+    """Percentage of a risk limit consumed.
+
+    Args:
+        current: Current exposure value (e.g. abs(delta), buying power used).
+        limit: Maximum allowed value.
+
+    Returns:
+        Utilization as 0–100 float. Returns 0.0 if limit is zero.
+    """
+    if limit == 0:
+        return 0.0
+    return abs(current) / abs(limit) * 100.0
+
+
+# =========================================================================
 # Function 4: compute_portfolio_analytics
 # =========================================================================
 

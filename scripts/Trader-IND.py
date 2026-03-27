@@ -29,6 +29,10 @@ import io
 import argparse
 import warnings
 import logging
+from pathlib import Path
+
+# Ensure income_desk is importable when run as a script
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 warnings.filterwarnings("ignore")
@@ -47,6 +51,7 @@ def main():
     args = parser.parse_args()
 
     # Connect data source
+    sim = None  # only set when using simulated data
     if args.broker == "dhan":
         try:
             from dotenv import load_dotenv
@@ -130,6 +135,7 @@ def main():
         risk_tolerance=args.risk,
         sim=sim_data,
         max_trades=5,
+        ma=ma if args.broker else None,
     )
 
     # Customize output for INR
