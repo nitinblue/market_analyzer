@@ -248,6 +248,30 @@ def rank_opportunities(
             ))
             continue
 
+        # --- Liquidity verification (only propose what's actually tradeable) ---
+        liquid_strikes = None
+        if st in ("iron_condor", "iron_butterfly") and ma.market_data is not None:
+            from income_desk.workflow.liquidity_filter import get_liquid_ic_strikes
+            import time as _time
+            _time.sleep(3.5)  # Dhan rate limit for chain call
+            liquid_strikes = get_liquid_ic_strikes(
+                ticker, current_price, ma,
+                short_distance_pct=0.03 if regime_id == 1 else 0.04,
+            )
+            if liquid_strikes is None:
+                blocked.append(BlockedTrade(
+                    ticker=ticker, structure=str(st),
+                    reason="No liquid strikes found in broker chain",
+                    score=entry.composite_score,
+                ))
+                continue
+            # Update entry_credit with actual chain data
+            entry_credit = liquid_strikes["net_credit_est"]
+            wing_width = max(liquid_strikes["put_wing"], liquid_strikes["call_wing"])
+            # Recalc profit with real credit
+            max_profit_per = entry_credit * lot_size
+            max_profit = max_profit_per * contracts
+
         seen_tickers.add(ticker)
 
         badge = ts.strategy_badge if ts.strategy_badge else str(st)
@@ -265,12 +289,20 @@ def rank_opportunities(
             max_risk=max_risk,
             max_profit=max_profit,
             entry_credit=entry_credit,
-            wing_width=ts.wing_width_points,
+            wing_width=wing_width if liquid_strikes else ts.wing_width_points,
             target_dte=ts.target_dte,
             lot_size=lot_size,
             currency=currency,
             rationale=entry.rationale or "",
             data_gaps=[g.reason for g in entry.data_gaps] if entry.data_gaps else [],
+            # Actual liquid strikes from broker chain
+            short_put=liquid_strikes["short_put"] if liquid_strikes else None,
+            long_put=liquid_strikes["long_put"] if liquid_strikes else None,
+            short_call=liquid_strikes["short_call"] if liquid_strikes else None,
+            long_call=liquid_strikes["long_call"] if liquid_strikes else None,
+            short_put_oi=liquid_strikes["short_put_oi"] if liquid_strikes else None,
+            short_call_oi=liquid_strikes["short_call_oi"] if liquid_strikes else None,
+            net_credit_per_unit=liquid_strikes["net_credit_est"] if liquid_strikes else None,
         ))
 
     return RankResponse(

@@ -42,6 +42,14 @@ class TradeProposal(BaseModel):
     currency: str = "USD"
     rationale: str = ""
     data_gaps: list[str] = []
+    # Verified liquid strikes from broker chain (None = not verified)
+    short_put: float | None = None
+    long_put: float | None = None
+    short_call: float | None = None
+    long_call: float | None = None
+    short_put_oi: int | None = None
+    short_call_oi: int | None = None
+    net_credit_per_unit: float | None = None
 
 
 class BlockedTrade(BaseModel):
