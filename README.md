@@ -373,6 +373,73 @@ Start with 1 contract. Validation gates protect your capital. System learns from
 calibrate_weights() learns → Kelly scales up → repeat
 ```
 
+## Workflow APIs
+
+15 high-level operations — one function call per trading action. All rate limiting, caching, and orchestration handled internally. Trades only propose strikes verified liquid in the broker's option chain.
+
+```python
+from income_desk.workflow import generate_daily_plan, DailyPlanRequest
+
+plan = generate_daily_plan(
+    DailyPlanRequest(tickers=["NIFTY", "BANKNIFTY", "RELIANCE", "TCS"], capital=5_000_000, market="India"),
+    ma,
+)
+# plan.proposed_trades[0].short_put = 2300 (verified OI=305,000)
+```
+
+| Category | Workflows |
+|----------|-----------|
+| Pre-market | `generate_daily_plan`, `snapshot_market` |
+| Scanning | `scan_universe`, `rank_opportunities` |
+| Trade entry | `validate_trade`, `size_position`, `price_trade` |
+| Positions | `monitor_positions`, `adjust_position`, `assess_overnight_risk` |
+| Portfolio risk | `aggregate_portfolio_greeks`, `check_portfolio_health` |
+| Expiry | `check_expiry_day` |
+| Reporting | `generate_daily_report` |
+
+Every workflow: Pydantic request in, Pydantic response out, `WorkflowMeta` with timestamp and warnings.
+
+---
+
+## Simulated Market Data — Weekend & After-Hours Testing
+
+Full pipeline works without broker, internet, or market hours. Swap one line to go from live to simulated.
+
+```python
+from income_desk.adapters.simulated import create_india_trading, create_ideal_income, SimulatedMetrics
+
+# India: 22 tickers (5 indices + 17 F&O stocks, correct strike intervals & lot sizes)
+sim = create_india_trading()
+
+# US: 16 tickers (SPY/QQQ/IWM + AAPL/MSFT/NVDA/TSLA + sector ETFs)
+sim = create_ideal_income()
+
+# Create analyzer — all 15 workflows work identically
+ma = MarketAnalyzer(data_service=DataService(), market_data=sim, market_metrics=SimulatedMetrics(sim))
+
+# Discovery: what tickers does this simulation support?
+sim.supported_tickers()   # ["NIFTY", "BANKNIFTY", "RELIANCE", ...]
+sim.has_ticker("NIFTY")   # True
+sim.ticker_info()         # {"NIFTY": {"price": 23000, "iv": 0.18, ...}}
+```
+
+**Available presets:** `create_calm_market`, `create_volatile_market`, `create_crash_scenario`, `create_post_crash_recovery`, `create_wheel_opportunity`, `create_india_market`, `create_india_trading`, `create_ideal_income`.
+
+---
+
+## Daily Profitability Test
+
+Run every market day to verify the pipeline is production-ready:
+
+```bash
+.venv_312/Scripts/python.exe scripts/daily_profitability_test.py          # live Dhan
+.venv_312/Scripts/python.exe scripts/daily_profitability_test.py --sim    # simulated
+```
+
+Produces a **GO / CAUTION / NO-GO** verdict based on: broker connectivity, option chain quality, regime detection, trade recommendation quality, validation gate pass rate, and position sizing sanity. Reports saved to `~/.income_desk/profitability_reports/`.
+
+---
+
 ## Documentation
 
 - [User Manual](USER_MANUAL.md) — complete guide by purpose, geography, user journey
@@ -381,10 +448,12 @@ calibrate_weights() learns → Kelly scales up → repeat
 - [Crash Playbook](docs/CRASH_PLAYBOOK.md) — systematic crash response protocol
 - [Launch Plan](docs/LAUNCH_PLAN.md) — project roadmap
 - [API Reference](API.md) — full Python API
+- [Workflow API Spec](docs/superpowers/specs/2026-03-27-workflow-apis-design.md) — workflow architecture
 
-## 80+ CLI Commands
+## 90+ CLI Commands
 
 ```
+Workflows:  daily_plan, snapshot, portfolio_greeks, profitability, presets, expiry_check
 Trading:    validate, rank, screen, opportunity, entry_analysis, kelly, audit, sentinel
 Monitoring: health, monitor, exit_intelligence, adjust, assignment_risk
 Portfolio:  desk, portfolio, trade, close_trade, rebalance
