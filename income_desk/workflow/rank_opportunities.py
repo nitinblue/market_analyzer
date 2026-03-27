@@ -182,17 +182,38 @@ def rank_opportunities(
             ))
             continue
 
-        # Position sizing
+        # Position sizing — use realistic margin, not just wing width
         contracts = 1
         max_risk = 0.0
         max_profit = 0.0
         try:
+            from income_desk import MarketRegistry
+            _reg = MarketRegistry()
+
             wing_width = ts.wing_width_points or 5.0
             max_profit_per = entry_credit * lot_size
             max_loss_per = (wing_width * lot_size) - max_profit_per
-            risk_per = max(max_loss_per, 1.0)
+
+            # India margin: SPAN + exposure is much higher than theoretical max loss.
+            # Real SPAN margin for short options = ~15-20% of underlying notional.
+            # For iron condors (defined risk), margin is lower but still significant.
+            if request.market == "India":
+                # Defined-risk (IC/IFly): ~8-12% of notional per lot
+                # Undefined-risk (straddle/strangle): ~15-20% of notional per lot
+                is_defined = st in ("iron_condor", "iron_butterfly", "credit_spread", "debit_spread")
+                margin_pct = 0.10 if is_defined else 0.18
+                margin_per_lot = current_price * lot_size * margin_pct
+            else:
+                # US: max loss is a reasonable proxy for margin (Reg-T)
+                margin_per_lot = max_loss_per
+
+            # Two constraints for India:
+            # 1. Kelly uses actual max_loss (wing width) for risk/reward math
+            # 2. Capital allocation uses margin (SPAN) for "how many lots can I afford"
+            risk_per = max(max_loss_per, 1.0)  # Kelly risk = theoretical max loss
 
             if st not in ("equity_long", "equity_short"):
+                # Kelly sizing on actual risk/reward
                 sz = compute_position_size(
                     pop_pct=pop_pct or 0.60,
                     max_profit=max_profit_per, max_loss=max_loss_per,
@@ -202,7 +223,13 @@ def rank_opportunities(
                 )
                 contracts = sz.recommended_contracts
 
-            max_risk = risk_per * contracts
+                # Cap by margin affordability (India: can't deploy more margin than we have)
+                max_risk_per_trade = request.capital * 0.04  # 4% max per trade
+                max_contracts_by_margin = max(1, int(max_risk_per_trade / margin_per_lot)) if margin_per_lot > 0 else contracts
+                contracts = min(contracts, max_contracts_by_margin)
+
+            # Report margin as the capital tied up (not just theoretical max loss)
+            max_risk = margin_per_lot * contracts
             max_profit = max_profit_per * contracts
         except Exception as e:
             warnings.append(f"{ticker}: position sizing failed: {e}")
