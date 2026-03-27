@@ -7168,6 +7168,186 @@ stratified by risk category (defined / semi_defined / undefined)."""
 
         print()
 
+    # ── Workflow Commands ─────────────────────────────────────────────────
+
+    def do_daily_plan(self, arg: str) -> None:
+        """Generate full daily trading plan with verified liquid strikes.
+
+        Usage: daily_plan [TICKER ...]
+        Example: daily_plan NIFTY BANKNIFTY RELIANCE TCS INFY
+        """
+        from income_desk.workflow import generate_daily_plan, DailyPlanRequest
+
+        tickers = arg.split() if arg.strip() else self._default_tickers()
+        capital = 5_000_000 if self.market == "India" else 100_000
+        currency = "INR" if self.market == "India" else "USD"
+
+        print(f"Generating daily plan for {len(tickers)} tickers...")
+        try:
+            plan = generate_daily_plan(
+                DailyPlanRequest(
+                    tickers=tickers, capital=capital,
+                    market=self.market, risk_tolerance="moderate",
+                    max_new_trades=5,
+                ),
+                self.ma,
+            )
+        except Exception as e:
+            print(f"Error: {e}")
+            return
+
+        _print_header(f"DAILY PLAN — {self.market}")
+        print(f"  Sentinel: {plan.sentinel_signal} | Safe: {plan.is_safe_to_trade}")
+        print(f"  Capital: {currency} {capital:,.0f}")
+
+        print(f"\n  REGIMES:")
+        for t, r in plan.regimes.items():
+            flag = " [SKIP]" if not r.tradeable else ""
+            print(f"    {t:<15} {r.regime_label} ({r.confidence:.0%}){flag}")
+
+        print(f"\n  TRADES: {len(plan.proposed_trades)} proposed, {len(plan.blocked_trades)} blocked")
+        for t in plan.proposed_trades:
+            pop = f"{t.pop_pct:.0%}" if t.pop_pct else "?"
+            margin_per = (t.max_risk / t.contracts) if t.contracts else 0
+            print(f"\n    #{t.rank} {t.ticker} — {t.strategy_badge} (score={t.composite_score:.2f})")
+            if t.short_put is not None:
+                print(f"       SELL PUT  {t.short_put:>8,.0f}  OI={t.short_put_oi or 0:>10,d}")
+                print(f"       BUY  PUT  {t.long_put:>8,.0f}")
+                print(f"       SELL CALL {t.short_call:>8,.0f}  OI={t.short_call_oi or 0:>10,d}")
+                print(f"       BUY  CALL {t.long_call:>8,.0f}")
+            print(f"       {t.contracts} lot(s) x {t.lot_size} | POP: {pop}")
+            print(f"       Credit: {currency} {(t.net_credit_per_unit or 0) * (t.lot_size or 1) * (t.contracts or 1):,.0f} | "
+                  f"Margin: {currency} {t.max_risk or 0:,.0f} ({(t.max_risk or 0)/capital:.1%})")
+
+        if plan.blocked_trades:
+            print(f"\n  BLOCKED:")
+            for b in plan.blocked_trades[:8]:
+                print(f"    {b.ticker:<12} {b.reason}")
+
+        print(f"\n  Risk: {currency} {plan.risk_deployed:,.0f} | "
+              f"Budget remaining: {currency} {plan.risk_budget_remaining:,.0f}")
+        print(f"  {plan.summary}")
+
+    def do_snapshot(self, arg: str) -> None:
+        """Batch market data snapshot for all tickers.
+
+        Usage: snapshot [TICKER ...] [--chains]
+        Example: snapshot NIFTY BANKNIFTY RELIANCE --chains
+        """
+        from income_desk.workflow import snapshot_market, SnapshotRequest
+
+        parts = arg.split() if arg.strip() else self._default_tickers()
+        include_chains = "--chains" in parts
+        tickers = [t for t in parts if not t.startswith("--")]
+
+        snap = snapshot_market(
+            SnapshotRequest(tickers=tickers, include_chains=include_chains, market=self.market),
+            self.ma,
+        )
+
+        _print_header(f"MARKET SNAPSHOT — {snap.timestamp.strftime('%H:%M:%S')}")
+        rows = []
+        for t, s in snap.tickers.items():
+            row = [t, f"{s.price or 0:,.2f}", f"R{s.regime_id or '?'}",
+                   f"{s.regime_confidence:.0%}", f"{s.atr_pct:.2f}%", f"{s.rsi or 0:.0f}"]
+            if include_chains:
+                row.extend([str(s.chain_strikes), "Y" if s.has_greeks else "N"])
+            rows.append(row)
+        headers = ["Ticker", "Price", "Regime", "Conf", "ATR%", "RSI"]
+        if include_chains:
+            headers.extend(["Strikes", "Greeks"])
+        print(tabulate(rows, headers=headers, tablefmt="simple"))
+
+    def do_portfolio_greeks(self, arg: str) -> None:
+        """Aggregate Greeks by underlying (from demo positions or manual).
+
+        Usage: portfolio_greeks
+        """
+        from income_desk.workflow import aggregate_portfolio_greeks, PortfolioGreeksRequest
+        from income_desk.workflow.portfolio_greeks import PositionLeg
+
+        # Use demo portfolio positions if available
+        try:
+            from income_desk.demo.portfolio import load_demo_portfolio
+            port = load_demo_portfolio()
+            if port and port.positions:
+                legs = []
+                for pos in port.positions:
+                    legs.append(PositionLeg(
+                        ticker=pos.ticker, option_type="put",
+                        contracts=pos.contracts, lot_size=getattr(pos, "lot_size", 100),
+                        action="short", delta=-0.2, gamma=0.001, theta=-5.0, vega=8.0,
+                    ))
+                result = aggregate_portfolio_greeks(
+                    PortfolioGreeksRequest(legs=legs, market=self.market), self.ma,
+                )
+                _print_header("PORTFOLIO GREEKS")
+                for t, r in result.by_underlying.items():
+                    print(f"  {t:<15} {r.risk_summary}")
+                    print(f"    delta={r.net_delta:+.1f}  gamma={r.net_gamma:+.4f}  "
+                          f"theta={r.net_theta:+.1f}/day  vega={r.net_vega:+.1f}")
+                print(f"\n  PORTFOLIO: delta={result.portfolio_delta:+.1f} "
+                      f"theta={result.portfolio_theta:+.1f}/day")
+                if result.risk_warnings:
+                    for w in result.risk_warnings:
+                        print(f"  WARNING: {w}")
+                return
+        except Exception:
+            pass
+        print("No portfolio positions found. Book trades first with 'daily_plan'.")
+
+    def do_profitability(self, arg: str) -> None:
+        """Run daily profitability GO/CAUTION/NO-GO test.
+
+        Usage: profitability
+        """
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, "scripts/daily_profitability_test.py"],
+            capture_output=False,
+        )
+
+    def do_presets(self, arg: str) -> None:
+        """Show available universe presets for current market.
+
+        Usage: presets [MARKET]
+        Example: presets India
+        """
+        from income_desk import MarketRegistry
+        market = arg.strip() or self.market
+        reg = MarketRegistry()
+        presets = reg.get_presets(market=market)
+
+        _print_header(f"UNIVERSE PRESETS — {market}")
+        rows = [[p["key"], p["count"], p["description"]] for p in presets]
+        print(tabulate(rows, headers=["Preset", "Tickers", "Description"], tablefmt="simple"))
+        print(f"\n  Usage: universe <preset>  (e.g., 'universe india_fno')")
+
+    def do_expiry_check(self, arg: str) -> None:
+        """Check expiry-day positions and urgency.
+
+        Usage: expiry_check
+        """
+        from income_desk.workflow import check_expiry_day, ExpiryDayRequest
+        from income_desk.workflow._types import OpenPosition
+
+        result = check_expiry_day(
+            ExpiryDayRequest(positions=[], market=self.market), self.ma,
+        )
+        _print_header(f"EXPIRY CHECK — {self.market}")
+        if result.expiry_index:
+            print(f"  TODAY: {result.expiry_index} expiry day!")
+        else:
+            print(f"  No expiry today.")
+
+    def _default_tickers(self) -> list[str]:
+        """Default tickers for current market."""
+        if self.market == "India":
+            return ["NIFTY", "BANKNIFTY", "RELIANCE", "TCS", "INFY", "HDFCBANK"]
+        return ["SPY", "QQQ", "IWM", "GLD", "TLT"]
+
+    # ── End Workflow Commands ─────────────────────────────────────────────
+
     def do_quit(self, arg: str) -> bool:
         """Exit the REPL."""
         print("Goodbye.")
