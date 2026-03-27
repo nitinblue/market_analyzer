@@ -7346,6 +7346,52 @@ stratified by risk category (defined / semi_defined / undefined)."""
             return ["NIFTY", "BANKNIFTY", "RELIANCE", "TCS", "INFY", "HDFCBANK"]
         return ["SPY", "QQQ", "IWM", "GLD", "TLT"]
 
+    def do_scenario(self, arg: str) -> None:
+        """Run stress test scenario on current market data.
+
+        Usage: scenario [SCENARIO_KEY]
+        Example: scenario sp500_down_10
+                 scenario nifty_down_10
+                 scenario list              — show all available scenarios
+        """
+        from income_desk.scenarios import apply_scenario, SCENARIOS
+        from income_desk.scenarios.definitions import list_scenarios
+
+        if not arg.strip() or arg.strip() == "list":
+            _print_header("AVAILABLE SCENARIOS")
+            for s in list_scenarios():
+                print(f"  {s['key']:25s} [{s['severity']:8s}] {s['name']}")
+            return
+
+        key = arg.strip()
+        if key not in SCENARIOS:
+            print(f"Unknown scenario: {key}. Use 'scenario list' to see options.")
+            return
+
+        # Build baseline from current MA's market_data
+        from income_desk.adapters.simulated import SimulatedMarketData
+        baseline = None
+        if isinstance(self.ma.market_data, SimulatedMarketData):
+            baseline = self.ma.market_data
+        else:
+            # Build from sim preset for current market
+            from income_desk.adapters.simulated import create_india_trading, create_ideal_income
+            baseline = create_india_trading() if self.market == "India" else create_ideal_income()
+
+        print(f"Applying scenario: {SCENARIOS[key].name}...")
+        stressed, result = apply_scenario(baseline, key)
+
+        _print_header(f"SCENARIO: {result.scenario_name}")
+        print(f"  Severity: {result.severity}")
+        print(f"  Portfolio avg: {result.portfolio_return_pct:+.1f}%")
+        print(f"  Worst: {result.max_loss_ticker} ({result.max_loss_pct:+.1f}%)")
+        print(f"  Best:  {result.max_gain_ticker} ({result.max_gain_pct:+.1f}%)")
+        print(f"  Avg IV shift: {result.avg_iv_change:+.4f}")
+
+        print(f"\n  {'Ticker':>12s} {'Base':>10s} {'Stressed':>10s} {'Return':>8s} {'IV':>6s} {'->':>3s} {'IV':>6s}")
+        for t, imp in sorted(result.ticker_impacts.items(), key=lambda x: x[1].return_pct):
+            print(f"  {t:>12s} {imp.base_price:>10,.0f} {imp.stressed_price:>10,.0f} {imp.return_pct:>+7.1f}% {imp.base_iv:>5.0%} -> {imp.stressed_iv:>5.0%}")
+
     # ── End Workflow Commands ─────────────────────────────────────────────
 
     def do_quit(self, arg: str) -> bool:
