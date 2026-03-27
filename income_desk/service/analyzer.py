@@ -76,6 +76,8 @@ class MarketAnalyzer:
         watchlist_provider: WatchlistProvider | None = None,
     ) -> None:
         self.data = data_service
+        self.market_data = market_data
+        self.market_metrics = market_metrics
         self.account_provider = account_provider
         self.registry = MarketRegistry()
 

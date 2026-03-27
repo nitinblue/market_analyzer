@@ -48,6 +48,8 @@ def main():
                         help="Connect to India broker")
     parser.add_argument("--sim", choices=["india_trading", "snapshot"], default="india_trading",
                         help="Simulation preset (default: india_trading)")
+    parser.add_argument("--workflow", action="store_true",
+                        help="Use workflow API (generate_daily_plan) instead of demo runner")
     args = parser.parse_args()
 
     # Connect data source
@@ -124,7 +126,85 @@ def main():
         print(f"Today: {weekday} — no expiry")
     print()
 
-    # Run trader
+    # --- Workflow mode (new) ---
+    if args.workflow:
+        from income_desk.workflow import (
+            generate_daily_plan, DailyPlanRequest,
+            snapshot_market, SnapshotRequest,
+        )
+
+        tickers = ["NIFTY", "BANKNIFTY", "RELIANCE", "TCS", "INFY", "HDFCBANK"]
+
+        # Market snapshot first
+        print("Fetching market snapshot...")
+        snap = snapshot_market(SnapshotRequest(tickers=tickers, market="India"), ma)
+        print(f"\nMARKET SNAPSHOT ({snap.timestamp.strftime('%H:%M:%S IST')})")
+        print(f"{'-'*60}")
+        for t, s in snap.tickers.items():
+            regime_tag = f"R{s.regime_id}" if s.regime_id else "?"
+            print(f"  {t:<15} {s.price or 0:>10,.2f}  {regime_tag} ({s.regime_confidence:.0%})  "
+                  f"ATR={s.atr_pct:.2f}%  RSI={s.rsi or 0:.0f}")
+
+        # Daily plan
+        print(f"\nGenerating daily plan...")
+        plan = generate_daily_plan(
+            DailyPlanRequest(
+                tickers=tickers,
+                capital=args.capital,
+                market="India",
+                risk_tolerance=args.risk,
+                max_new_trades=5,
+            ),
+            ma,
+        )
+
+        print(f"\n{'='*60}")
+        print(f"INDIA DAILY PLAN (Workflow API)")
+        print(f"{'='*60}")
+        print(f"Capital: INR {args.capital:,.0f} ({args.capital/100000:.0f} lakh)")
+        print(f"Sentinel: {plan.sentinel_signal}")
+        print(f"Safe to trade: {plan.is_safe_to_trade}")
+
+        print(f"\nREGIMES:")
+        for t, r in plan.regimes.items():
+            flag = " << SKIP" if not r.tradeable else ""
+            print(f"  {t:<15} {r.regime_label} ({r.confidence:.0%}){flag}")
+
+        print(f"\nTRADES: {len(plan.proposed_trades)} proposed, {len(plan.blocked_trades)} blocked")
+        for t in plan.proposed_trades:
+            pop_str = f"{t.pop_pct:.0%}" if t.pop_pct else "n/a"
+            print(f"  #{t.rank} {t.ticker:<12} {t.strategy_badge:<28} "
+                  f"score={t.composite_score:.2f} POP={pop_str} "
+                  f"{t.contracts}x lot={t.lot_size} "
+                  f"risk=INR {t.max_risk or 0:,.0f}")
+
+        if plan.blocked_trades:
+            print(f"\nBLOCKED:")
+            for b in plan.blocked_trades[:5]:
+                print(f"  {b.ticker:<12} {b.reason}")
+
+        print(f"\nRISK BUDGET:")
+        print(f"  Deployed: INR {plan.risk_deployed:,.0f}")
+        print(f"  Remaining: INR {plan.risk_budget_remaining:,.0f}")
+
+        print(f"\n{'='*60}")
+        print(f"SUMMARY: {plan.summary}")
+        print(f"{'='*60}")
+
+        if plan.meta.warnings:
+            print(f"\nWarnings ({len(plan.meta.warnings)}):")
+            for w in plan.meta.warnings[:5]:
+                print(f"  {w}")
+
+        # Save
+        import json
+        report_path = Path.home() / ".income_desk" / "last_india_plan.json"
+        report_path.parent.mkdir(exist_ok=True)
+        report_path.write_text(json.dumps(plan.model_dump(), indent=2, default=str))
+        print(f"\nPlan saved: {report_path}")
+        return
+
+    # --- Legacy demo runner ---
     from income_desk.demo.trader import run_trader, print_trader_report
 
     sim_data = sim if not args.broker else None
@@ -142,7 +222,7 @@ def main():
     print(f"\n{'='*60}")
     print(f"INDIA INCOME TRADER REPORT")
     print(f"{'='*60}")
-    print(f"Capital: INR {report.capital:,.0f} (₹{report.capital/100000:.1f} lakh)")
+    print(f"Capital: INR {report.capital:,.0f} ({report.capital/100000:.1f} lakh)")
     print(f"Risk tolerance: {report.risk_tolerance}")
     print(f"Sentinel: {report.sentinel_signal}")
     print(f"Trust: {report.trust_summary}")
@@ -160,7 +240,7 @@ def main():
     for trade in report.positions:
         print(f"  {trade['ticker']:<12} {trade['structure']:<16} {trade['contracts']}x  "
               f"INR {trade['credit']*100*trade['contracts']:,.0f} credit  "
-              f"POP {trade['pop']:.0%}  → {trade['desk']}")
+              f"POP {trade['pop']:.0%}  -> {trade['desk']}")
 
     if report.trades_blocked:
         print(f"\nBLOCKED:")
@@ -181,7 +261,6 @@ def main():
     print(f"{'='*60}")
 
     # Save report
-    from pathlib import Path
     report_path = Path.home() / ".income_desk" / "last_india_trader_report.json"
     report_path.parent.mkdir(exist_ok=True)
     report_path.write_text(report.model_dump_json(indent=2))

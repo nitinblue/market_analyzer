@@ -467,42 +467,101 @@ class DhanMarketData(MarketDataProvider):
 
         return results
 
-    def get_greeks(self, legs: list[LegSpec]) -> dict[str, dict]:
-        """Greeks are included natively in Dhan option chain response.
+    def get_greeks(
+        self, legs_or_ticker: "list[LegSpec] | str" = "", ticker: str = "",
+    ) -> dict[str, dict]:
+        """Get Greeks from Dhan option chain.
 
-        Returns a dict keyed by ``"{strike}{C|P}"`` (e.g. ``"26000C"``).
+        Accepts either:
+        - A ticker string: returns ATM Greeks for nearest expiry
+        - A list of LegSpec: returns Greeks for each leg
+
+        Returns dict keyed by ``"{strike}{C|P}"`` (e.g. ``"23000C"``),
+        with values ``{"delta": .., "gamma": .., "theta": .., "vega": .., "iv": ..}``.
         """
-        if not legs:
+        # Resolve ticker
+        if isinstance(legs_or_ticker, str) and legs_or_ticker:
+            ticker = legs_or_ticker
+        elif isinstance(legs_or_ticker, list) and legs_or_ticker:
+            # LegSpec list — try to extract ticker from chain call
+            ticker = ticker or ""
+        if not ticker:
             return {}
 
-        # Get ticker from first leg if possible — legs don't carry ticker
-        # Return empty if no ticker context; caller should use get_quotes()
-        return {}
+        chain = self.get_option_chain(ticker)
+        if not chain:
+            return {}
+
+        result: dict[str, dict] = {}
+        if isinstance(legs_or_ticker, list) and legs_or_ticker:
+            # Match specific legs
+            for leg in legs_or_ticker:
+                opt_type_char = "C" if leg.option_type == "call" else "P"
+                key = f"{leg.strike:.0f}{opt_type_char}"
+                for q in chain:
+                    if (q.strike == leg.strike and q.option_type == leg.option_type
+                            and q.delta is not None):
+                        result[key] = {
+                            "delta": q.delta, "gamma": q.gamma,
+                            "theta": q.theta, "vega": q.vega,
+                            "iv": q.implied_volatility,
+                        }
+                        break
+        else:
+            # Return all Greeks from chain where available
+            for q in chain:
+                if q.delta is not None:
+                    opt_type_char = "C" if q.option_type == "call" else "P"
+                    key = f"{q.strike:.0f}{opt_type_char}"
+                    result[key] = {
+                        "delta": q.delta, "gamma": q.gamma,
+                        "theta": q.theta, "vega": q.vega,
+                        "iv": q.implied_volatility,
+                    }
+
+        return result
+
+    # Session-level price cache: avoids hammering Dhan for the same ticker
+    # within a short window. Entries are (price, timestamp).
+    _price_cache: dict[str, tuple[float, float]] = {}
+    _PRICE_CACHE_TTL = 5.0  # seconds
 
     def get_underlying_price(self, ticker: str) -> float | None:
         """Get current price of underlying (index or equity) via ticker_data.
 
         Uses NSE_EQ for equities, IDX_I for indices.
-        Dhan ticker_data response: {data: {data: {SEGMENT: {scrip_id: {last_price: X}}}}}
+        Includes retry with backoff to handle Dhan rate limiting.
+        Caches results for 5 seconds to reduce API calls.
         """
+        import time as _time
+
+        upper = ticker.upper()
+
+        # Check cache first
+        if upper in self._price_cache:
+            cached_price, cached_at = self._price_cache[upper]
+            if (_time.monotonic() - cached_at) < self._PRICE_CACHE_TTL:
+                return cached_price
+
         scrip_code = self._resolve_scrip_code(ticker)
         if scrip_code is None:
             return None
 
-        # Indices use IDX_I segment, equities use NSE_EQ.
-        # Only try the correct segment — trying both burns rate-limit quota
-        # and the second attempt often fails with 429 Too Many Requests.
-        is_index = ticker.upper() in _INDEX_TICKERS
-        segments = [_SEGMENT_IDX_I] if is_index else [_SEGMENT_NSE_EQ]
+        is_index = upper in _INDEX_TICKERS
+        segment = _SEGMENT_IDX_I if is_index else _SEGMENT_NSE_EQ
 
-        for segment in segments:
+        # Retry with backoff: Dhan rate-limits ticker_data under burst
+        for attempt in range(3):
             try:
+                if attempt > 0:
+                    _time.sleep(1.5 * attempt)
+
                 response = self._client.ticker_data(
                     {segment: [scrip_code]}
                 )
                 if not isinstance(response, dict) or response.get("status") != "success":
                     continue
-                # Response: {data: {data: {NSE_EQ: {1333: {last_price: 755.85}}}}}
+
                 outer = response.get("data", {})
                 inner = outer.get("data", outer) if isinstance(outer, dict) else {}
                 if isinstance(inner, dict):
@@ -512,11 +571,101 @@ class DhanMarketData(MarketDataProvider):
                         if isinstance(item, dict):
                             ltp = _safe_float(item.get("last_price"))
                             if ltp > 0:
+                                self._price_cache[upper] = (ltp, _time.monotonic())
                                 return ltp
             except Exception as e:
-                logger.debug("Dhan ticker_data failed for %s on %s: %s", ticker, segment, e)
+                logger.debug("Dhan ticker_data attempt %d failed for %s: %s", attempt + 1, ticker, e)
 
         return None
+
+    def get_prices_batch(self, tickers: list[str]) -> dict[str, float]:
+        """Fetch prices for multiple tickers in minimal API calls.
+
+        Groups tickers by segment (IDX_I vs NSE_EQ) and makes ONE
+        Dhan ticker_data call per segment — maximum 2 API calls total.
+        Returns dict of ticker → price. Missing tickers omitted.
+        """
+        import time as _time
+
+        if not tickers:
+            return {}
+
+        # Group by segment
+        idx_codes: dict[str, int] = {}  # ticker → scrip_code
+        eq_codes: dict[str, int] = {}
+        for ticker in tickers:
+            upper = ticker.upper()
+            # Check cache first
+            if upper in self._price_cache:
+                cached_price, cached_at = self._price_cache[upper]
+                if (_time.monotonic() - cached_at) < self._PRICE_CACHE_TTL:
+                    continue  # will add from cache below
+
+            scrip_code = self._resolve_scrip_code(ticker)
+            if scrip_code is None:
+                continue
+            if upper in _INDEX_TICKERS:
+                idx_codes[upper] = scrip_code
+            else:
+                eq_codes[upper] = scrip_code
+
+        result: dict[str, float] = {}
+
+        # Add cached prices
+        now = _time.monotonic()
+        for ticker in tickers:
+            upper = ticker.upper()
+            if upper in self._price_cache:
+                cached_price, cached_at = self._price_cache[upper]
+                if (now - cached_at) < self._PRICE_CACHE_TTL:
+                    result[upper] = cached_price
+
+        # Batch fetch indices (1 API call)
+        if idx_codes:
+            try:
+                response = self._client.ticker_data(
+                    {_SEGMENT_IDX_I: list(idx_codes.values())}
+                )
+                if isinstance(response, dict) and response.get("status") == "success":
+                    outer = response.get("data", {})
+                    inner = outer.get("data", outer) if isinstance(outer, dict) else {}
+                    if isinstance(inner, dict):
+                        seg_data = inner.get(_SEGMENT_IDX_I, {})
+                        if isinstance(seg_data, dict):
+                            for ticker_upper, scrip_code in idx_codes.items():
+                                item = seg_data.get(str(scrip_code), seg_data.get(scrip_code, {}))
+                                if isinstance(item, dict):
+                                    ltp = _safe_float(item.get("last_price"))
+                                    if ltp > 0:
+                                        result[ticker_upper] = ltp
+                                        self._price_cache[ticker_upper] = (ltp, _time.monotonic())
+            except Exception as e:
+                logger.debug("Batch index price fetch failed: %s", e)
+
+        # Batch fetch equities (1 API call)
+        if eq_codes:
+            try:
+                _time.sleep(1.5)  # small delay between segment calls
+                response = self._client.ticker_data(
+                    {_SEGMENT_NSE_EQ: list(eq_codes.values())}
+                )
+                if isinstance(response, dict) and response.get("status") == "success":
+                    outer = response.get("data", {})
+                    inner = outer.get("data", outer) if isinstance(outer, dict) else {}
+                    if isinstance(inner, dict):
+                        seg_data = inner.get(_SEGMENT_NSE_EQ, {})
+                        if isinstance(seg_data, dict):
+                            for ticker_upper, scrip_code in eq_codes.items():
+                                item = seg_data.get(str(scrip_code), seg_data.get(scrip_code, {}))
+                                if isinstance(item, dict):
+                                    ltp = _safe_float(item.get("last_price"))
+                                    if ltp > 0:
+                                        result[ticker_upper] = ltp
+                                        self._price_cache[ticker_upper] = (ltp, _time.monotonic())
+            except Exception as e:
+                logger.debug("Batch equity price fetch failed: %s", e)
+
+        return result
 
     def get_intraday_candles(
         self, ticker: str, interval: str = "5m",
@@ -532,26 +681,38 @@ class DhanMarketData(MarketDataProvider):
         if scrip_code is None:
             return pd.DataFrame()
 
+        is_index = ticker.upper() in _INDEX_TICKERS
+        if is_index:
+            # Dhan intraday_minute_data does not support index candles.
+            # Index intraday data requires a different endpoint (not available
+            # in dhanhq SDK as of 2026-03). Return empty gracefully.
+            return pd.DataFrame()
+        segment = _SEGMENT_NSE_EQ
+        inst_type = "EQUITY"
+
         today = date.today()
         try:
             # Use intraday_minute_data with today's date range
             response = self._client.intraday_minute_data(
                 security_id=str(scrip_code),
-                exchange_segment=_SEGMENT_NSE_EQ,
-                instrument_type="EQUITY",
+                exchange_segment=segment,
+                instrument_type=inst_type,
                 from_date=today.strftime("%Y-%m-%d"),
                 to_date=today.strftime("%Y-%m-%d"),
             )
         except AttributeError:
             # Older SDK versions may not have this method
-            logger.debug("Dhan SDK does not support intraday_daily_minute_charts")
+            logger.debug("Dhan SDK does not support intraday_minute_data")
             return pd.DataFrame()
         except Exception as e:
             logger.warning("Dhan intraday_candles failed for %s: %s", ticker, e)
             return pd.DataFrame()
 
-        if not response:
+        # Guard against DataFrame or None response
+        if response is None:
             return pd.DataFrame()
+        if isinstance(response, pd.DataFrame):
+            return response if not response.empty else pd.DataFrame()
 
         candles = response.get("data", response) if isinstance(response, dict) else response
         if not isinstance(candles, list) or not candles:

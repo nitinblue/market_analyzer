@@ -153,6 +153,50 @@ class MarketRegistry:
 
         return [i.ticker for i in instruments]
 
+    def get_presets(self, market: str | None = None) -> list[dict]:
+        """Discover available universe presets for a market.
+
+        Returns list of preset descriptions with ticker counts.
+        eTrading uses this for the universe configuration UI.
+        """
+        all_presets = {
+            "income": "Curated high-liquidity income names (theta/premium selling)",
+            "directional": "Liquid equities for breakout/momentum plays",
+            "india_fno": "All India F&O instruments (index + stocks)",
+            "nifty50": "India NIFTY 50 constituent proxies",
+            "us_etf": "US ETFs with weekly options",
+            "us_mega": "US mega-cap equities",
+            "sector_etf": "US sector ETFs",
+            "all": "Everything in the registry",
+        }
+
+        # Market-specific preset mapping
+        india_presets = {"income", "directional", "india_fno", "nifty50", "all"}
+        us_presets = {"income", "directional", "us_etf", "us_mega", "sector_etf", "all"}
+
+        if market:
+            m = market.upper()
+            if m == "INDIA":
+                keys = india_presets
+            elif m == "US":
+                keys = us_presets
+            else:
+                keys = set(all_presets.keys())
+        else:
+            keys = set(all_presets.keys())
+
+        results = []
+        for key in sorted(keys):
+            tickers = self.get_universe(preset=key, market=market)
+            results.append({
+                "key": key,
+                "name": key.replace("_", " ").title(),
+                "count": len(tickers),
+                "description": all_presets.get(key, ""),
+            })
+
+        return results
+
     def add_instrument(self, instrument: InstrumentInfo) -> None:
         """Add a custom instrument to the registry (for eTrading extensibility).
 
