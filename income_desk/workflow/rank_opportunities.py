@@ -20,6 +20,19 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+def _extract_strike(ts, role: str, opt_type: str, action_prefix: str) -> float | None:
+    """Extract a strike from trade spec legs by role or type+action."""
+    if not ts or not ts.legs:
+        return None
+    for leg in ts.legs:
+        if hasattr(leg, 'role') and leg.role == role:
+            return leg.strike
+        action_str = getattr(leg.action, 'value', str(leg.action))
+        if leg.option_type == opt_type and action_str.startswith(action_prefix):
+            return leg.strike
+    return None
+
 # Regime labels
 _REGIME_LABELS = {1: "R1 Low-Vol MR", 2: "R2 High-Vol MR", 3: "R3 Low-Vol Trend", 4: "R4 High-Vol Trend"}
 
@@ -360,14 +373,14 @@ def rank_opportunities(
             currency=currency,
             rationale=entry.rationale or "",
             data_gaps=[g.reason for g in entry.data_gaps] if entry.data_gaps else [],
-            # Actual liquid strikes from broker chain
-            short_put=liquid_strikes["short_put"] if liquid_strikes else None,
-            long_put=liquid_strikes["long_put"] if liquid_strikes else None,
-            short_call=liquid_strikes["short_call"] if liquid_strikes else None,
-            long_call=liquid_strikes["long_call"] if liquid_strikes else None,
+            # Strikes: from broker chain if verified, otherwise from trade spec legs
+            short_put=liquid_strikes["short_put"] if liquid_strikes else _extract_strike(ts, "short_put", "put", "STO"),
+            long_put=liquid_strikes["long_put"] if liquid_strikes else _extract_strike(ts, "long_put", "put", "BTO"),
+            short_call=liquid_strikes["short_call"] if liquid_strikes else _extract_strike(ts, "short_call", "call", "STO"),
+            long_call=liquid_strikes["long_call"] if liquid_strikes else _extract_strike(ts, "long_call", "call", "BTO"),
             short_put_oi=liquid_strikes["short_put_oi"] if liquid_strikes else None,
             short_call_oi=liquid_strikes["short_call_oi"] if liquid_strikes else None,
-            net_credit_per_unit=liquid_strikes["net_credit_est"] if liquid_strikes else None,
+            net_credit_per_unit=liquid_strikes["net_credit_est"] if liquid_strikes else entry_credit,
         ))
 
     return RankResponse(
