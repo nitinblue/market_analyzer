@@ -16,8 +16,18 @@ from pathlib import Path
 
 from tabulate import tabulate
 
-MEMORY_DIR = Path(__file__).parent.parent / "income_desk" / "memory"
-DOCS_DIR = Path(__file__).parent.parent / "docs"
+PROJECT_ROOT = Path(__file__).parent.parent
+
+# Auto-discover memory dir: look for */memory/ with MEMORY.md inside
+MEMORY_DIR = None
+for d in sorted(PROJECT_ROOT.iterdir()):
+    if d.is_dir() and (d / "memory" / "MEMORY.md").exists():
+        MEMORY_DIR = d / "memory"
+        break
+if MEMORY_DIR is None:
+    MEMORY_DIR = PROJECT_ROOT / "memory"  # fallback
+
+DOCS_DIR = PROJECT_ROOT / "docs"
 
 STALENESS_DAYS = {"FRESH": 3, "AGING": 7}
 
