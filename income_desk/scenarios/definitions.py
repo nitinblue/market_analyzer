@@ -241,6 +241,24 @@ SCENARIOS: dict[str, ScenarioDef] = {
 }
 
 
+def load_all_scenarios() -> dict[str, ScenarioDef]:
+    """Load scenarios from .scenario.md files, fall back to Python definitions.
+
+    MD files in scenarios/formats/ take precedence over the Python SCENARIOS dict.
+    This allows editing scenarios as markdown without touching Python code.
+    """
+    from pathlib import Path
+    from income_desk.scenarios.parser import load_scenario_dir
+
+    formats_dir = Path(__file__).parent / "formats"
+    md_scenarios = load_scenario_dir(formats_dir)
+
+    # Merge: Python dict as base, MD files override
+    merged = dict(SCENARIOS)
+    merged.update(md_scenarios)
+    return merged
+
+
 def list_scenarios(category: str | None = None) -> list[dict]:
     """List available scenarios with metadata.
 
