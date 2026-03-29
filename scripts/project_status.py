@@ -166,11 +166,7 @@ def main():
             elif in_blockers and not line.startswith("|"):
                 in_blockers = False
 
-    print()
-    print(f"  READINESS:  US {us_pct:.0f}%  |  India {india_pct:.0f}%  ({checks_total} checks)")
-    print(f"  BLOCKERS:   {len(blockers)} open blockers to go-live")
-
-    # Find stale items across all intake docs early
+    # Find all intake items early
     _all_intake_items = []
     if MEMORY_DIR.exists():
         for p in sorted(MEMORY_DIR.glob("*_intake.md")):
@@ -181,13 +177,49 @@ def main():
 
     stale_items = [i for i in _all_intake_items if i["health"] == "STALE"]
     aging_items = [i for i in _all_intake_items if i["health"] == "AGING"]
+    total_active = len(_all_intake_items)
+    closed_all = sum(1 for dd in (parse_intake(p) for p in sorted(MEMORY_DIR.glob("*_intake.md"))) for i in dd["items"] if i["status"] == "CLOSED") if MEMORY_DIR.exists() else 0
+
+    # ── Skin in the Game Score ──
+    # Measures: is Claude driving toward objectives or doing busywork?
+    # Factors: readiness %, stale count (penalty), blocker resolution, closed items
+    skin_score = 0
+    skin_max = 100
+    # Readiness progress (40 points max)
+    skin_score += (us_pct + india_pct) / 2 * 0.4
+    # No stale items (20 points max, lose 5 per stale)
+    skin_score += max(0, 20 - len(stale_items) * 5)
+    # Blocker resolution (20 points max)
+    if checks_total > 0:
+        total_blockers_possible = checks_total  # max theoretical blockers
+        resolved = total_blockers_possible - len(blockers)
+        skin_score += (resolved / total_blockers_possible) * 20
+    # Closed items ratio (20 points max)
+    if total_active + closed_all > 0:
+        skin_score += (closed_all / (total_active + closed_all)) * 20
+
+    skin_score = min(skin_score, skin_max)
+
+    if skin_score >= 80:
+        skin_label = "STRONG"
+    elif skin_score >= 50:
+        skin_label = "MODERATE"
+    elif skin_score >= 25:
+        skin_label = "WEAK"
+    else:
+        skin_label = "NONE"
+
+    print()
+    print(f"  SKIN IN THE GAME:  {skin_score:.0f}/100 ({skin_label})")
+    print(f"  READINESS:         US {us_pct:.0f}%  |  India {india_pct:.0f}%  ({checks_total} checks)")
+    print(f"  BLOCKERS:          {len(blockers)} open blockers to go-live")
 
     if stale_items:
-        print(f"  STALE:      {len(stale_items)} items (Claude's failure -- action immediately)")
+        print(f"  STALE:             {len(stale_items)} items (Claude's failure -- action immediately)")
     elif aging_items:
-        print(f"  AGING:      {len(aging_items)} items approaching stale")
+        print(f"  AGING:             {len(aging_items)} items approaching stale")
     else:
-        print(f"  HEALTH:     All items fresh")
+        print(f"  HEALTH:            All items fresh")
 
     # Recommended focus: highest-priority blocker that blocks most objectives
     go_live_blockers = [b for b in blockers if "OBJ-1" in b["blocks"] or "OBJ-2" in b["blocks"]]
