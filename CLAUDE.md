@@ -111,8 +111,8 @@ If any of these is unwired in eTrading, the platform is not production-ready. Tr
 
 - **Audit before building.** When touching any capability, check whether it's actually wired end-to-end — not just that the function exists.
 - **Name things clearly.** Confusing names (like `var` for an ATR-based loss estimate) create integration bugs. Fix naming proactively.
-- **Document for eTrading immediately.** Every new API gets a section in `ETRADING_INTEGRATION.md` before the conversation ends. eTrading developers should never have to read MA source code to understand how to use it.
-- **Flag broken things explicitly.** If something in `ETRADING_INTEGRATION.md`'s priority list is relevant to what you're working on, surface it. Don't let known P0 bugs stay silent.
+- **Document for eTrading immediately.** Every new API gets a section in `docs/INTEGRATION.md` before the conversation ends. eTrading developers should never have to read MA source code to understand how to use it.
+- **Flag broken things explicitly.** If something in integration docs is relevant to what you're working on, surface it. Don't let known P0 bugs stay silent.
 - **Think about real money.** Every decision — what to build, what to fix first, what to document — should be evaluated through the lens of: does this protect or grow Nitin's capital?
 
 ---
@@ -130,9 +130,9 @@ If any of these is unwired in eTrading, the platform is not production-ready. Tr
 - **Prefer simplicity.** Minimal dependencies, no over-engineering. The goal is making money, not beautiful abstractions.
 - **DXLink is the only path for live data.** `from tastytrade.streamer import DXLinkStreamer`, `from tastytrade.dxfeed import Greeks as DXGreeks, Quote as DXQuote`.
 - **Additive changes preferred** over moving existing files.
-- **Update SYSTEMATIC_GAPS.md after any gap-related work.** Mark status, add implementation details, update test counts. This is the single source of truth for what's done vs open.
+- **Update `docs/archive/SYSTEMATIC_GAPS.md` after any gap-related work.** Mark status, add implementation details, update test counts. This is the single source of truth for what's done vs open.
 - **Every gap must have an eTrading Integration column.** When building a new MA API, document what eTrading needs to do to consume it (pass iv_rank, store outcomes, schedule calibration, etc.). If no eTrading action needed, say so explicitly.
-- **Always update USER_MANUAL.md after building new features.** This is the trader's single source of truth. Every new capability, CLI command, or API must be documented there.
+- **Always update `docs/USER_MANUAL.md` after building new features.** This is the trader's single source of truth. Every new capability, CLI command, or API must be documented there.
 - **`rank()` output is NOT safe to execute directly.** It ranks on market merit only — no position awareness. eTrading MUST call `filter_trades_with_portfolio()` and `evaluate_trade_gates()` before execution. Document this in every integration guide.
 
 ---
@@ -194,7 +194,7 @@ income_desk is a **stateless library**. eTrading owns auth, tenant isolation, ca
 
 MA's end state: enable a fully systematic trading system where **no human decisions are needed during a trading day**. eTrading executes; MA decides.
 
-**Current state: ALL 9 systematic gaps DONE & WIRED.** See [`SYSTEMATIC_GAPS.md`](SYSTEMATIC_GAPS.md) for full status.
+**Current state: ALL 9 systematic gaps DONE & WIRED.** See [`docs/archive/SYSTEMATIC_GAPS.md`](docs/archive/SYSTEMATIC_GAPS.md) for full status.
 
 ### What's Complete
 - Deterministic adjustment decisions (no menus — single action per situation)
