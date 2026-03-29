@@ -76,4 +76,5 @@ packages = ["income_desk"]
 markers = [
     "integration: marks tests that hit real network APIs",
     "daily: marks tests that validate daily trading pipeline readiness",
+    "slow: marks tests that are slow (full workflow execution with yfinance)",
 ]
