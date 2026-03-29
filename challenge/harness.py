@@ -81,6 +81,21 @@ def _cur(market: str) -> str:
     return "INR " if market == "India" else "$"
 
 
+def _fetch_iv_rank_map(ma: Any, tickers: list[str]) -> dict[str, float]:
+    """Fetch IV ranks from market_metrics if available."""
+    iv_map: dict[str, float] = {}
+    if not hasattr(ma, "market_metrics") or ma.market_metrics is None:
+        return iv_map
+    try:
+        metrics = ma.market_metrics.get_metrics(tickers)
+        for ticker, m in metrics.items():
+            if hasattr(m, "iv_rank") and m.iv_rank is not None:
+                iv_map[ticker] = m.iv_rank
+    except Exception:
+        pass
+    return iv_map
+
+
 # ---------------------------------------------------------------------------
 # Phase menu
 # ---------------------------------------------------------------------------
@@ -187,10 +202,12 @@ def run_premarket(
         from income_desk.workflow import generate_daily_plan
         from income_desk.workflow.daily_plan import DailyPlanRequest
 
+        iv_map = _fetch_iv_rank_map(ma, tickers)
         req = DailyPlanRequest(
             tickers=tickers,
             capital=capital,
             market=meta.market,
+            iv_rank_map=iv_map or None,
         )
         print_signature("generate_daily_plan", req, cli_command="analyzer-cli> plan")
         resp = generate_daily_plan(req, ma)
@@ -354,10 +371,12 @@ def run_scanning(
         from income_desk.workflow import rank_opportunities
         from income_desk.workflow.rank_opportunities import RankRequest
 
+        iv_map = _fetch_iv_rank_map(ma, tickers)
         req = RankRequest(
             tickers=tickers,
             capital=capital,
             market=meta.market,
+            iv_rank_map=iv_map or None,
         )
         cli_tickers = " ".join(tickers[:4])
         print_signature("rank_opportunities", req, cli_command=f"analyzer-cli> rank {cli_tickers}")

@@ -242,6 +242,14 @@ def setup(market: str) -> tuple:
         meta.data_source = "LIVE quotes (market open)"
     elif broker_ok:
         meta.data_source = "Broker connected (market closed)"
+        # Supplement with simulated metrics for IV ranks (DXLink unavailable)
+        if market == "India":
+            sim_fallback = create_india_trading()
+        else:
+            sim_fallback = create_ideal_income()
+        mm = SimulatedMetrics(sim_fallback)
+        # Keep broker md for account data, but use simulated for quotes
+        md = sim_fallback
     else:
         # --- Fallback: snapshot then preset ---
         snap_info = get_snapshot_info()
