@@ -117,6 +117,36 @@ If any of these is unwired in eTrading, the platform is not production-ready. Tr
 
 ---
 
+## Document Management
+
+### File Types
+- `*_info.md` — Static reference. Facts, rules, profiles. No action tracking.
+- `*_living.md` — Active documents with action items. Claude's job to drain these.
+
+### Staleness Levels
+- **FRESH**: All items actioned within 3 days
+- **AGING**: Some items 4-7 days old
+- **STALE**: Any item 8+ days without action
+- **DRAINED**: All items delivered — file is effectively info, history preserved
+
+### Standing Instruction: Drain Living Documents
+1. **Session start**: Read `memory/MEMORY.md`. Check living docs for STALE items.
+2. **STALE items**: Report to user. Propose action. If actionable without input, just do it.
+3. **Every action item** in a living doc must flow to `docs/ROADMAP.md` (high-level) or session tasks (execution-level).
+4. **Keep scrubbing** living docs until all items are DELIVERED or BLOCKED.
+5. **When feedback, errors, or new requirements arrive**: capture → living doc → ROADMAP → deliver. End-to-end. Not the user's job to manage the pipeline.
+6. **Never let living docs rot.** If an item is STALE, it's Claude's failure, not the user's.
+
+### Document Hierarchy
+```
+ROADMAP.md          ← High-level: phases, business objectives, what's next
+  └── Session tasks ← Execution-level: specific steps for current session
+Living docs         ← Action items that feed ROADMAP
+Info docs           ← Stable reference, no actions
+```
+
+---
+
 ## Standing Instructions for Claude
 
 - **Read this file before any work.**
