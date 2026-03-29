@@ -37,7 +37,12 @@ def _parse_date(s: str) -> date | None:
 
 
 def parse_intake(path: Path) -> dict:
-    """Parse an _intake.md file."""
+    """Parse an _intake.md file.
+
+    Table columns (9): Key, Item, Added, Last Actioned, Status, Assignee,
+    Next Action, Blockers, Delivered To.
+    Status values: OPEN, IN_PROGRESS, BLOCKED, CLOSED.
+    """
     text = path.read_text(encoding="utf-8")
     items = []
     in_table = False
@@ -53,15 +58,15 @@ def parse_intake(path: Path) -> dict:
             if len(cols) >= 5:
                 added = _parse_date(cols[2])
                 actioned = _parse_date(cols[3])
-                age = (date.today() - actioned).days if actioned else 999
-                # Handle both old (6-col) and new (9-col) formats
+                age_days = (date.today() - added).days if added else 999
+                health_days = (date.today() - actioned).days if actioned else 999
                 items.append({
                     "key": cols[0],
                     "item": cols[1][:50],
                     "added": cols[2].strip(),
                     "last_actioned": cols[3].strip(),
-                    "age_days": age,
-                    "staleness": _age_to_staleness(age),
+                    "age_days": age_days,
+                    "health": _age_to_staleness(health_days),
                     "status": cols[4],
                     "assignee": cols[5] if len(cols) > 5 else "",
                     "next_action": cols[6][:40] if len(cols) > 6 else "",
@@ -71,12 +76,12 @@ def parse_intake(path: Path) -> dict:
         elif in_table and not line.startswith("|"):
             in_table = False
 
-    active = [i for i in items if i["status"] not in ("DELIVERED",)]
+    active = [i for i in items if i["status"] not in ("CLOSED",)]
     if not active:
         doc_staleness = "DRAINED"
-    elif any(i["staleness"] == "STALE" for i in active):
+    elif any(i["health"] == "STALE" for i in active):
         doc_staleness = "STALE"
-    elif any(i["staleness"] == "AGING" for i in active):
+    elif any(i["health"] == "AGING" for i in active):
         doc_staleness = "AGING"
     else:
         doc_staleness = "FRESH"
@@ -140,7 +145,7 @@ def main():
     doc_rows = []
     for d in intake_docs:
         total = len(d["items"])
-        active = len([i for i in d["items"] if i["status"] not in ("DELIVERED",)])
+        active = len([i for i in d["items"] if i["status"] not in ("CLOSED",)])
         doc_rows.append([d["path"], "INTAKE", d["staleness"], total, active, ""])
     for d in living_docs:
         doc_rows.append([d["path"], "LIVING", d["staleness"], "", "", f"reviewed {d['age_days']}d ago"])
@@ -159,21 +164,21 @@ def main():
     all_items = []
     for d in intake_docs:
         for item in d["items"]:
-            if item["status"] == "DELIVERED":
+            if item["status"] == "CLOSED":
                 continue
             all_items.append(item)
 
     if args.stale:
-        show_items = [i for i in all_items if i["staleness"] in ("STALE", "AGING")]
+        show_items = [i for i in all_items if i["health"] in ("STALE", "AGING")]
         title = "STALE & AGING ITEMS"
     elif args.items:
         show_items = all_items
         title = "ALL ACTIVE ITEMS"
     else:
-        show_items = [i for i in all_items if i["staleness"] in ("STALE", "AGING")]
+        show_items = [i for i in all_items if i["health"] in ("STALE", "AGING")]
         if not show_items:
             show_items = all_items[:10]  # show top 10 if nothing stale
-        title = "ITEMS NEEDING ATTENTION" if any(i["staleness"] != "FRESH" for i in show_items) else "TOP ACTIVE ITEMS"
+        title = "ITEMS NEEDING ATTENTION" if any(i["health"] != "FRESH" for i in show_items) else "TOP ACTIVE ITEMS"
 
     if show_items:
         item_rows = [
@@ -181,18 +186,18 @@ def main():
                 i["key"],
                 i["item"][:40],
                 f"{i['age_days']}d",
-                i["staleness"],
+                i["health"],
                 i["status"],
                 i.get("assignee", "")[:10],
                 i.get("next_action", "")[:35],
-                i.get("blockers", "")[:20] if i.get("blockers", "") not in ("", "-") else "",
+                i.get("blockers", "")[:20] if i.get("blockers", "") not in ("", "-", "\u2014") else "",
             ]
             for i in show_items
         ]
         print(f"  {title}")
         print(tabulate(
             item_rows,
-            headers=["Key", "Item", "Age", "Health", "Status", "Assignee", "Next Action", "Blockers"],
+            headers=["Key", "Item", "Age(d)", "Health", "Status", "Assignee", "Next Action", "Blockers"],
             tablefmt="grid",
         ))
         print()
@@ -200,18 +205,21 @@ def main():
     # ── Summary ──
 
     total_items = len(all_items)
-    stale = sum(1 for i in all_items if i["staleness"] == "STALE")
-    aging = sum(1 for i in all_items if i["staleness"] == "AGING")
-    fresh = sum(1 for i in all_items if i["staleness"] == "FRESH")
-    blocked = sum(1 for i in all_items if i["status"] == "BLOCKED")
+    stale = sum(1 for i in all_items if i["health"] == "STALE")
+    aging = sum(1 for i in all_items if i["health"] == "AGING")
+    fresh = sum(1 for i in all_items if i["health"] == "FRESH")
+    n_open = sum(1 for i in all_items if i["status"] == "OPEN")
     in_progress = sum(1 for i in all_items if i["status"] == "IN_PROGRESS")
+    blocked = sum(1 for i in all_items if i["status"] == "BLOCKED")
+    # Count closed across ALL items (including filtered ones)
+    n_closed = sum(1 for d in intake_docs for i in d["items"] if i["status"] == "CLOSED")
 
     health = "HEALTHY" if stale == 0 else "NEEDS ATTENTION" if stale <= 2 else "UNHEALTHY"
 
     print(f"  {'-' * 40}")
     print(f"  Health:    {health}")
-    print(f"  Items:     {total_items} active ({fresh} fresh, {aging} aging, {stale} stale)")
-    print(f"  Pipeline:  {in_progress} in progress, {blocked} blocked")
+    print(f"  Items:     {n_open} open, {in_progress} in progress, {blocked} blocked, {n_closed} closed")
+    print(f"  Staleness: {fresh} fresh, {aging} aging, {stale} stale")
     print(f"  Documents: {len(intake_docs)} intake, {len(living_docs)} living, {len(info_docs)} info")
     print()
 
