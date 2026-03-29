@@ -17,6 +17,40 @@ income-desk --trader india    # India market version
 
 ---
 
+## Quick Start: Workflow Harness
+
+**New to the codebase?** The workflow harness walks you through every API in the system, step by step, with real outputs.
+
+```bash
+# Interactive — pick a market, explore each phase
+python -m challenge.harness
+
+# Run all 15 workflows non-interactively (daily stability check)
+python -m challenge.harness --all --market=US
+python -m challenge.harness --all --market=India
+
+# Run a specific phase
+python -m challenge.harness --phase=2 --market=US    # Scanning only
+```
+
+The harness auto-connects to your broker (TastyTrade for US, Dhan for India). If the market is closed or no credentials are available, it falls back to simulated data seamlessly.
+
+**7 Phases, 15 Workflows:**
+
+| Phase | What it tests | Workflows |
+|-------|--------------|-----------|
+| 1. Pre-Market | Is it safe to trade today? | health check, daily plan, market snapshot |
+| 2. Scanning | What should I trade? | scan universe, rank opportunities |
+| 3. Trade Entry | Is this trade ready? | validate, size (Kelly), price |
+| 4. Monitoring | How are my positions? | monitor, adjust, overnight risk |
+| 5. Portfolio Risk | What's my exposure? | Greeks aggregation, stress test |
+| 6. Calendar | Any expiries today? | expiry day check |
+| 7. Reporting | How did today go? | daily report |
+
+Every workflow prints its API signature, inputs, and tabular results. See `challenge/harness.py` for the full implementation.
+
+---
+
 ## The Trading Workflow
 
 Trading doesn't start with placing an order. It starts with setting up your desk.
