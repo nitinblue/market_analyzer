@@ -103,7 +103,7 @@ def parse_info(path: Path) -> dict:
 def parse_objectives() -> dict:
     """Parse objectives_info.md for readiness checklist and blockers."""
     obj_file = MEMORY_DIR / "objectives_info.md"
-    result = {"us_pass": 0, "india_pass": 0, "checks": 0, "blockers": []}
+    result = {"us_pass": 0, "india_pass": 0, "checks": 0, "blockers": [], "checklist": []}
     if not obj_file.exists():
         return result
 
@@ -123,6 +123,9 @@ def parse_objectives() -> dict:
                     result["us_pass"] += 1
                 if "PASS" in cols[3]:
                     result["india_pass"] += 1
+                result["checklist"].append({
+                    "check": cols[1][:45], "us": cols[2], "india": cols[3],
+                })
         elif in_checklist and not line.startswith("|"):
             in_checklist = False
 
@@ -147,11 +150,32 @@ def parse_objectives() -> dict:
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Project status dashboard")
-    parser.add_argument("--items", action="store_true", help="Show all intake items")
-    parser.add_argument("--stale", action="store_true", help="Show only stale/aging items")
-    parser.add_argument("--docs", action="store_true", help="Show document inventory")
+    parser = argparse.ArgumentParser(
+        description="Project status dashboard",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+switches:
+  --items       All active intake items with next actions
+  --stale       Only stale/aging items (need immediate attention)
+  --blockers    All blockers mapped to objectives
+  --objectives  Go-live checklist detail (per-check status)
+  --pipeline    Pipeline breakdown by intake category
+  --docs        Document inventory (all files with types)
+  --focus       Just the recommended focus item
+  --all         Everything at once
+""",
+    )
+    parser.add_argument("--items", action="store_true", help="All active items")
+    parser.add_argument("--stale", action="store_true", help="Stale/aging items only")
+    parser.add_argument("--blockers", action="store_true", help="All blockers to objectives")
+    parser.add_argument("--objectives", action="store_true", help="Go-live checklist detail")
+    parser.add_argument("--pipeline", action="store_true", help="Pipeline by category")
+    parser.add_argument("--docs", action="store_true", help="Document inventory")
+    parser.add_argument("--focus", action="store_true", help="Recommended focus only")
+    parser.add_argument("--all", action="store_true", help="Show everything")
     args = parser.parse_args()
+    if args.all:
+        args.items = args.blockers = args.objectives = args.pipeline = args.docs = True
 
     # ── Collect data ──
 
@@ -211,14 +235,15 @@ def main():
     ]
     print(tabulate(kpi_rows, headers=["KPI", "Value", "Detail"], tablefmt="grid"))
 
-    # ── Section 2: Top Blocker + Recommended Focus ──
+    # ── Focus (always shown unless --focus suppresses other sections) ──
 
-    print()
+    if not args.focus:
+        print()
+
     if go_live_blockers:
         top = go_live_blockers[0]
         print(f"  >> FOCUS: {top['key']} -- {top['blocker']}")
         print(f"     Blocks: {top['blocks']}")
-        # Find next action from intake items
         for item in all_items:
             if item["key"] == top["key"]:
                 print(f"     Next:   {item.get('next_action', 'TBD')}")
@@ -226,7 +251,11 @@ def main():
     else:
         print(f"  >> No go-live blockers -- focus on features")
 
-    # ── Section 3: Stale/Aging Items ──
+    if args.focus:
+        print()
+        return
+
+    # ── Stale/Aging (always shown in default view) ──
 
     if stale_items or aging_items:
         print()
@@ -242,55 +271,60 @@ def main():
                         headers=["Key", "Item", "Age", "Health", "Status", "Owner", "Next Action"],
                         tablefmt="grid"))
 
-    # ── Section 4: All Blockers to Objectives ──
+    # ── Blockers (default view shows count, --blockers shows full table) ──
 
-    if blockers:
+    if args.blockers and blockers:
         print()
         print(f"  BLOCKERS TO OBJECTIVES ({len(blockers)} open)")
-        print(tabulate(
-            [[b["key"], b["blocker"], b["blocks"]] for b in blockers],
-            headers=["Key", "Blocker", "Blocks"],
-            tablefmt="grid",
-        ))
+        blocker_rows = []
+        for b in blockers:
+            # Find next action from intake items
+            next_act = ""
+            for item in all_items:
+                if item["key"] == b["key"]:
+                    next_act = item.get("next_action", "")[:30]
+                    break
+            blocker_rows.append([b["key"], b["blocker"], b["blocks"], next_act])
+        print(tabulate(blocker_rows,
+                        headers=["Key", "Blocker", "Blocks", "Next Action"],
+                        tablefmt="grid"))
 
-    # ── Section 5: Pipeline Summary ──
+    # ── Objectives detail (--objectives) ──
 
-    n_open = sum(1 for i in all_items if i["status"] == "OPEN")
-    n_ip = sum(1 for i in all_items if i["status"] == "IN_PROGRESS")
-    n_blocked = sum(1 for i in all_items if i["status"] == "BLOCKED")
-
-    print()
-    print(f"  {'-' * 60}")
-    print(f"  Pipeline:   {n_open} open | {n_ip} in progress | {n_blocked} blocked | {closed_count} closed")
-    print(f"  Staleness:  {len(all_items) - len(stale_items) - len(aging_items)} fresh | {len(aging_items)} aging | {len(stale_items)} stale")
-    print(f"  Documents:  {len(intake_docs)} intake | ", end="")
-
-    # Count living + info docs
-    living_count = len(list(DOCS_DIR.glob("*_living.md"))) if DOCS_DIR.exists() else 0
-    info_count = len(list(MEMORY_DIR.glob("*_info.md"))) if MEMORY_DIR.exists() else 0
-    print(f"{living_count} living | {info_count} info")
-
-    # ── Section 6: Document Inventory (only with --docs) ──
-
-    if args.docs:
+    if args.objectives and obj["checklist"]:
         print()
-        living_docs = [parse_living(p) for p in sorted(DOCS_DIR.glob("*_living.md"))] if DOCS_DIR.exists() else []
-        info_docs = [parse_info(p) for p in sorted(MEMORY_DIR.glob("*_info.md"))] if MEMORY_DIR.exists() else []
+        print(f"  GO-LIVE CHECKLIST")
+        check_rows = [
+            [f"{i+1}", c["check"], c["us"], c["india"]]
+            for i, c in enumerate(obj["checklist"])
+        ]
+        print(tabulate(check_rows,
+                        headers=["#", "Check", "US", "India"],
+                        tablefmt="grid"))
 
-        doc_rows = []
+    # ── Pipeline by category (--pipeline) ──
+
+    if args.pipeline:
+        print()
+        print(f"  PIPELINE BY CATEGORY")
+        cat_rows = []
         for d in intake_docs:
-            total = len(d["items"])
-            active = len([i for i in d["items"] if i["status"] != "CLOSED"])
-            doc_rows.append([d["path"], "INTAKE", d["staleness"], total, active, ""])
-        for d in living_docs:
-            doc_rows.append([d["path"], "LIVING", d["staleness"], "", "", f"reviewed {d['age_days']}d ago"])
-        for d in info_docs:
-            doc_rows.append([d["path"], "INFO", "", "", "", f"updated {d['updated']}"])
+            active = [i for i in d["items"] if i["status"] != "CLOSED"]
+            if active:
+                n_open = sum(1 for i in active if i["status"] == "OPEN")
+                n_ip = sum(1 for i in active if i["status"] == "IN_PROGRESS")
+                n_blk = sum(1 for i in active if i["status"] == "BLOCKED")
+                oldest = max((i["age_days"] for i in active), default=0)
+                cat_rows.append([
+                    d["path"].replace("_intake.md", ""),
+                    len(active), n_open, n_ip, n_blk,
+                    f"{oldest}d", d["staleness"],
+                ])
+        print(tabulate(cat_rows,
+                        headers=["Category", "Total", "Open", "InProg", "Blocked", "Oldest", "Health"],
+                        tablefmt="grid"))
 
-        print("  DOCUMENT INVENTORY")
-        print(tabulate(doc_rows, headers=["File", "Type", "Staleness", "Total", "Active", "Notes"], tablefmt="grid"))
-
-    # ── Section 7: All Items (only with --items or --stale) ──
+    # ── All items (--items or --stale) ──
 
     if args.items or args.stale:
         if args.stale:
@@ -313,6 +347,37 @@ def main():
                             headers=["Key", "Item", "Age", "Health", "Status", "Owner", "Next Action", "Blockers"],
                             tablefmt="grid"))
 
+    # ── Document inventory (--docs) ──
+
+    if args.docs:
+        print()
+        living_docs = [parse_living(p) for p in sorted(DOCS_DIR.glob("*_living.md"))] if DOCS_DIR.exists() else []
+        info_docs = [parse_info(p) for p in sorted(MEMORY_DIR.glob("*_info.md"))] if MEMORY_DIR.exists() else []
+        doc_rows = []
+        for d in intake_docs:
+            total = len(d["items"])
+            active = len([i for i in d["items"] if i["status"] != "CLOSED"])
+            doc_rows.append([d["path"], "INTAKE", d["staleness"], total, active, ""])
+        for d in living_docs:
+            doc_rows.append([d["path"], "LIVING", d["staleness"], "", "", f"reviewed {d['age_days']}d ago"])
+        for d in info_docs:
+            doc_rows.append([d["path"], "INFO", "", "", "", f"updated {d['updated']}"])
+        print("  DOCUMENT INVENTORY")
+        print(tabulate(doc_rows, headers=["File", "Type", "Staleness", "Total", "Active", "Notes"], tablefmt="grid"))
+
+    # ── Pipeline summary (always at bottom) ──
+
+    n_open = sum(1 for i in all_items if i["status"] == "OPEN")
+    n_ip = sum(1 for i in all_items if i["status"] == "IN_PROGRESS")
+    n_blocked = sum(1 for i in all_items if i["status"] == "BLOCKED")
+    living_count = len(list(DOCS_DIR.glob("*_living.md"))) if DOCS_DIR.exists() else 0
+    info_count = len(list(MEMORY_DIR.glob("*_info.md"))) if MEMORY_DIR.exists() else 0
+
+    print()
+    print(f"  {'-' * 60}")
+    print(f"  Pipeline:   {n_open} open | {n_ip} in progress | {n_blocked} blocked | {closed_count} closed")
+    print(f"  Staleness:  {len(all_items) - len(stale_items) - len(aging_items)} fresh | {len(aging_items)} aging | {len(stale_items)} stale")
+    print(f"  Documents:  {len(intake_docs)} intake | {living_count} living | {info_count} info")
     print()
 
 
