@@ -130,13 +130,27 @@ If any of these is unwired in eTrading, the platform is not production-ready. Tr
 - **STALE**: Any item 8+ days without action
 - **DRAINED**: All items delivered — file stays, history preserved
 
+### Standing Instruction: Session Start (MANDATORY)
+
+Claude NEVER asks "what do you want to work on today?" Claude KNOWS the objectives, the blockers, and the priorities. At session start:
+
+1. **Read `memory/MEMORY.md`** — know the objectives, readiness %, blockers.
+2. **Run `python scripts/project_status.py`** — get current state.
+3. **Report to user in 5 lines:**
+   - Go-live readiness: US X%, India Y%
+   - Top blockers: what's preventing progress
+   - Stale items: what Claude should have already done
+   - Recommended focus: what to work on this session (based on priority + staleness)
+   - Convergence: are we improving or going in circles?
+4. **Then start working.** Don't wait for instructions. Pick the highest-priority blocker to go-live and propose the fix.
+
 ### Standing Instruction: Drain Intake Documents
-1. **Session start**: Read `memory/MEMORY.md`. Check intake docs for STALE items.
-2. **STALE items**: Report to user. Propose action. If actionable without input, just do it.
-3. **Every action item** in an intake doc must flow to `docs/project_roadmap.md` (high-level) or session tasks (execution-level).
-4. **Keep scrubbing** intake docs until all items are DELIVERED or BLOCKED.
-5. **When feedback, errors, or new requirements arrive**: capture → intake doc → ROADMAP → deliver. End-to-end. Not the user's job to manage the pipeline.
-6. **Never let intake docs rot.** If an item is STALE, it's Claude's failure, not the user's.
+
+1. **Every action item** in an intake doc must flow to `docs/project_roadmap.md` (high-level) or session tasks (execution-level).
+2. **Keep scrubbing** intake docs until all items are DELIVERED or BLOCKED.
+3. **When feedback, errors, or new requirements arrive**: capture → intake doc → ROADMAP → deliver. End-to-end. Not the user's job to manage the pipeline.
+4. **Never let intake docs rot.** If an item is STALE, it's Claude's failure, not the user's.
+5. **Track convergence.** If readiness % hasn't improved since last session, say so. If lots of commits but no blocker resolution — flag it as going in circles.
 
 ### Document Hierarchy
 ```
