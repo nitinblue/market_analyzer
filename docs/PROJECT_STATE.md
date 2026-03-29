@@ -341,7 +341,7 @@ Position-aware portfolio filtering (7-step cascade), expected portfolio loss (AT
 
 ### Equity Research (EQ1-EQ3) — All DONE
 
-Stock fundamental analysis (5 strategies: value/growth/dividend/quality_momentum/turnaround), stock screening across universe by composite or strategy-specific score, trader reference flow (`challenge/trader_stocks.py`, US + India, `--market` switch).
+Stock fundamental analysis (5 strategies: value/growth/dividend/quality_momentum/turnaround), stock screening across universe by composite or strategy-specific score, trader reference flow (`income_desk/trader/trader_stocks.py`, US + India, `--market` switch).
 
 ### Capital Deployment (CD1-CD7, WH1) — All DONE
 
@@ -573,7 +573,7 @@ See `ETRADING_INTEGRATION.md` for full guide (last updated 2026-03-17).
 | `wheel_strategy.py` | STABLE | `analyze_wheel_strategy()`, `decide_wheel_action()` |
 | `hmm/` | STABLE | HMM model fitting, inference, feature computation |
 | `fundamentals/` | STABLE | Earnings fetching (skips ETFs/indexes to avoid yfinance noise) |
-| `challenge/` | REFERENCE ONLY | `trader.py`, `trader_stocks.py`, `portfolio.py` — do NOT import from eTrading |
+| `income_desk/trader/` | REFERENCE ONLY | `trader.py`, `trader_stocks.py`, `portfolio.py` — do NOT import from eTrading |
 
 ---
 
@@ -815,7 +815,7 @@ Repository made OSS-ready:
 
 ### Architecture Notes
 
-- `challenge/` contains reference implementations only — eTrading must NOT import from it
+- `income_desk/trader/` contains reference implementations only — eTrading must NOT import from it
 - `rank()` output is NOT safe to execute directly — eTrading MUST call `filter_trades_with_portfolio()` and `evaluate_trade_gates()` before execution
 - `risk.py` function `estimate_portfolio_loss()` is ATR-based, NOT formal VaR; use `run_stress_suite()` for scenario analysis
 - Dhan broker is now fully implemented (was a stub as of 2026-03-20; completed 2026-03-21)

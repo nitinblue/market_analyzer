@@ -5,7 +5,7 @@ eTrading calls these functions with TradeSpec objects + fill data.
 
 Usage::
 
-    from challenge.portfolio import Portfolio
+    from income_desk.trader.portfolio import Portfolio
 
     port = Portfolio()  # Loads config + trades from YAML
 
@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING
 
 import yaml
 
-from challenge.models import (
+from income_desk.trader.models import (
     PortfolioStatus,
     RiskCheckResult,
     RiskLimits,

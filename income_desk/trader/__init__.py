@@ -2,7 +2,7 @@
 
 Usage::
 
-    from challenge.portfolio import Portfolio
+    from income_desk.trader.portfolio import Portfolio
 
     port = Portfolio()
     status = port.get_status()
@@ -11,14 +11,14 @@ Usage::
     port.close_trade(record.trade_id, exit_price=0.35, reason="profit_target")
 """
 
-from challenge.models import (
+from income_desk.trader.models import (
     PortfolioStatus,
     RiskCheckResult,
     RiskLimits,
     TradeRecord,
     TradeStatus,
 )
-from challenge.portfolio import Portfolio
+from income_desk.trader.portfolio import Portfolio
 
 __all__ = [
     "Portfolio",

@@ -22,7 +22,7 @@ income-desk --trader india    # India market version
 The fastest way to understand income-desk. One command walks you through every API — with real broker data or seamless simulated fallback.
 
 ```bash
-python -m challenge.harness
+python -m income_desk.trader
 ```
 
 ```
@@ -58,18 +58,18 @@ Pricing data is clearly flagged when simulated: `** SIMULATED QUOTES — not tra
 
 ```bash
 # Interactive — pick market, walk through each phase
-python -m challenge.harness
+python -m income_desk.trader
 
 # Non-interactive — run all phases, get pass/fail summary
-python -m challenge.harness --all --market=US
-python -m challenge.harness --all --market=India
+python -m income_desk.trader --all --market=US
+python -m income_desk.trader --all --market=India
 
 # Single phase
-python -m challenge.harness --phase=2 --market=US    # Scanning only
-python -m challenge.harness --phase=5 --market=India  # Portfolio Risk
+python -m income_desk.trader --phase=2 --market=US    # Scanning only
+python -m income_desk.trader --phase=5 --market=India  # Portfolio Risk
 
 # Verbose — show library warnings and tracebacks
-python -m challenge.harness --all --market=US --verbose
+python -m income_desk.trader --all --market=US --verbose
 ```
 
 ### 7 Phases, 15 Workflows
@@ -112,8 +112,8 @@ After running all phases, the harness prints a summary:
 
 | File | Purpose |
 |------|---------|
-| `challenge/harness.py` | Main script — phase menu, workflow calls, tabular output (~1100 lines) |
-| `challenge/harness_support.py` | Broker setup, data source detection, demo positions, formatting (~560 lines) |
+| `income_desk/trader/trader.py` | Main script — phase menu, workflow calls, tabular output (~1100 lines) |
+| `income_desk/trader/support.py` | Broker setup, data source detection, demo positions, formatting (~560 lines) |
 
 ---
 

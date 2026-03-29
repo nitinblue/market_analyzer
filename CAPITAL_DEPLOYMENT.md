@@ -367,7 +367,7 @@ if rebalance.needs_rebalance:
 | CD4 | Core holdings recommender | `recommend_core_portfolio()` | HIGH — what to actually buy |
 | CD5 | Rebalancing engine | `check_rebalance()` | MEDIUM — quarterly check |
 | CD6 | CLI commands | `deploy`, `valuation`, `allocate`, `rebalance` | HIGH |
-| CD7 | Reference flow | `challenge/trader_deploy.py` | MEDIUM |
+| CD7 | Reference flow | `income_desk/trader/trader_legacy.py` | MEDIUM |
 
 ---
 

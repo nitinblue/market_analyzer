@@ -46,7 +46,7 @@ class HarnessSession:
         self.results.append((phase, workflow, status))
 
     def print_summary(self) -> None:
-        from challenge.harness_support import print_table
+        from income_desk.trader.support import print_table
 
         if not self.results:
             print("\n  No workflows were executed.")
@@ -146,7 +146,7 @@ def run_premarket(
     interactive: bool = True,
     verbose: bool = False,
 ) -> None:
-    from challenge.harness_support import (
+    from income_desk.trader.support import (
         print_error,
         print_signature,
         print_table,
@@ -318,7 +318,7 @@ def run_scanning(
     interactive: bool = True,
     verbose: bool = False,
 ) -> list[Any] | None:
-    from challenge.harness_support import (
+    from income_desk.trader.support import (
         print_error,
         print_signature,
         print_table,
@@ -438,7 +438,7 @@ def run_entry(
     interactive: bool = True,
     verbose: bool = False,
 ) -> None:
-    from challenge.harness_support import (
+    from income_desk.trader.support import (
         build_demo_proposal,
         print_error,
         print_signature,
@@ -666,7 +666,7 @@ def run_monitoring(
     interactive: bool = True,
     verbose: bool = False,
 ) -> None:
-    from challenge.harness_support import (
+    from income_desk.trader.support import (
         build_demo_positions,
         print_error,
         print_signature,
@@ -821,7 +821,7 @@ def run_portfolio_risk(
     interactive: bool = True,
     verbose: bool = False,
 ) -> None:
-    from challenge.harness_support import (
+    from income_desk.trader.support import (
         build_demo_positions,
         print_error,
         print_signature,
@@ -972,7 +972,7 @@ def run_calendar(
     interactive: bool = True,
     verbose: bool = False,
 ) -> None:
-    from challenge.harness_support import (
+    from income_desk.trader.support import (
         build_demo_positions,
         print_error,
         print_signature,
@@ -1037,7 +1037,7 @@ def run_reporting(
     interactive: bool = True,
     verbose: bool = False,
 ) -> None:
-    from challenge.harness_support import (
+    from income_desk.trader.support import (
         print_error,
         print_signature,
         wait_for_input,
@@ -1095,7 +1095,7 @@ def run_reporting(
 
 
 def main() -> None:
-    from challenge.harness_support import (
+    from income_desk.trader.support import (
         parse_args,
         pick_market,
         pick_tickers,

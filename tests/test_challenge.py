@@ -16,8 +16,8 @@ from income_desk.trade_spec_factory import (
     parse_dxlink_symbol,
 )
 from income_desk.models.opportunity import TradeSpec, LegAction, StructureType, OrderSide
-from challenge.portfolio import Portfolio
-from challenge.models import TradeStatus, RiskLimits, PortfolioStatus
+from income_desk.trader.portfolio import Portfolio
+from income_desk.trader.models import TradeStatus, RiskLimits, PortfolioStatus
 
 
 # ── TradeSpec Factory Tests ──
@@ -449,7 +449,7 @@ class TestRiskChecks:
 
 class TestTradeRecordProperties:
     def test_max_profit_credit(self):
-        from challenge.models import TradeRecord
+        from income_desk.trader.models import TradeRecord
         r = TradeRecord(
             trade_id="T1", ticker="GLD", structure_type="iron_condor",
             order_side="credit", legs=[], target_expiration="2026-04-17",
@@ -461,7 +461,7 @@ class TestTradeRecordProperties:
         assert r.risk_reward_ratio == pytest.approx(5.94, rel=0.01)
 
     def test_max_profit_debit(self):
-        from challenge.models import TradeRecord
+        from income_desk.trader.models import TradeRecord
         r = TradeRecord(
             trade_id="T1", ticker="SPY", structure_type="debit_spread",
             order_side="debit", legs=[], target_expiration="2026-04-17",
