@@ -111,7 +111,7 @@ If any of these is unwired in eTrading, the platform is not production-ready. Tr
 
 - **Audit before building.** When touching any capability, check whether it's actually wired end-to-end — not just that the function exists.
 - **Name things clearly.** Confusing names (like `var` for an ATR-based loss estimate) create integration bugs. Fix naming proactively.
-- **Document for eTrading immediately.** Every new API gets a section in `docs/INTEGRATION.md` before the conversation ends. eTrading developers should never have to read MA source code to understand how to use it.
+- **Document for eTrading immediately.** Every new API gets a section in `docs/project_integration_living.md` before the conversation ends. eTrading developers should never have to read MA source code to understand how to use it.
 - **Flag broken things explicitly.** If something in integration docs is relevant to what you're working on, surface it. Don't let known P0 bugs stay silent.
 - **Think about real money.** Every decision — what to build, what to fix first, what to document — should be evaluated through the lens of: does this protect or grow Nitin's capital?
 
@@ -120,29 +120,32 @@ If any of these is unwired in eTrading, the platform is not production-ready. Tr
 ## Document Management
 
 ### File Types
-- `*_info.md` — Static reference. Facts, rules, profiles. No action tracking.
-- `*_living.md` — Active documents with action items. Claude's job to drain these.
+- `*_info.md` — Static reference. Stable facts, rules, decisions. No action tracking.
+- `*_intake.md` — Action inbox (memory dir). Items flow: NEW → IN_PROGRESS → DELIVERED → archived.
+- `*_living.md` — Content-freshness tracked docs (docs/ dir). Refresh after major changes.
 
-### Staleness Levels
+### Staleness Levels (for intake items)
 - **FRESH**: All items actioned within 3 days
 - **AGING**: Some items 4-7 days old
 - **STALE**: Any item 8+ days without action
-- **DRAINED**: All items delivered — file is effectively info, history preserved
+- **DRAINED**: All items delivered — file stays, history preserved
 
-### Standing Instruction: Drain Living Documents
-1. **Session start**: Read `memory/MEMORY.md`. Check living docs for STALE items.
+### Standing Instruction: Drain Intake Documents
+1. **Session start**: Read `memory/MEMORY.md`. Check intake docs for STALE items.
 2. **STALE items**: Report to user. Propose action. If actionable without input, just do it.
-3. **Every action item** in a living doc must flow to `docs/ROADMAP.md` (high-level) or session tasks (execution-level).
-4. **Keep scrubbing** living docs until all items are DELIVERED or BLOCKED.
-5. **When feedback, errors, or new requirements arrive**: capture → living doc → ROADMAP → deliver. End-to-end. Not the user's job to manage the pipeline.
-6. **Never let living docs rot.** If an item is STALE, it's Claude's failure, not the user's.
+3. **Every action item** in an intake doc must flow to `docs/project_roadmap.md` (high-level) or session tasks (execution-level).
+4. **Keep scrubbing** intake docs until all items are DELIVERED or BLOCKED.
+5. **When feedback, errors, or new requirements arrive**: capture → intake doc → ROADMAP → deliver. End-to-end. Not the user's job to manage the pipeline.
+6. **Never let intake docs rot.** If an item is STALE, it's Claude's failure, not the user's.
 
 ### Document Hierarchy
 ```
-ROADMAP.md          ← High-level: phases, business objectives, what's next
-  └── Session tasks ← Execution-level: specific steps for current session
-Living docs         ← Action items that feed ROADMAP
-Info docs           ← Stable reference, no actions
+docs/project_roadmap.md         ← High-level: phases, objectives, what's next
+  └── Session tasks             ← Execution-level: specific steps for current session
+memory/*_intake.md              ← Action items that feed ROADMAP
+memory/*_info.md                ← Stable reference, no actions
+docs/project_*_living.md        ← Content docs with freshness tracking
+docs/project_*_info.md          ← Stable project docs
 ```
 
 ---
@@ -162,7 +165,7 @@ Info docs           ← Stable reference, no actions
 - **Additive changes preferred** over moving existing files.
 - **Update `docs/archive/SYSTEMATIC_GAPS.md` after any gap-related work.** Mark status, add implementation details, update test counts. This is the single source of truth for what's done vs open.
 - **Every gap must have an eTrading Integration column.** When building a new MA API, document what eTrading needs to do to consume it (pass iv_rank, store outcomes, schedule calibration, etc.). If no eTrading action needed, say so explicitly.
-- **Always update `docs/USER_MANUAL.md` after building new features.** This is the trader's single source of truth. Every new capability, CLI command, or API must be documented there.
+- **Always update `README.md` after building new features.** This is the trader's single source of truth. Every new capability, CLI command, or API must be documented there.
 - **`rank()` output is NOT safe to execute directly.** It ranks on market merit only — no position awareness. eTrading MUST call `filter_trades_with_portfolio()` and `evaluate_trade_gates()` before execution. Document this in every integration guide.
 
 ---

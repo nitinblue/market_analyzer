@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Document health check — scan living docs for staleness.
+"""Project status — scan intake and living docs for staleness.
 
 Usage:
-    python scripts/doc_health.py
-    python -m scripts.doc_health
+    python scripts/project_status.py
 """
 from __future__ import annotations
 
@@ -21,8 +20,8 @@ STALENESS_THRESHOLDS = {
 }
 
 
-def parse_living_doc(path: Path) -> dict:
-    """Parse a _living.md file and extract items with staleness."""
+def parse_tracked_doc(path: Path) -> dict:
+    """Parse a _intake.md or _living.md file and extract items with staleness."""
     text = path.read_text(encoding="utf-8")
 
     # Extract header staleness
@@ -100,53 +99,79 @@ def parse_living_doc(path: Path) -> dict:
 
 def main():
     print("\n" + "=" * 60)
-    print("  DOCUMENT HEALTH CHECK")
+    print("  PROJECT STATUS")
     print("=" * 60)
     print(f"  Date: {date.today()}")
     print()
 
-    # Find all living docs
+    # Find intake docs in memory dir
+    intake_files = []
+    if MEMORY_DIR.exists():
+        intake_files.extend(MEMORY_DIR.glob("*_intake.md"))
+
+    # Find living docs in docs dir
     living_files = []
-    for d in [MEMORY_DIR, DOCS_DIR]:
-        if d.exists():
-            living_files.extend(d.glob("*_living.md"))
-            living_files.extend(d.glob("*_living.md"))
+    if DOCS_DIR.exists():
+        living_files.extend(DOCS_DIR.glob("*_living.md"))
 
-    # Deduplicate
-    living_files = list(set(living_files))
+    all_files = sorted(set(intake_files)) + sorted(set(living_files))
 
-    if not living_files:
-        print("  No living documents found.")
+    if not all_files:
+        print("  No intake or living documents found.")
         return
 
     total_items = 0
     total_stale = 0
     total_aging = 0
 
-    for path in sorted(living_files):
-        doc = parse_living_doc(path)
-        total_items += doc["total"]
-        total_stale += doc["stale_count"]
-        total_aging += doc["aging_count"]
-
-        icon = {"FRESH": "OK", "AGING": "!!", "STALE": "XX", "DRAINED": "--"}
-        staleness = doc["staleness"]
-
-        print(f"  [{icon.get(staleness, '??')}] {doc['path']}: {staleness}")
-        print(f"       Items: {doc['total']} (FRESH:{doc['fresh_count']} AGING:{doc['aging_count']} STALE:{doc['stale_count']})")
-
-        # Show stale items
-        for item in doc["items"]:
-            if item["staleness"] in ("STALE", "AGING"):
-                print(f"       {item['key']}: {item['description']} ({item['age_days']}d old, {item['status']})")
+    # Report intake docs
+    if intake_files:
+        print("  --- Intake Documents (memory) ---")
         print()
+        for path in sorted(intake_files):
+            doc = parse_tracked_doc(path)
+            total_items += doc["total"]
+            total_stale += doc["stale_count"]
+            total_aging += doc["aging_count"]
+
+            icon = {"FRESH": "OK", "AGING": "!!", "STALE": "XX", "DRAINED": "--"}
+            staleness = doc["staleness"]
+
+            print(f"  [{icon.get(staleness, '??')}] {doc['path']}: {staleness}")
+            print(f"       Items: {doc['total']} (FRESH:{doc['fresh_count']} AGING:{doc['aging_count']} STALE:{doc['stale_count']})")
+
+            for item in doc["items"]:
+                if item["staleness"] in ("STALE", "AGING"):
+                    print(f"       {item['key']}: {item['description']} ({item['age_days']}d old, {item['status']})")
+            print()
+
+    # Report living docs
+    if living_files:
+        print("  --- Living Documents (docs/) ---")
+        print()
+        for path in sorted(living_files):
+            doc = parse_tracked_doc(path)
+            total_items += doc["total"]
+            total_stale += doc["stale_count"]
+            total_aging += doc["aging_count"]
+
+            icon = {"FRESH": "OK", "AGING": "!!", "STALE": "XX", "DRAINED": "--"}
+            staleness = doc["staleness"]
+
+            print(f"  [{icon.get(staleness, '??')}] {doc['path']}: {staleness}")
+            print(f"       Items: {doc['total']} (FRESH:{doc['fresh_count']} AGING:{doc['aging_count']} STALE:{doc['stale_count']})")
+
+            for item in doc["items"]:
+                if item["staleness"] in ("STALE", "AGING"):
+                    print(f"       {item['key']}: {item['description']} ({item['age_days']}d old, {item['status']})")
+            print()
 
     # Summary
     print("-" * 60)
     health = "HEALTHY" if total_stale == 0 else "NEEDS ATTENTION" if total_stale <= 2 else "UNHEALTHY"
     print(f"  Health: {health}")
     print(f"  Total items: {total_items} | Stale: {total_stale} | Aging: {total_aging}")
-    print(f"  Living docs: {len(living_files)}")
+    print(f"  Intake docs: {len(intake_files)} | Living docs: {len(living_files)}")
     print()
 
 

@@ -705,13 +705,12 @@ Produces a **GO / CAUTION / NO-GO** verdict based on: broker connectivity, optio
 
 ## Documentation
 
-- [User Manual](USER_MANUAL.md) — complete guide by purpose, geography, user journey
-- [Trust Framework](docs/TRUST_FRAMEWORK.md) — 3-dimensional data reliability scoring
-- [Data Interfaces](docs/DATA_INTERFACES.md) — bring your own data source
-- [Crash Playbook](docs/CRASH_PLAYBOOK.md) — systematic crash response protocol
-- [Launch Plan](docs/LAUNCH_PLAN.md) — project roadmap
-- [API Reference](API.md) — full Python API
-- [Workflow API Spec](docs/superpowers/specs/2026-03-27-workflow-apis-design.md) — workflow architecture
+- [Architecture](docs/project_architecture_living.md) — system design
+- [Integration Guide](docs/project_integration_living.md) — APIs, contracts, boundaries
+- [Roadmap](docs/project_roadmap.md) — delivery tracker
+- [Vision](docs/project_vision_info.md) — mission and philosophy
+- [Trust Framework](docs/archive/TRUST_FRAMEWORK.md) — 3-dimensional data reliability scoring
+- [Crash Playbook](docs/archive/CRASH_PLAYBOOK.md) — systematic crash response protocol
 
 ## 90+ CLI Commands
 
