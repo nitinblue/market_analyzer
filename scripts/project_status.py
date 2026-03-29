@@ -54,15 +54,19 @@ def parse_intake(path: Path) -> dict:
                 added = _parse_date(cols[2])
                 actioned = _parse_date(cols[3])
                 age = (date.today() - actioned).days if actioned else 999
+                # Handle both old (6-col) and new (9-col) formats
                 items.append({
                     "key": cols[0],
-                    "item": cols[1][:60],
+                    "item": cols[1][:50],
                     "added": cols[2].strip(),
                     "last_actioned": cols[3].strip(),
                     "age_days": age,
                     "staleness": _age_to_staleness(age),
                     "status": cols[4],
-                    "delivered_to": cols[5] if len(cols) > 5 else "",
+                    "assignee": cols[5] if len(cols) > 5 else "",
+                    "next_action": cols[6][:40] if len(cols) > 6 else "",
+                    "blockers": cols[7] if len(cols) > 7 else "",
+                    "delivered_to": cols[8] if len(cols) > 8 else (cols[5] if len(cols) == 6 else ""),
                 })
         elif in_table and not line.startswith("|"):
             in_table = False
@@ -173,13 +177,22 @@ def main():
 
     if show_items:
         item_rows = [
-            [i["key"], i["item"][:45], i["added"], f"{i['age_days']}d", i["staleness"], i["status"], i["delivered_to"][:20]]
+            [
+                i["key"],
+                i["item"][:40],
+                f"{i['age_days']}d",
+                i["staleness"],
+                i["status"],
+                i.get("assignee", "")[:10],
+                i.get("next_action", "")[:35],
+                i.get("blockers", "")[:20] if i.get("blockers", "") not in ("", "-") else "",
+            ]
             for i in show_items
         ]
         print(f"  {title}")
         print(tabulate(
             item_rows,
-            headers=["Key", "Item", "Added", "Age", "Health", "Status", "Delivered To"],
+            headers=["Key", "Item", "Age", "Health", "Status", "Assignee", "Next Action", "Blockers"],
             tablefmt="grid",
         ))
         print()
