@@ -77,7 +77,7 @@ workflow: validate_trade
 inputs:
   ticker: $phase2.proposals[0].ticker
   entry_credit: $phase2.proposals[0].entry_credit
-  regime_id: $phase2.proposals[0].regime_id
+  regime_id: 1
   atr_pct: 1.0
   current_price: 0
 gate:
@@ -92,7 +92,7 @@ inputs:
   max_loss: $phase2.proposals[0].max_risk
   capital: $capital
   risk_per_contract: $phase2.proposals[0].max_risk
-  regime_id: $phase2.proposals[0].regime_id
+  regime_id: 1
 gate:
   - risk_pct_of_capital < $risk.max_risk_per_trade_pct
 on_fail: BLOCK "Risk {risk_pct_of_capital}% exceeds limit"

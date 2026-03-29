@@ -247,8 +247,27 @@ class TradingRunner:
 
     def _resolve_binding(self, expr: str, ctx: ExecutionContext) -> Any:
         """Resolve a binding expression like $universe, $capital, $phase1.iv_rank_map."""
-        if not isinstance(expr, str) or not expr.startswith("$"):
-            return expr  # literal value
+        if not isinstance(expr, str):
+            return expr
+        if not expr.startswith("$"):
+            # Parse literal values: "[]", "true", "false", numbers
+            if expr == "[]":
+                return []
+            if expr == "true" or expr == "True":
+                return True
+            if expr == "false" or expr == "False":
+                return False
+            if expr == "null" or expr == "None":
+                return None
+            try:
+                return int(expr)
+            except ValueError:
+                pass
+            try:
+                return float(expr)
+            except ValueError:
+                pass
+            return expr  # string literal
 
         path = expr[1:]  # strip $
 
