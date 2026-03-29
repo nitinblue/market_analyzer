@@ -465,6 +465,10 @@ def run_entry(
             "capital": top.max_risk,
             "wing_width": getattr(top, "wing_width", 5.0),
             "dte": getattr(top, "target_dte", 30),
+            "short_put": getattr(top, "short_put", None),
+            "long_put": getattr(top, "long_put", None),
+            "short_call": getattr(top, "short_call", None),
+            "long_call": getattr(top, "long_call", None),
         }
     else:
         prop = build_demo_proposal(meta.market)
@@ -567,19 +571,35 @@ def run_entry(
         from income_desk.workflow import price_trade
         from income_desk.workflow.price_trade import PriceRequest
 
-        # Build demo legs -put credit spread ~3% and ~7% OTM
-        price = prop["current_price"]
-        if price > 0:
-            short_strike = round(price * 0.97, 0)
-            long_strike = round(price * 0.93, 0)
-        else:
-            short_strike = 550.0
-            long_strike = 545.0
+        # Use strikes from the proposal if available, otherwise estimate
+        short_put = prop.get("short_put")
+        long_put = prop.get("long_put")
+        short_call = prop.get("short_call")
+        long_call = prop.get("long_call")
 
-        legs = [
-            {"strike": short_strike, "option_type": "put", "action": "sell"},
-            {"strike": long_strike, "option_type": "put", "action": "buy"},
-        ]
+        if short_put and long_put:
+            legs = [
+                {"strike": short_put, "option_type": "put", "action": "sell"},
+                {"strike": long_put, "option_type": "put", "action": "buy"},
+            ]
+            if short_call and long_call:
+                legs.extend([
+                    {"strike": short_call, "option_type": "call", "action": "sell"},
+                    {"strike": long_call, "option_type": "call", "action": "buy"},
+                ])
+        else:
+            # Fallback: estimate strikes from price
+            price = prop.get("current_price", 0)
+            if price > 0:
+                short_strike = round(price * 0.97, 0)
+                long_strike = round(price * 0.93, 0)
+            else:
+                short_strike = 550.0
+                long_strike = 545.0
+            legs = [
+                {"strike": short_strike, "option_type": "put", "action": "sell"},
+                {"strike": long_strike, "option_type": "put", "action": "buy"},
+            ]
 
         req = PriceRequest(
             ticker=ticker,
@@ -588,6 +608,10 @@ def run_entry(
         )
         print_signature("price_trade", req, cli_command=f"analyzer-cli> price {ticker}")
         resp = price_trade(req, ma)
+
+        # Flag data source — pricing is only trustworthy with live broker
+        if "simulated" in meta.data_source.lower() or "closed" in meta.data_source.lower():
+            print("  ** SIMULATED QUOTES — not tradeable. Live broker required for real pricing **")
 
         print(f"  Underlying   : {cur}{resp.underlying_price:,.2f}")
         if resp.net_credit is not None:
