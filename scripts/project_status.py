@@ -16,7 +16,7 @@ from pathlib import Path
 
 from tabulate import tabulate
 
-MEMORY_DIR = Path.home() / ".claude" / "projects" / "C--Users-nitin-PythonProjects-income-desk" / "memory"
+MEMORY_DIR = Path(__file__).parent.parent / "income_desk" / "memory"
 DOCS_DIR = Path(__file__).parent.parent / "docs"
 
 STALENESS_DAYS = {"FRESH": 3, "AGING": 7}

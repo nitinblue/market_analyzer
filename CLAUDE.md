@@ -134,7 +134,7 @@ If any of these is unwired in eTrading, the platform is not production-ready. Tr
 
 Claude NEVER asks "what do you want to work on today?" Claude KNOWS the objectives, the blockers, and the priorities. At session start:
 
-1. **Read `memory/MEMORY.md`** — know the objectives, readiness %, blockers.
+1. **Read `income_desk/memory/MEMORY.md`** — know the objectives, readiness %, blockers.
 2. **Run `python scripts/project_status.py`** — get current state.
 3. **Report to user in 5 lines:**
    - Go-live readiness: US X%, India Y%
