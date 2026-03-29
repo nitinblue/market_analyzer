@@ -19,35 +19,101 @@ income-desk --trader india    # India market version
 
 ## Quick Start: Workflow Harness
 
-**New to the codebase?** The workflow harness walks you through every API in the system, step by step, with real outputs.
+The fastest way to understand income-desk. One command walks you through every API — with real broker data or seamless simulated fallback.
 
 ```bash
-# Interactive — pick a market, explore each phase
+python -m challenge.harness
+```
+
+```
++------------------------------------------------------------------+
+|                         WORKFLOW HARNESS                         |
++------------------------------------------------------------------+
+| Market: US                                                       |
+| Broker: tastytrade (LIVE)                                        |
+| Data:   Broker connected (market closed)                         |
+| Tickers (16): AAPL, AMZN, DIA, GLD, GOOGL, IWM + 10 more       |
+| Account: NLV USD 32,635  |  BP USD 30,555                       |
++------------------------------------------------------------------+
+```
+
+### What it does
+
+Exercises all **15 workflow APIs** across 7 phases that mirror a real trading day. Each workflow prints:
+- **API signature** with all Pydantic request fields and values
+- **CLI equivalent** (`analyzer-cli> rank SPY QQQ ...`)
+- **Tabular results** — regimes, ranked trades, gate scorecards, stress scenarios, Greeks
+
+### Data source handling
+
+| Condition | What happens |
+|-----------|-------------|
+| Market open + broker credentials | Live quotes from TastyTrade (US) or Dhan (India) |
+| Market closed + broker credentials | Account data live, quotes from simulated presets |
+| No broker credentials | Full simulated mode — works out of the box |
+
+Pricing data is clearly flagged when simulated: `** SIMULATED QUOTES — not tradeable **`
+
+### Usage
+
+```bash
+# Interactive — pick market, walk through each phase
 python -m challenge.harness
 
-# Run all 15 workflows non-interactively (daily stability check)
+# Non-interactive — run all phases, get pass/fail summary
 python -m challenge.harness --all --market=US
 python -m challenge.harness --all --market=India
 
-# Run a specific phase
+# Single phase
 python -m challenge.harness --phase=2 --market=US    # Scanning only
+python -m challenge.harness --phase=5 --market=India  # Portfolio Risk
+
+# Verbose — show library warnings and tracebacks
+python -m challenge.harness --all --market=US --verbose
 ```
 
-The harness auto-connects to your broker (TastyTrade for US, Dhan for India). If the market is closed or no credentials are available, it falls back to simulated data seamlessly.
+### 7 Phases, 15 Workflows
 
-**7 Phases, 15 Workflows:**
+| Phase | Trading Question | Workflows | Key Output |
+|-------|-----------------|-----------|------------|
+| 1. Pre-Market | Is it safe to trade? | health check, daily plan, snapshot | Crash sentinel (GREEN/RED), regime map, ticker snapshots |
+| 2. Scanning | What should I trade? | scan universe, rank opportunities | Screened candidates, ranked proposals with POP/score/credit |
+| 3. Trade Entry | Is this trade ready? | validate, size, price | Gate scorecard, Kelly sizing, leg quotes with bid/ask |
+| 4. Monitoring | How are positions? | monitor, adjust, overnight risk | Exit signals, adjustment recommendations, overnight risk levels |
+| 5. Portfolio Risk | What's my exposure? | Greeks aggregation, stress test | Net delta/gamma/theta/vega, 18-scenario stress results |
+| 6. Calendar | Any expiries today? | expiry day check | Expiry index, position urgency/deadlines |
+| 7. Reporting | How did today go? | daily report | Trade counts, P&L, win rate summary |
 
-| Phase | What it tests | Workflows |
-|-------|--------------|-----------|
-| 1. Pre-Market | Is it safe to trade today? | health check, daily plan, market snapshot |
-| 2. Scanning | What should I trade? | scan universe, rank opportunities |
-| 3. Trade Entry | Is this trade ready? | validate, size (Kelly), price |
-| 4. Monitoring | How are my positions? | monitor, adjust, overnight risk |
-| 5. Portfolio Risk | What's my exposure? | Greeks aggregation, stress test |
-| 6. Calendar | Any expiries today? | expiry day check |
-| 7. Reporting | How did today go? | daily report |
+### Workflow chaining
 
-Every workflow prints its API signature, inputs, and tabular results. See `challenge/harness.py` for the full implementation.
+Phases feed into each other naturally:
+- Phase 2 `rank_opportunities` produces trade proposals with real strikes
+- Phase 3 `validate_trade` + `size_position` + `price_trade` use that top proposal
+- Phase 4-6 use demo positions (since harness doesn't manage real positions)
+
+### Pass/fail summary
+
+After running all phases, the harness prints a summary:
+
+```
+  HARNESS SUMMARY
++-----------------+----------------------------+----------+
+| Phase           | Workflow                   | Status   |
++-----------------+----------------------------+----------+
+| 1-PreMarket     | check_portfolio_health     | OK       |
+| 1-PreMarket     | generate_daily_plan        | OK       |
+| ...             | ...                        | ...      |
+| 7-Reporting     | generate_daily_report      | OK       |
++-----------------+----------------------------+----------+
+  Total: 15  |  Passed: 15  |  Failed: 0
+```
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `challenge/harness.py` | Main script — phase menu, workflow calls, tabular output (~1100 lines) |
+| `challenge/harness_support.py` | Broker setup, data source detection, demo positions, formatting (~560 lines) |
 
 ---
 
