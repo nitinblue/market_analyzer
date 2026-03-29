@@ -1,38 +1,49 @@
 #!/usr/bin/env python3
-"""Project status — scan intake and living docs for staleness.
+"""Project status — scan all managed documents and report health.
 
 Usage:
     python scripts/project_status.py
+    python scripts/project_status.py --items     # show all items
+    python scripts/project_status.py --stale     # show only stale/aging items
 """
 from __future__ import annotations
 
+import argparse
 import re
 from datetime import datetime, date
 from pathlib import Path
 
+from tabulate import tabulate
+
 MEMORY_DIR = Path.home() / ".claude" / "projects" / "C--Users-nitin-PythonProjects-income-desk" / "memory"
 DOCS_DIR = Path(__file__).parent.parent / "docs"
 
-STALENESS_THRESHOLDS = {
-    "FRESH": 3,
-    "AGING": 7,
-    # 8+ = STALE
-}
+STALENESS_DAYS = {"FRESH": 3, "AGING": 7}
 
 
-def parse_tracked_doc(path: Path) -> dict:
-    """Parse a _intake.md or _living.md file and extract items with staleness."""
+def _age_to_staleness(age_days: int) -> str:
+    if age_days <= STALENESS_DAYS["FRESH"]:
+        return "FRESH"
+    if age_days <= STALENESS_DAYS["AGING"]:
+        return "AGING"
+    return "STALE"
+
+
+def _parse_date(s: str) -> date | None:
+    try:
+        return datetime.strptime(s.strip(), "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return None
+
+
+def parse_intake(path: Path) -> dict:
+    """Parse an _intake.md file."""
     text = path.read_text(encoding="utf-8")
-
-    # Extract header staleness
-    header_match = re.search(r"Staleness:\s*(\w+)", text)
-    header_staleness = header_match.group(1) if header_match else "UNKNOWN"
-
-    # Parse active items table
     items = []
     in_table = False
+
     for line in text.splitlines():
-        if "| Key |" in line or "| # |" in line:
+        if "| Key |" in line:
             in_table = True
             continue
         if in_table and line.startswith("|---"):
@@ -40,151 +51,155 @@ def parse_tracked_doc(path: Path) -> dict:
         if in_table and line.startswith("|"):
             cols = [c.strip() for c in line.split("|") if c.strip()]
             if len(cols) >= 5:
-                key = cols[0]
-                item_desc = cols[1]
-                added = cols[2]
-                last_actioned = cols[3]
-                status = cols[4]
-                delivered = cols[5] if len(cols) > 5 else "—"
-
-                # Calculate age
-                try:
-                    action_date = datetime.strptime(last_actioned.strip(), "%Y-%m-%d").date()
-                    age_days = (date.today() - action_date).days
-                except (ValueError, TypeError):
-                    age_days = 999
-
-                if age_days <= STALENESS_THRESHOLDS["FRESH"]:
-                    item_staleness = "FRESH"
-                elif age_days <= STALENESS_THRESHOLDS["AGING"]:
-                    item_staleness = "AGING"
-                else:
-                    item_staleness = "STALE"
-
+                added = _parse_date(cols[2])
+                actioned = _parse_date(cols[3])
+                age = (date.today() - actioned).days if actioned else 999
                 items.append({
-                    "key": key,
-                    "description": item_desc[:50],
-                    "age_days": age_days,
-                    "staleness": item_staleness,
-                    "status": status,
-                    "delivered": delivered,
+                    "key": cols[0],
+                    "item": cols[1][:60],
+                    "added": cols[2].strip(),
+                    "last_actioned": cols[3].strip(),
+                    "age_days": age,
+                    "staleness": _age_to_staleness(age),
+                    "status": cols[4],
+                    "delivered_to": cols[5] if len(cols) > 5 else "",
                 })
         elif in_table and not line.startswith("|"):
             in_table = False
 
-    # Compute document staleness from worst item
-    if not items:
+    active = [i for i in items if i["status"] not in ("DELIVERED",)]
+    if not active:
         doc_staleness = "DRAINED"
+    elif any(i["staleness"] == "STALE" for i in active):
+        doc_staleness = "STALE"
+    elif any(i["staleness"] == "AGING" for i in active):
+        doc_staleness = "AGING"
     else:
-        active = [i for i in items if i["status"] not in ("DELIVERED", "DRAINED")]
-        if not active:
-            doc_staleness = "DRAINED"
-        elif any(i["staleness"] == "STALE" for i in active):
-            doc_staleness = "STALE"
-        elif any(i["staleness"] == "AGING" for i in active):
-            doc_staleness = "AGING"
-        else:
-            doc_staleness = "FRESH"
+        doc_staleness = "FRESH"
 
+    return {"path": path.name, "type": "INTAKE", "staleness": doc_staleness, "items": items}
+
+
+def parse_living(path: Path) -> dict:
+    """Parse a _living.md file by header date."""
+    text = path.read_text(encoding="utf-8")
+    match = re.search(r"Last (?:reviewed|updated):\s*(\d{4}-\d{2}-\d{2})", text)
+    reviewed = _parse_date(match.group(1)) if match else None
+    age = (date.today() - reviewed).days if reviewed else 999
     return {
         "path": path.name,
-        "staleness": doc_staleness,
-        "items": items,
-        "total": len(items),
-        "stale_count": sum(1 for i in items if i["staleness"] == "STALE"),
-        "aging_count": sum(1 for i in items if i["staleness"] == "AGING"),
-        "fresh_count": sum(1 for i in items if i["staleness"] == "FRESH"),
+        "type": "LIVING",
+        "staleness": _age_to_staleness(age),
+        "reviewed": match.group(1) if match else "unknown",
+        "age_days": age,
+        "items": [],
     }
 
 
+def parse_info(path: Path) -> dict:
+    """Parse an _info.md file by header date."""
+    text = path.read_text(encoding="utf-8")
+    match = re.search(r"Last updated:\s*(\d{4}-\d{2}-\d{2})", text)
+    updated = match.group(1) if match else "unknown"
+    return {"path": path.name, "type": "INFO", "updated": updated, "items": []}
+
+
 def main():
-    print("\n" + "=" * 60)
-    print("  PROJECT STATUS")
-    print("=" * 60)
-    print(f"  Date: {date.today()}")
+    parser = argparse.ArgumentParser(description="Project status dashboard")
+    parser.add_argument("--items", action="store_true", help="Show all intake items")
+    parser.add_argument("--stale", action="store_true", help="Show only stale/aging items")
+    args = parser.parse_args()
+
+    print(f"\n{'=' * 80}")
+    print(f"  PROJECT STATUS — {date.today()}")
+    print(f"{'=' * 80}\n")
+
+    # ── Collect all files ──
+
+    intake_docs = []
+    if MEMORY_DIR.exists():
+        for p in sorted(MEMORY_DIR.glob("*_intake.md")):
+            intake_docs.append(parse_intake(p))
+
+    living_docs = []
+    if DOCS_DIR.exists():
+        for p in sorted(DOCS_DIR.glob("*_living.md")):
+            living_docs.append(parse_living(p))
+
+    info_docs = []
+    if MEMORY_DIR.exists():
+        for p in sorted(MEMORY_DIR.glob("*_info.md")):
+            info_docs.append(parse_info(p))
+
+    # ── Table 1: All Documents ──
+
+    doc_rows = []
+    for d in intake_docs:
+        total = len(d["items"])
+        active = len([i for i in d["items"] if i["status"] not in ("DELIVERED",)])
+        doc_rows.append([d["path"], "INTAKE", d["staleness"], total, active, ""])
+    for d in living_docs:
+        doc_rows.append([d["path"], "LIVING", d["staleness"], "", "", f"reviewed {d['age_days']}d ago"])
+    for d in info_docs:
+        doc_rows.append([d["path"], "INFO", "", "", "", f"updated {d['updated']}"])
+
+    print(tabulate(
+        doc_rows,
+        headers=["File", "Type", "Staleness", "Total", "Active", "Notes"],
+        tablefmt="grid",
+    ))
     print()
 
-    # Find intake docs in memory dir
-    intake_files = []
-    if MEMORY_DIR.exists():
-        intake_files.extend(MEMORY_DIR.glob("*_intake.md"))
+    # ── Table 2: Intake Items (all or stale only) ──
 
-    # Find living docs in docs dir
-    living_files = []
-    if DOCS_DIR.exists():
-        living_files.extend(DOCS_DIR.glob("*_living.md"))
+    all_items = []
+    for d in intake_docs:
+        for item in d["items"]:
+            if item["status"] == "DELIVERED":
+                continue
+            all_items.append(item)
 
-    all_files = sorted(set(intake_files)) + sorted(set(living_files))
+    if args.stale:
+        show_items = [i for i in all_items if i["staleness"] in ("STALE", "AGING")]
+        title = "STALE & AGING ITEMS"
+    elif args.items:
+        show_items = all_items
+        title = "ALL ACTIVE ITEMS"
+    else:
+        show_items = [i for i in all_items if i["staleness"] in ("STALE", "AGING")]
+        if not show_items:
+            show_items = all_items[:10]  # show top 10 if nothing stale
+        title = "ITEMS NEEDING ATTENTION" if any(i["staleness"] != "FRESH" for i in show_items) else "TOP ACTIVE ITEMS"
 
-    if not all_files:
-        print("  No intake or living documents found.")
-        return
-
-    total_items = 0
-    total_stale = 0
-    total_aging = 0
-
-    # Report intake docs
-    if intake_files:
-        print("  --- Intake Documents (memory) ---")
+    if show_items:
+        item_rows = [
+            [i["key"], i["item"][:45], i["added"], f"{i['age_days']}d", i["staleness"], i["status"], i["delivered_to"][:20]]
+            for i in show_items
+        ]
+        print(f"  {title}")
+        print(tabulate(
+            item_rows,
+            headers=["Key", "Item", "Added", "Age", "Health", "Status", "Delivered To"],
+            tablefmt="grid",
+        ))
         print()
-        for path in sorted(intake_files):
-            doc = parse_tracked_doc(path)
-            total_items += doc["total"]
-            total_stale += doc["stale_count"]
-            total_aging += doc["aging_count"]
 
-            icon = {"FRESH": "OK", "AGING": "!!", "STALE": "XX", "DRAINED": "--"}
-            staleness = doc["staleness"]
+    # ── Summary ──
 
-            print(f"  [{icon.get(staleness, '??')}] {doc['path']}: {staleness}")
-            print(f"       Items: {doc['total']} (FRESH:{doc['fresh_count']} AGING:{doc['aging_count']} STALE:{doc['stale_count']})")
+    total_items = len(all_items)
+    stale = sum(1 for i in all_items if i["staleness"] == "STALE")
+    aging = sum(1 for i in all_items if i["staleness"] == "AGING")
+    fresh = sum(1 for i in all_items if i["staleness"] == "FRESH")
+    blocked = sum(1 for i in all_items if i["status"] == "BLOCKED")
+    in_progress = sum(1 for i in all_items if i["status"] == "IN_PROGRESS")
 
-            for item in doc["items"]:
-                if item["staleness"] in ("STALE", "AGING"):
-                    print(f"       {item['key']}: {item['description']} ({item['age_days']}d old, {item['status']})")
-            print()
+    health = "HEALTHY" if stale == 0 else "NEEDS ATTENTION" if stale <= 2 else "UNHEALTHY"
 
-    # Report living docs (freshness by header date, not row items)
-    if living_files:
-        print("  --- Living Documents (docs/) ---")
-        print()
-        for path in sorted(living_files):
-            text = path.read_text(encoding="utf-8")
-            # Get freshness from "Last reviewed" or "Last updated" header
-            date_match = re.search(r"Last (?:reviewed|updated):\s*(\d{4}-\d{2}-\d{2})", text)
-            if date_match:
-                try:
-                    reviewed = datetime.strptime(date_match.group(1), "%Y-%m-%d").date()
-                    age = (date.today() - reviewed).days
-                except ValueError:
-                    age = 999
-            else:
-                age = 999
-
-            if age <= STALENESS_THRESHOLDS["FRESH"]:
-                staleness = "FRESH"
-            elif age <= STALENESS_THRESHOLDS["AGING"]:
-                staleness = "AGING"
-            else:
-                staleness = "STALE"
-
-            icon = {"FRESH": "OK", "AGING": "!!", "STALE": "XX"}
-            print(f"  [{icon.get(staleness, '??')}] {path.name}: {staleness} (reviewed {age}d ago)")
-            if staleness == "STALE":
-                print(f"       ** Needs refresh — last reviewed {date_match.group(1) if date_match else 'unknown'} **")
-
-            for item in doc["items"]:
-                if item["staleness"] in ("STALE", "AGING"):
-                    print(f"       {item['key']}: {item['description']} ({item['age_days']}d old, {item['status']})")
-            print()
-
-    # Summary
-    print("-" * 60)
-    health = "HEALTHY" if total_stale == 0 else "NEEDS ATTENTION" if total_stale <= 2 else "UNHEALTHY"
-    print(f"  Health: {health}")
-    print(f"  Total items: {total_items} | Stale: {total_stale} | Aging: {total_aging}")
-    print(f"  Intake docs: {len(intake_files)} | Living docs: {len(living_files)}")
+    print(f"  {'-' * 40}")
+    print(f"  Health:    {health}")
+    print(f"  Items:     {total_items} active ({fresh} fresh, {aging} aging, {stale} stale)")
+    print(f"  Pipeline:  {in_progress} in progress, {blocked} blocked")
+    print(f"  Documents: {len(intake_docs)} intake, {len(living_docs)} living, {len(info_docs)} info")
     print()
 
 
