@@ -202,6 +202,75 @@ def main():
         ))
         print()
 
+    # ── Business Objectives & Convergence ──
+
+    obj_file = MEMORY_DIR / "objectives_info.md"
+    if obj_file.exists():
+        obj_text = obj_file.read_text(encoding="utf-8")
+
+        # Parse go-live checklist
+        checks_total = 0
+        checks_pass = 0
+        us_pass = 0
+        india_pass = 0
+        in_checklist = False
+        for line in obj_text.splitlines():
+            if "| # |" in line and "Check" in line:
+                in_checklist = True
+                continue
+            if in_checklist and line.startswith("|---"):
+                continue
+            if in_checklist and line.startswith("|"):
+                cols = [c.strip() for c in line.split("|") if c.strip()]
+                if len(cols) >= 4:
+                    checks_total += 1
+                    if "PASS" in cols[2]:
+                        us_pass += 1
+                    if "PASS" in cols[3]:
+                        india_pass += 1
+            elif in_checklist and not line.startswith("|"):
+                in_checklist = False
+
+        # Parse blockers
+        blockers = []
+        in_blockers = False
+        for line in obj_text.splitlines():
+            if "| Blocker |" in line:
+                in_blockers = True
+                continue
+            if in_blockers and line.startswith("|---"):
+                continue
+            if in_blockers and line.startswith("|"):
+                cols = [c.strip() for c in line.split("|") if c.strip()]
+                if len(cols) >= 4 and cols[3] == "OPEN":
+                    blockers.append({"blocker": cols[0][:40], "blocks": cols[1], "key": cols[2]})
+            elif in_blockers and not line.startswith("|"):
+                in_blockers = False
+
+        us_pct = (us_pass / checks_total * 100) if checks_total > 0 else 0
+        india_pct = (india_pass / checks_total * 100) if checks_total > 0 else 0
+
+        print(f"  BUSINESS OBJECTIVES")
+        print(tabulate(
+            [
+                ["OBJ-1", "Go live US", f"{us_pct:.0f}%", f"{us_pass}/{checks_total} checks", "P0"],
+                ["OBJ-2", "Go live India", f"{india_pct:.0f}%", f"{india_pass}/{checks_total} checks", "P0"],
+            ],
+            headers=["ID", "Objective", "Readiness", "Progress", "Priority"],
+            tablefmt="grid",
+        ))
+        print()
+
+        if blockers:
+            print(f"  KEY BLOCKERS TO GO-LIVE")
+            blocker_rows = [[b["key"], b["blocker"], b["blocks"]] for b in blockers]
+            print(tabulate(
+                blocker_rows,
+                headers=["Key", "Blocker", "Blocks"],
+                tablefmt="grid",
+            ))
+            print()
+
     # ── Summary ──
 
     total_items = len(all_items)
@@ -211,7 +280,6 @@ def main():
     n_open = sum(1 for i in all_items if i["status"] == "OPEN")
     in_progress = sum(1 for i in all_items if i["status"] == "IN_PROGRESS")
     blocked = sum(1 for i in all_items if i["status"] == "BLOCKED")
-    # Count closed across ALL items (including filtered ones)
     n_closed = sum(1 for d in intake_docs for i in d["items"] if i["status"] == "CLOSED")
 
     health = "HEALTHY" if stale == 0 else "NEEDS ATTENTION" if stale <= 2 else "UNHEALTHY"
