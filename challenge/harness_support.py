@@ -95,7 +95,7 @@ def print_signature(workflow_name: str, request: Any, cli_command: str = "") -> 
 
     # Print field values
     if hasattr(req_cls, "model_fields"):
-        print(f"  {'─' * 40}")
+        print(f"  {'-' * 40}")
         for name, finfo in req_cls.model_fields.items():
             val = getattr(request, name, finfo.default)
             print(f"    {name}: {val!r}")

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""income_desk Workflow Harness — interactive debugging, onboarding, and stability checks.
+"""income_desk Workflow Harness -interactive debugging, onboarding, and stability checks.
 
 Exercises all 15 workflow APIs against live broker or simulated data.
 Shows API signatures, inputs, and tabular results for every workflow.
@@ -32,7 +32,7 @@ PHASES = {
 
 
 # ---------------------------------------------------------------------------
-# Session tracker — no module-level mutable state
+# Session tracker -no module-level mutable state
 # ---------------------------------------------------------------------------
 
 
@@ -78,7 +78,7 @@ def _trunc(text: Any, width: int = 50) -> str:
 
 def _cur(market: str) -> str:
     """Return currency symbol for the market."""
-    return "\u20b9" if market == "India" else "$"
+    return "INR " if market == "India" else "$"
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +99,7 @@ def phase_menu(interactive: bool, preset_phase: int | None = None) -> list[int]:
 
     print("\n  Phases:")
     for num, (name, desc) in PHASES.items():
-        print(f"    {num}. {name} — {desc}")
+        print(f"    {num}. {name} -{desc}")
     print("    A. Run all")
 
     try:
@@ -119,7 +119,7 @@ def phase_menu(interactive: bool, preset_phase: int | None = None) -> list[int]:
 
 
 # ---------------------------------------------------------------------------
-# Phase 1 — Pre-Market
+# Phase 1 -Pre-Market
 # ---------------------------------------------------------------------------
 
 
@@ -158,13 +158,13 @@ def run_premarket(
         print(f"  Sentinel : {resp.sentinel_signal}")
         print(f"  Safe?    : {resp.is_safe_to_trade}")
         print(f"  Risk %   : {resp.risk_pct:.1f}%")
-        print(f"  Budget   : {resp.risk_budget_remaining:.1f}%")
+        print(f"  Budget   : {resp.risk_budget_remaining:,.0f}")
         print(f"  Data trust: {resp.data_trust}")
 
         # Regime table
         if resp.regimes:
             rows = [
-                [t, r.regime_id, r.label, "Y" if r.tradeable else "N"]
+                [t, r.regime_id, r.regime_label, "Y" if r.tradeable else "N"]
                 for t, r in resp.regimes.items()
             ]
             print_table("Regime Map", ["Ticker", "ID", "Label", "Tradeable"], rows)
@@ -200,7 +200,7 @@ def run_premarket(
         print(f"  Tradeable: {', '.join(resp.tradeable_tickers)}")
         print(f"  Capital  : {cur}{resp.capital:,.0f}")
         print(f"  Risk dep : {resp.risk_deployed:.1f}%")
-        print(f"  Budget   : {resp.risk_budget_remaining:.1f}%")
+        print(f"  Budget   : {resp.risk_budget_remaining:,.0f}")
         if resp.summary:
             print(f"  Summary  : {_trunc(resp.summary, 80)}")
 
@@ -289,7 +289,7 @@ def run_premarket(
 
 
 # ---------------------------------------------------------------------------
-# Phase 2 — Scanning
+# Phase 2 -Scanning
 # ---------------------------------------------------------------------------
 
 
@@ -406,7 +406,7 @@ def run_scanning(
 
 
 # ---------------------------------------------------------------------------
-# Phase 3 — Trade Entry
+# Phase 3 -Trade Entry
 # ---------------------------------------------------------------------------
 
 
@@ -505,17 +505,20 @@ def run_entry(
         from income_desk.workflow.size_position import SizeRequest
 
         capital = meta.account_nlv or 50_000.0
-        wing = prop.get("wing_width", 5.0)
+        wing = prop.get("wing_width") or 5.0
         lot_size = 25 if meta.market == "India" else 100
         risk_per_contract = wing * lot_size
+        pop = prop.get("pop_pct") or 65.0
+        mx_profit = prop.get("max_profit") or (prop.get("entry_credit", 1.0) * lot_size)
+        mx_loss = prop.get("max_loss") or (risk_per_contract)
 
         req = SizeRequest(
-            pop_pct=prop["pop_pct"],
-            max_profit=prop["max_profit"],
-            max_loss=prop["max_loss"],
+            pop_pct=pop,
+            max_profit=mx_profit,
+            max_loss=mx_loss,
             capital=capital,
             risk_per_contract=risk_per_contract,
-            regime_id=prop["regime_id"],
+            regime_id=prop.get("regime_id", 1),
             wing_width=wing,
         )
         print_signature("size_position", req, cli_command="analyzer-cli> size")
@@ -545,7 +548,7 @@ def run_entry(
         from income_desk.workflow import price_trade
         from income_desk.workflow.price_trade import PriceRequest
 
-        # Build demo legs — put credit spread ~3% and ~7% OTM
+        # Build demo legs -put credit spread ~3% and ~7% OTM
         price = prop["current_price"]
         if price > 0:
             short_strike = round(price * 0.97, 0)
@@ -608,7 +611,7 @@ def run_entry(
 
 
 # ---------------------------------------------------------------------------
-# Phase 4 — Monitoring
+# Phase 4 -Monitoring
 # ---------------------------------------------------------------------------
 
 
@@ -763,7 +766,7 @@ def run_monitoring(
 
 
 # ---------------------------------------------------------------------------
-# Phase 5 — Portfolio Risk
+# Phase 5 -Portfolio Risk
 # ---------------------------------------------------------------------------
 
 
@@ -915,7 +918,7 @@ def run_portfolio_risk(
 
 
 # ---------------------------------------------------------------------------
-# Phase 6 — Calendar
+# Phase 6 -Calendar
 # ---------------------------------------------------------------------------
 
 
@@ -980,7 +983,7 @@ def run_calendar(
 
 
 # ---------------------------------------------------------------------------
-# Phase 7 — Reporting
+# Phase 7 -Reporting
 # ---------------------------------------------------------------------------
 
 
@@ -1085,7 +1088,7 @@ def main() -> None:
     for p in phases:
         name, desc = PHASES.get(p, ("?", "?"))
         print(f"\n{'#' * 60}")
-        print(f"  PHASE {p}: {name.upper()} — {desc}")
+        print(f"  PHASE {p}: {name.upper()} -{desc}")
         print(f"{'#' * 60}")
 
         if p == 1:
@@ -1103,7 +1106,7 @@ def main() -> None:
         elif p == 7:
             run_reporting(ma, meta, session, interactive, args.verbose)
 
-    # Summary — always print for non-interactive / run-all; for interactive only if multiple phases
+    # Summary -always print for non-interactive / run-all; for interactive only if multiple phases
     if not interactive or len(phases) > 1:
         session.print_summary()
 
