@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Project status — scan all managed documents and report health.
+"""Project status — executive dashboard for income_desk.
 
 Usage:
-    python scripts/project_status.py
-    python scripts/project_status.py --items     # show all items
-    python scripts/project_status.py --stale     # show only stale/aging items
+    python scripts/project_status.py              # Executive summary + attention items
+    python scripts/project_status.py --items      # Show all active items
+    python scripts/project_status.py --stale      # Show only stale/aging items
+    python scripts/project_status.py --docs       # Show document inventory
 """
 from __future__ import annotations
 
@@ -20,6 +21,10 @@ DOCS_DIR = Path(__file__).parent.parent / "docs"
 
 STALENESS_DAYS = {"FRESH": 3, "AGING": 7}
 
+
+# ---------------------------------------------------------------------------
+# Parsers
+# ---------------------------------------------------------------------------
 
 def _age_to_staleness(age_days: int) -> str:
     if age_days <= STALENESS_DAYS["FRESH"]:
@@ -37,16 +42,10 @@ def _parse_date(s: str) -> date | None:
 
 
 def parse_intake(path: Path) -> dict:
-    """Parse an _intake.md file.
-
-    Table columns (9): Key, Item, Added, Last Actioned, Status, Assignee,
-    Next Action, Blockers, Delivered To.
-    Status values: OPEN, IN_PROGRESS, BLOCKED, CLOSED.
-    """
+    """Parse an _intake.md file."""
     text = path.read_text(encoding="utf-8")
     items = []
     in_table = False
-
     for line in text.splitlines():
         if "| Key |" in line:
             in_table = True
@@ -58,297 +57,262 @@ def parse_intake(path: Path) -> dict:
             if len(cols) >= 5:
                 added = _parse_date(cols[2])
                 actioned = _parse_date(cols[3])
-                age_days = (date.today() - added).days if added else 999
-                health_days = (date.today() - actioned).days if actioned else 999
                 items.append({
                     "key": cols[0],
                     "item": cols[1][:50],
                     "added": cols[2].strip(),
                     "last_actioned": cols[3].strip(),
-                    "age_days": age_days,
-                    "health": _age_to_staleness(health_days),
+                    "age_days": (date.today() - added).days if added else 999,
+                    "health": _age_to_staleness((date.today() - actioned).days if actioned else 999),
                     "status": cols[4],
                     "assignee": cols[5] if len(cols) > 5 else "",
                     "next_action": cols[6][:40] if len(cols) > 6 else "",
                     "blockers": cols[7] if len(cols) > 7 else "",
-                    "delivered_to": cols[8] if len(cols) > 8 else (cols[5] if len(cols) == 6 else ""),
+                    "delivered_to": cols[8] if len(cols) > 8 else "",
                 })
         elif in_table and not line.startswith("|"):
             in_table = False
 
     active = [i for i in items if i["status"] not in ("CLOSED",)]
     if not active:
-        doc_staleness = "DRAINED"
+        staleness = "DRAINED"
     elif any(i["health"] == "STALE" for i in active):
-        doc_staleness = "STALE"
+        staleness = "STALE"
     elif any(i["health"] == "AGING" for i in active):
-        doc_staleness = "AGING"
+        staleness = "AGING"
     else:
-        doc_staleness = "FRESH"
-
-    return {"path": path.name, "type": "INTAKE", "staleness": doc_staleness, "items": items}
+        staleness = "FRESH"
+    return {"path": path.name, "type": "INTAKE", "staleness": staleness, "items": items}
 
 
 def parse_living(path: Path) -> dict:
-    """Parse a _living.md file by header date."""
     text = path.read_text(encoding="utf-8")
     match = re.search(r"Last (?:reviewed|updated):\s*(\d{4}-\d{2}-\d{2})", text)
     reviewed = _parse_date(match.group(1)) if match else None
     age = (date.today() - reviewed).days if reviewed else 999
-    return {
-        "path": path.name,
-        "type": "LIVING",
-        "staleness": _age_to_staleness(age),
-        "reviewed": match.group(1) if match else "unknown",
-        "age_days": age,
-        "items": [],
-    }
+    return {"path": path.name, "type": "LIVING", "staleness": _age_to_staleness(age),
+            "reviewed": match.group(1) if match else "unknown", "age_days": age, "items": []}
 
 
 def parse_info(path: Path) -> dict:
-    """Parse an _info.md file by header date."""
     text = path.read_text(encoding="utf-8")
     match = re.search(r"Last updated:\s*(\d{4}-\d{2}-\d{2})", text)
-    updated = match.group(1) if match else "unknown"
-    return {"path": path.name, "type": "INFO", "updated": updated, "items": []}
+    return {"path": path.name, "type": "INFO", "updated": match.group(1) if match else "unknown", "items": []}
 
+
+def parse_objectives() -> dict:
+    """Parse objectives_info.md for readiness checklist and blockers."""
+    obj_file = MEMORY_DIR / "objectives_info.md"
+    result = {"us_pass": 0, "india_pass": 0, "checks": 0, "blockers": []}
+    if not obj_file.exists():
+        return result
+
+    text = obj_file.read_text(encoding="utf-8")
+    in_checklist = False
+    for line in text.splitlines():
+        if "| # |" in line and "Check" in line:
+            in_checklist = True
+            continue
+        if in_checklist and line.startswith("|---"):
+            continue
+        if in_checklist and line.startswith("|"):
+            cols = [c.strip() for c in line.split("|") if c.strip()]
+            if len(cols) >= 4:
+                result["checks"] += 1
+                if "PASS" in cols[2]:
+                    result["us_pass"] += 1
+                if "PASS" in cols[3]:
+                    result["india_pass"] += 1
+        elif in_checklist and not line.startswith("|"):
+            in_checklist = False
+
+    in_blockers = False
+    for line in text.splitlines():
+        if "| Blocker |" in line:
+            in_blockers = True
+            continue
+        if in_blockers and line.startswith("|---"):
+            continue
+        if in_blockers and line.startswith("|"):
+            cols = [c.strip() for c in line.split("|") if c.strip()]
+            if len(cols) >= 4 and cols[3] == "OPEN":
+                result["blockers"].append({"blocker": cols[0][:40], "blocks": cols[1], "key": cols[2]})
+        elif in_blockers and not line.startswith("|"):
+            in_blockers = False
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(description="Project status dashboard")
     parser.add_argument("--items", action="store_true", help="Show all intake items")
     parser.add_argument("--stale", action="store_true", help="Show only stale/aging items")
+    parser.add_argument("--docs", action="store_true", help="Show document inventory")
     args = parser.parse_args()
 
-    print(f"\n{'=' * 80}")
-    print(f"  PROJECT STATUS -- {date.today()}")
-    print(f"{'=' * 80}")
-
-    # ── Session Briefing (always first) ──
-
-    obj_file = MEMORY_DIR / "objectives_info.md"
-    us_pct, india_pct, blockers, checks_total = 0, 0, [], 0
-
-    if obj_file.exists():
-        obj_text = obj_file.read_text(encoding="utf-8")
-        us_pass, india_pass = 0, 0
-        in_checklist = False
-        for line in obj_text.splitlines():
-            if "| # |" in line and "Check" in line:
-                in_checklist = True
-                continue
-            if in_checklist and line.startswith("|---"):
-                continue
-            if in_checklist and line.startswith("|"):
-                cols = [c.strip() for c in line.split("|") if c.strip()]
-                if len(cols) >= 4:
-                    checks_total += 1
-                    if "PASS" in cols[2]:
-                        us_pass += 1
-                    if "PASS" in cols[3]:
-                        india_pass += 1
-            elif in_checklist and not line.startswith("|"):
-                in_checklist = False
-
-        us_pct = (us_pass / checks_total * 100) if checks_total > 0 else 0
-        india_pct = (india_pass / checks_total * 100) if checks_total > 0 else 0
-
-        in_blockers = False
-        for line in obj_text.splitlines():
-            if "| Blocker |" in line:
-                in_blockers = True
-                continue
-            if in_blockers and line.startswith("|---"):
-                continue
-            if in_blockers and line.startswith("|"):
-                cols = [c.strip() for c in line.split("|") if c.strip()]
-                if len(cols) >= 4 and cols[3] == "OPEN":
-                    blockers.append({"blocker": cols[0][:40], "blocks": cols[1], "key": cols[2]})
-            elif in_blockers and not line.startswith("|"):
-                in_blockers = False
-
-    # Find all intake items early
-    _all_intake_items = []
-    if MEMORY_DIR.exists():
-        for p in sorted(MEMORY_DIR.glob("*_intake.md")):
-            d = parse_intake(p)
-            for item in d["items"]:
-                if item["status"] != "CLOSED":
-                    _all_intake_items.append(item)
-
-    stale_items = [i for i in _all_intake_items if i["health"] == "STALE"]
-    aging_items = [i for i in _all_intake_items if i["health"] == "AGING"]
-    total_active = len(_all_intake_items)
-    closed_all = sum(1 for dd in (parse_intake(p) for p in sorted(MEMORY_DIR.glob("*_intake.md"))) for i in dd["items"] if i["status"] == "CLOSED") if MEMORY_DIR.exists() else 0
-
-    # ── Skin in the Game Score ──
-    # Measures: is Claude driving toward objectives or doing busywork?
-    # Factors: readiness %, stale count (penalty), blocker resolution, closed items
-    skin_score = 0
-    skin_max = 100
-    # Readiness progress (40 points max)
-    skin_score += (us_pct + india_pct) / 2 * 0.4
-    # No stale items (20 points max, lose 5 per stale)
-    skin_score += max(0, 20 - len(stale_items) * 5)
-    # Blocker resolution (20 points max)
-    if checks_total > 0:
-        total_blockers_possible = checks_total  # max theoretical blockers
-        resolved = total_blockers_possible - len(blockers)
-        skin_score += (resolved / total_blockers_possible) * 20
-    # Closed items ratio (20 points max)
-    if total_active + closed_all > 0:
-        skin_score += (closed_all / (total_active + closed_all)) * 20
-
-    skin_score = min(skin_score, skin_max)
-
-    if skin_score >= 80:
-        skin_label = "STRONG"
-    elif skin_score >= 50:
-        skin_label = "MODERATE"
-    elif skin_score >= 25:
-        skin_label = "WEAK"
-    else:
-        skin_label = "NONE"
-
-    print()
-    print(f"  SKIN IN THE GAME:  {skin_score:.0f}/100 ({skin_label})")
-    print(f"  READINESS:         US {us_pct:.0f}%  |  India {india_pct:.0f}%  ({checks_total} checks)")
-    print(f"  BLOCKERS:          {len(blockers)} open blockers to go-live")
-
-    if stale_items:
-        print(f"  STALE:             {len(stale_items)} items (Claude's failure -- action immediately)")
-    elif aging_items:
-        print(f"  AGING:             {len(aging_items)} items approaching stale")
-    else:
-        print(f"  HEALTH:            All items fresh")
-
-    # Recommended focus: highest-priority blocker that blocks most objectives
-    go_live_blockers = [b for b in blockers if "OBJ-1" in b["blocks"] or "OBJ-2" in b["blocks"]]
-    if go_live_blockers:
-        top = go_live_blockers[0]
-        print(f"  FOCUS:      {top['key']} -- {top['blocker']} (blocks {top['blocks']})")
-
-    print(f"\n{'-' * 80}\n")
-
-    # ── Collect all files ──
+    # ── Collect data ──
 
     intake_docs = []
     if MEMORY_DIR.exists():
         for p in sorted(MEMORY_DIR.glob("*_intake.md")):
             intake_docs.append(parse_intake(p))
 
-    living_docs = []
-    if DOCS_DIR.exists():
-        for p in sorted(DOCS_DIR.glob("*_living.md")):
-            living_docs.append(parse_living(p))
+    all_items = [i for d in intake_docs for i in d["items"] if i["status"] != "CLOSED"]
+    closed_count = sum(1 for d in intake_docs for i in d["items"] if i["status"] == "CLOSED")
+    stale_items = [i for i in all_items if i["health"] == "STALE"]
+    aging_items = [i for i in all_items if i["health"] == "AGING"]
 
-    info_docs = []
-    if MEMORY_DIR.exists():
-        for p in sorted(MEMORY_DIR.glob("*_info.md")):
-            info_docs.append(parse_info(p))
+    obj = parse_objectives()
+    us_pct = (obj["us_pass"] / obj["checks"] * 100) if obj["checks"] > 0 else 0
+    india_pct = (obj["india_pass"] / obj["checks"] * 100) if obj["checks"] > 0 else 0
+    blockers = obj["blockers"]
+    go_live_blockers = [b for b in blockers if "OBJ-1" in b["blocks"] or "OBJ-2" in b["blocks"]]
 
-    # ── Table 1: All Documents ──
+    # ── Skin in the Game ──
 
-    doc_rows = []
-    for d in intake_docs:
-        total = len(d["items"])
-        active = len([i for i in d["items"] if i["status"] not in ("CLOSED",)])
-        doc_rows.append([d["path"], "INTAKE", d["staleness"], total, active, ""])
-    for d in living_docs:
-        doc_rows.append([d["path"], "LIVING", d["staleness"], "", "", f"reviewed {d['age_days']}d ago"])
-    for d in info_docs:
-        doc_rows.append([d["path"], "INFO", "", "", "", f"updated {d['updated']}"])
+    skin = 0
+    skin += (us_pct + india_pct) / 2 * 0.4                                    # readiness (40 pts)
+    skin += max(0, 20 - len(stale_items) * 5)                                 # no stale (20 pts)
+    if obj["checks"] > 0:                                                       # blockers resolved (20 pts)
+        skin += ((obj["checks"] - len(blockers)) / obj["checks"]) * 20
+    if len(all_items) + closed_count > 0:                                       # closed ratio (20 pts)
+        skin += (closed_count / (len(all_items) + closed_count)) * 20
+    skin = min(skin, 100)
+    skin_label = "STRONG" if skin >= 80 else "MODERATE" if skin >= 50 else "WEAK" if skin >= 25 else "NONE"
 
-    print(tabulate(
-        doc_rows,
-        headers=["File", "Type", "Staleness", "Total", "Active", "Notes"],
-        tablefmt="grid",
-    ))
+    # ── Going in Circles? ──
+    # If >20 items exist but 0 closed and readiness < 30% — that's churn
+    circles = len(all_items) > 15 and closed_count == 0 and (us_pct + india_pct) / 2 < 30
+
+    # ── Convergence ──
+    # Simple: items closed / total ever created
+    convergence = (closed_count / (len(all_items) + closed_count) * 100) if (len(all_items) + closed_count) > 0 else 0
+
+    # ======================================================================
+    # OUTPUT
+    # ======================================================================
+
+    print(f"\n{'=' * 80}")
+    print(f"  PROJECT STATUS -- income_desk -- {date.today()}")
+    print(f"{'=' * 80}")
+
+    # ── Section 1: KPIs (always first, always visible) ──
+
     print()
+    kpi_rows = [
+        ["Skin in the Game", f"{skin:.0f}/100 ({skin_label})", "Is Claude driving toward objectives?"],
+        ["Go-Live US", f"{us_pct:.0f}% ({obj['us_pass']}/{obj['checks']})", f"{len([b for b in blockers if 'OBJ-1' in b['blocks']])} blockers"],
+        ["Go-Live India", f"{india_pct:.0f}% ({obj['india_pass']}/{obj['checks']})", f"{len([b for b in blockers if 'OBJ-2' in b['blocks']])} blockers"],
+        ["Convergence", f"{convergence:.0f}%", f"{closed_count} closed / {len(all_items) + closed_count} total"],
+        ["Going in Circles?", "YES -- technical churn, no objective progress" if circles else "No", f"{len(all_items)} open, {closed_count} closed"],
+    ]
+    print(tabulate(kpi_rows, headers=["KPI", "Value", "Detail"], tablefmt="grid"))
 
-    # ── Table 2: Intake Items (all or stale only) ──
+    # ── Section 2: Top Blocker + Recommended Focus ──
 
-    all_items = []
-    for d in intake_docs:
-        for item in d["items"]:
-            if item["status"] == "CLOSED":
-                continue
-            all_items.append(item)
-
-    if args.stale:
-        show_items = [i for i in all_items if i["health"] in ("STALE", "AGING")]
-        title = "STALE & AGING ITEMS"
-    elif args.items:
-        show_items = all_items
-        title = "ALL ACTIVE ITEMS"
+    print()
+    if go_live_blockers:
+        top = go_live_blockers[0]
+        print(f"  >> FOCUS: {top['key']} -- {top['blocker']}")
+        print(f"     Blocks: {top['blocks']}")
+        # Find next action from intake items
+        for item in all_items:
+            if item["key"] == top["key"]:
+                print(f"     Next:   {item.get('next_action', 'TBD')}")
+                break
     else:
-        show_items = [i for i in all_items if i["health"] in ("STALE", "AGING")]
-        if not show_items:
-            show_items = all_items[:10]  # show top 10 if nothing stale
-        title = "ITEMS NEEDING ATTENTION" if any(i["health"] != "FRESH" for i in show_items) else "TOP ACTIVE ITEMS"
+        print(f"  >> No go-live blockers -- focus on features")
 
-    if show_items:
-        item_rows = [
-            [
-                i["key"],
-                i["item"][:40],
-                f"{i['age_days']}d",
-                i["health"],
-                i["status"],
-                i.get("assignee", "")[:10],
-                i.get("next_action", "")[:35],
-                i.get("blockers", "")[:20] if i.get("blockers", "") not in ("", "-", "\u2014") else "",
-            ]
-            for i in show_items
-        ]
-        print(f"  {title}")
-        print(tabulate(
-            item_rows,
-            headers=["Key", "Item", "Age(d)", "Health", "Status", "Assignee", "Next Action", "Blockers"],
-            tablefmt="grid",
-        ))
+    # ── Section 3: Stale/Aging Items ──
+
+    if stale_items or aging_items:
         print()
+        attention = stale_items + aging_items
+        att_rows = [
+            [i["key"], i["item"][:35], f"{i['age_days']}d", i["health"], i["status"],
+             i.get("assignee", "")[:8], i.get("next_action", "")[:30]]
+            for i in attention
+        ]
+        title = "STALE ITEMS (Claude's failure)" if stale_items else "AGING ITEMS"
+        print(f"  {title}")
+        print(tabulate(att_rows,
+                        headers=["Key", "Item", "Age", "Health", "Status", "Owner", "Next Action"],
+                        tablefmt="grid"))
 
-    # ── Business Objectives ──
+    # ── Section 4: All Blockers to Objectives ──
 
     if blockers:
-        print(f"  BUSINESS OBJECTIVES")
-        print(tabulate(
-            [
-                ["OBJ-1", "Go live US", f"{us_pct:.0f}%", f"{us_pass}/{checks_total} checks", "P0"],
-                ["OBJ-2", "Go live India", f"{india_pct:.0f}%", f"{india_pass}/{checks_total} checks", "P0"],
-            ],
-            headers=["ID", "Objective", "Readiness", "Progress", "Priority"],
-            tablefmt="grid",
-        ))
         print()
-
-        print(f"  KEY BLOCKERS")
-        blocker_rows = [[b["key"], b["blocker"], b["blocks"]] for b in blockers]
+        print(f"  BLOCKERS TO OBJECTIVES ({len(blockers)} open)")
         print(tabulate(
-            blocker_rows,
+            [[b["key"], b["blocker"], b["blocks"]] for b in blockers],
             headers=["Key", "Blocker", "Blocks"],
             tablefmt="grid",
         ))
-        print()
 
-    # ── Summary ──
+    # ── Section 5: Pipeline Summary ──
 
-    total_items = len(all_items)
-    stale = sum(1 for i in all_items if i["health"] == "STALE")
-    aging = sum(1 for i in all_items if i["health"] == "AGING")
-    fresh = sum(1 for i in all_items if i["health"] == "FRESH")
     n_open = sum(1 for i in all_items if i["status"] == "OPEN")
-    in_progress = sum(1 for i in all_items if i["status"] == "IN_PROGRESS")
-    blocked = sum(1 for i in all_items if i["status"] == "BLOCKED")
-    n_closed = sum(1 for d in intake_docs for i in d["items"] if i["status"] == "CLOSED")
+    n_ip = sum(1 for i in all_items if i["status"] == "IN_PROGRESS")
+    n_blocked = sum(1 for i in all_items if i["status"] == "BLOCKED")
 
-    health = "HEALTHY" if stale == 0 else "NEEDS ATTENTION" if stale <= 2 else "UNHEALTHY"
+    print()
+    print(f"  {'-' * 60}")
+    print(f"  Pipeline:   {n_open} open | {n_ip} in progress | {n_blocked} blocked | {closed_count} closed")
+    print(f"  Staleness:  {len(all_items) - len(stale_items) - len(aging_items)} fresh | {len(aging_items)} aging | {len(stale_items)} stale")
+    print(f"  Documents:  {len(intake_docs)} intake | ", end="")
 
-    print(f"  {'-' * 40}")
-    print(f"  Health:    {health}")
-    print(f"  Items:     {n_open} open, {in_progress} in progress, {blocked} blocked, {n_closed} closed")
-    print(f"  Staleness: {fresh} fresh, {aging} aging, {stale} stale")
-    print(f"  Documents: {len(intake_docs)} intake, {len(living_docs)} living, {len(info_docs)} info")
+    # Count living + info docs
+    living_count = len(list(DOCS_DIR.glob("*_living.md"))) if DOCS_DIR.exists() else 0
+    info_count = len(list(MEMORY_DIR.glob("*_info.md"))) if MEMORY_DIR.exists() else 0
+    print(f"{living_count} living | {info_count} info")
+
+    # ── Section 6: Document Inventory (only with --docs) ──
+
+    if args.docs:
+        print()
+        living_docs = [parse_living(p) for p in sorted(DOCS_DIR.glob("*_living.md"))] if DOCS_DIR.exists() else []
+        info_docs = [parse_info(p) for p in sorted(MEMORY_DIR.glob("*_info.md"))] if MEMORY_DIR.exists() else []
+
+        doc_rows = []
+        for d in intake_docs:
+            total = len(d["items"])
+            active = len([i for i in d["items"] if i["status"] != "CLOSED"])
+            doc_rows.append([d["path"], "INTAKE", d["staleness"], total, active, ""])
+        for d in living_docs:
+            doc_rows.append([d["path"], "LIVING", d["staleness"], "", "", f"reviewed {d['age_days']}d ago"])
+        for d in info_docs:
+            doc_rows.append([d["path"], "INFO", "", "", "", f"updated {d['updated']}"])
+
+        print("  DOCUMENT INVENTORY")
+        print(tabulate(doc_rows, headers=["File", "Type", "Staleness", "Total", "Active", "Notes"], tablefmt="grid"))
+
+    # ── Section 7: All Items (only with --items or --stale) ──
+
+    if args.items or args.stale:
+        if args.stale:
+            show = [i for i in all_items if i["health"] in ("STALE", "AGING")]
+            title = "STALE & AGING ITEMS"
+        else:
+            show = all_items
+            title = "ALL ACTIVE ITEMS"
+
+        if show:
+            print()
+            print(f"  {title}")
+            rows = [
+                [i["key"], i["item"][:35], f"{i['age_days']}d", i["health"], i["status"],
+                 i.get("assignee", "")[:8], i.get("next_action", "")[:30],
+                 i.get("blockers", "")[:15] if i.get("blockers", "") not in ("", "-", "\u2014") else ""]
+                for i in show
+            ]
+            print(tabulate(rows,
+                            headers=["Key", "Item", "Age", "Health", "Status", "Owner", "Next Action", "Blockers"],
+                            tablefmt="grid"))
+
     print()
 
 
