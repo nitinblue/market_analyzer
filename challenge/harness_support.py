@@ -189,6 +189,13 @@ def setup(market: str) -> tuple:
     2. Snapshot from ~/.income_desk/sim_snapshot.json
     3. Preset simulation data
     """
+    # Load .env so broker credentials are available
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+
     from income_desk import DataService, MarketAnalyzer
     from income_desk.adapters.simulated import (
         SimulatedAccount,
