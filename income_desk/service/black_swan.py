@@ -187,7 +187,12 @@ class BlackSwanService:
         return float(series.iloc[-1] * 100)
 
     def _fetch_put_call(self) -> float | None:
-        series = self._fred.get_series("EQUITPC", lookback_days=30)
-        if series is None or series.empty:
-            return None
-        return float(series.iloc[-1])
+        # Try current FRED series, then legacy (EQUITPC was discontinued)
+        for series_id in ("PCRATIOPCE", "EQUITPC"):
+            try:
+                series = self._fred.get_series(series_id, lookback_days=30)
+                if series is not None and not series.empty:
+                    return float(series.iloc[-1])
+            except Exception:
+                continue
+        return None

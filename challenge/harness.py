@@ -1082,6 +1082,13 @@ def main() -> None:
     args = parse_args()
     interactive = not args.run_all and args.phase is None
 
+    # Suppress noisy library warnings (FRED tracebacks, yfinance, etc.)
+    # Use --verbose to see them
+    import logging
+    if not args.verbose:
+        logging.getLogger("income_desk").setLevel(logging.ERROR)
+        logging.getLogger("fredapi").setLevel(logging.ERROR)
+
     # Market selection
     market = pick_market(preset=args.market)
 
