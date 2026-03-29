@@ -120,8 +120,82 @@ def main():
     args = parser.parse_args()
 
     print(f"\n{'=' * 80}")
-    print(f"  PROJECT STATUS — {date.today()}")
-    print(f"{'=' * 80}\n")
+    print(f"  PROJECT STATUS -- {date.today()}")
+    print(f"{'=' * 80}")
+
+    # ── Session Briefing (always first) ──
+
+    obj_file = MEMORY_DIR / "objectives_info.md"
+    us_pct, india_pct, blockers, checks_total = 0, 0, [], 0
+
+    if obj_file.exists():
+        obj_text = obj_file.read_text(encoding="utf-8")
+        us_pass, india_pass = 0, 0
+        in_checklist = False
+        for line in obj_text.splitlines():
+            if "| # |" in line and "Check" in line:
+                in_checklist = True
+                continue
+            if in_checklist and line.startswith("|---"):
+                continue
+            if in_checklist and line.startswith("|"):
+                cols = [c.strip() for c in line.split("|") if c.strip()]
+                if len(cols) >= 4:
+                    checks_total += 1
+                    if "PASS" in cols[2]:
+                        us_pass += 1
+                    if "PASS" in cols[3]:
+                        india_pass += 1
+            elif in_checklist and not line.startswith("|"):
+                in_checklist = False
+
+        us_pct = (us_pass / checks_total * 100) if checks_total > 0 else 0
+        india_pct = (india_pass / checks_total * 100) if checks_total > 0 else 0
+
+        in_blockers = False
+        for line in obj_text.splitlines():
+            if "| Blocker |" in line:
+                in_blockers = True
+                continue
+            if in_blockers and line.startswith("|---"):
+                continue
+            if in_blockers and line.startswith("|"):
+                cols = [c.strip() for c in line.split("|") if c.strip()]
+                if len(cols) >= 4 and cols[3] == "OPEN":
+                    blockers.append({"blocker": cols[0][:40], "blocks": cols[1], "key": cols[2]})
+            elif in_blockers and not line.startswith("|"):
+                in_blockers = False
+
+    print()
+    print(f"  READINESS:  US {us_pct:.0f}%  |  India {india_pct:.0f}%  ({checks_total} checks)")
+    print(f"  BLOCKERS:   {len(blockers)} open blockers to go-live")
+
+    # Find stale items across all intake docs early
+    _all_intake_items = []
+    if MEMORY_DIR.exists():
+        for p in sorted(MEMORY_DIR.glob("*_intake.md")):
+            d = parse_intake(p)
+            for item in d["items"]:
+                if item["status"] != "CLOSED":
+                    _all_intake_items.append(item)
+
+    stale_items = [i for i in _all_intake_items if i["health"] == "STALE"]
+    aging_items = [i for i in _all_intake_items if i["health"] == "AGING"]
+
+    if stale_items:
+        print(f"  STALE:      {len(stale_items)} items (Claude's failure -- action immediately)")
+    elif aging_items:
+        print(f"  AGING:      {len(aging_items)} items approaching stale")
+    else:
+        print(f"  HEALTH:     All items fresh")
+
+    # Recommended focus: highest-priority blocker that blocks most objectives
+    go_live_blockers = [b for b in blockers if "OBJ-1" in b["blocks"] or "OBJ-2" in b["blocks"]]
+    if go_live_blockers:
+        top = go_live_blockers[0]
+        print(f"  FOCUS:      {top['key']} -- {top['blocker']} (blocks {top['blocks']})")
+
+    print(f"\n{'-' * 80}\n")
 
     # ── Collect all files ──
 
@@ -202,54 +276,9 @@ def main():
         ))
         print()
 
-    # ── Business Objectives & Convergence ──
+    # ── Business Objectives ──
 
-    obj_file = MEMORY_DIR / "objectives_info.md"
-    if obj_file.exists():
-        obj_text = obj_file.read_text(encoding="utf-8")
-
-        # Parse go-live checklist
-        checks_total = 0
-        checks_pass = 0
-        us_pass = 0
-        india_pass = 0
-        in_checklist = False
-        for line in obj_text.splitlines():
-            if "| # |" in line and "Check" in line:
-                in_checklist = True
-                continue
-            if in_checklist and line.startswith("|---"):
-                continue
-            if in_checklist and line.startswith("|"):
-                cols = [c.strip() for c in line.split("|") if c.strip()]
-                if len(cols) >= 4:
-                    checks_total += 1
-                    if "PASS" in cols[2]:
-                        us_pass += 1
-                    if "PASS" in cols[3]:
-                        india_pass += 1
-            elif in_checklist and not line.startswith("|"):
-                in_checklist = False
-
-        # Parse blockers
-        blockers = []
-        in_blockers = False
-        for line in obj_text.splitlines():
-            if "| Blocker |" in line:
-                in_blockers = True
-                continue
-            if in_blockers and line.startswith("|---"):
-                continue
-            if in_blockers and line.startswith("|"):
-                cols = [c.strip() for c in line.split("|") if c.strip()]
-                if len(cols) >= 4 and cols[3] == "OPEN":
-                    blockers.append({"blocker": cols[0][:40], "blocks": cols[1], "key": cols[2]})
-            elif in_blockers and not line.startswith("|"):
-                in_blockers = False
-
-        us_pct = (us_pass / checks_total * 100) if checks_total > 0 else 0
-        india_pct = (india_pass / checks_total * 100) if checks_total > 0 else 0
-
+    if blockers:
         print(f"  BUSINESS OBJECTIVES")
         print(tabulate(
             [
@@ -261,15 +290,14 @@ def main():
         ))
         print()
 
-        if blockers:
-            print(f"  KEY BLOCKERS TO GO-LIVE")
-            blocker_rows = [[b["key"], b["blocker"], b["blocks"]] for b in blockers]
-            print(tabulate(
-                blocker_rows,
-                headers=["Key", "Blocker", "Blocks"],
-                tablefmt="grid",
-            ))
-            print()
+        print(f"  KEY BLOCKERS")
+        blocker_rows = [[b["key"], b["blocker"], b["blocks"]] for b in blockers]
+        print(tabulate(
+            blocker_rows,
+            headers=["Key", "Blocker", "Blocks"],
+            tablefmt="grid",
+        ))
+        print()
 
     # ── Summary ──
 
