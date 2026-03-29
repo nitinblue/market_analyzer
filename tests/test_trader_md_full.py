@@ -156,6 +156,7 @@ class TestBindingResolution:
         self.runner = TradingRunner.__new__(TradingRunner)
         self.runner.plan = None
         self.runner.ma = None
+        self.runner.overrides = {}
         self.ctx = ExecutionContext(
             universe=["SPY", "QQQ", "IWM"],
             capital=50000.0,
@@ -286,6 +287,7 @@ class TestGateEvaluation:
         self.runner = TradingRunner.__new__(TradingRunner)
         self.runner.plan = None
         self.runner.ma = None
+        self.runner.overrides = {}
         self.ctx = ExecutionContext()
 
     def test_string_not_equal_pass(self):

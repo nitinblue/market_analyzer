@@ -95,10 +95,12 @@ class TradingRunner:
         workflow_path: str,
         interactive: bool = False,
         verbose: bool = False,
+        overrides: dict[str, str] | None = None,
     ):
         self.workflow_path = Path(workflow_path)
         self.interactive = interactive
         self.verbose = verbose
+        self.overrides: dict[str, str] = overrides or {}
         self.base_dir = self._find_base_dir()
         self.plan: Any = None
         self.ma: Any = None
@@ -246,29 +248,42 @@ class TradingRunner:
 
     # -- binding resolution --------------------------------------------------
 
+    @staticmethod
+    def _parse_literal(value: str) -> Any:
+        """Parse a string literal into a typed Python value."""
+        if value == "[]":
+            return []
+        if value in ("true", "True"):
+            return True
+        if value in ("false", "False"):
+            return False
+        if value in ("null", "None"):
+            return None
+        try:
+            return int(value)
+        except ValueError:
+            pass
+        try:
+            return float(value)
+        except ValueError:
+            pass
+        return value  # string literal
+
     def _resolve_binding(self, expr: str, ctx: ExecutionContext) -> Any:
         """Resolve a binding expression like $universe, $capital, $phase1.iv_rank_map."""
         if not isinstance(expr, str):
             return expr
+
+        # Check overrides first
+        if expr.startswith("$"):
+            var_name = expr[1:]
+            if var_name in self.overrides:
+                return self._parse_literal(self.overrides[var_name])
+        elif expr in self.overrides:
+            return self._parse_literal(self.overrides[expr])
+
         if not expr.startswith("$"):
-            # Parse literal values: "[]", "true", "false", numbers
-            if expr == "[]":
-                return []
-            if expr == "true" or expr == "True":
-                return True
-            if expr == "false" or expr == "False":
-                return False
-            if expr == "null" or expr == "None":
-                return None
-            try:
-                return int(expr)
-            except ValueError:
-                pass
-            try:
-                return float(expr)
-            except ValueError:
-                pass
-            return expr  # string literal
+            return self._parse_literal(expr)
 
         path = expr[1:]  # strip $
 
@@ -522,6 +537,100 @@ class TradingRunner:
             print(f"  HALTED: {self.report.halt_reason}")
         print(f"  Elapsed: {elapsed}ms")
         print(f"{'=' * 60}\n")
+
+    # -- report export -------------------------------------------------------
+
+    def export_report(self, path: str) -> None:
+        """Export execution results as a markdown report."""
+        assert self.report is not None, "No report — run() must be called first"
+
+        report = self.report
+        lines = [
+            f"# {report.plan_name} — Execution Report",
+            "",
+            f"**Date:** {report.started_at.strftime('%Y-%m-%d %H:%M')}",
+            f"**Market:** {report.market}",
+            f"**Broker:** {report.broker}",
+            f"**Data:** {report.data_source}",
+            "",
+        ]
+
+        if report.halted:
+            lines.append(f"**HALTED:** {report.halt_reason}")
+            lines.append("")
+
+        # Summary table
+        lines.append("## Execution Summary")
+        lines.append("")
+
+        # Build table manually (no tabulate dependency required)
+        headers = ["Phase", "Step", "Workflow", "Status", "Time(ms)"]
+        rows: list[list[str]] = []
+
+        phase_idx = 0
+        phases = self.plan.phases if self.plan else []
+        step_count = 0
+        for r in report.step_results:
+            phase_label = ""
+            cum = 0
+            for p in phases:
+                cum += len(p.steps)
+                if step_count < cum:
+                    phase_label = f"Phase {p.number}"
+                    break
+            rows.append([phase_label, r.step_name, r.workflow, r.status, str(r.duration_ms)])
+            step_count += 1
+
+        # Render as GitHub-flavored markdown table
+        col_widths = [len(h) for h in headers]
+        for row in rows:
+            for i, cell in enumerate(row):
+                col_widths[i] = max(col_widths[i], len(cell))
+
+        def _fmt_row(cells: list[str]) -> str:
+            return "| " + " | ".join(c.ljust(col_widths[i]) for i, c in enumerate(cells)) + " |"
+
+        lines.append(_fmt_row(headers))
+        lines.append("| " + " | ".join("-" * w for w in col_widths) + " |")
+        for row in rows:
+            lines.append(_fmt_row(row))
+        lines.append("")
+
+        ok = sum(1 for r in report.step_results if r.status == "OK")
+        total = len(report.step_results)
+        failed = sum(1 for r in report.step_results if r.status == "FAILED")
+        skipped = sum(
+            1 for r in report.step_results if r.status in ("SKIP", "SKIPPED", "WARNED")
+        )
+        lines.append(
+            f"**Total:** {total} | **OK:** {ok} | **Skipped:** {skipped} | **Failed:** {failed}"
+        )
+        lines.append("")
+
+        # Failed/warned steps detail
+        issues = [r for r in report.step_results if r.status != "OK"]
+        if issues:
+            lines.append("## Issues")
+            lines.append("")
+            for r in issues:
+                lines.append(f"- **{r.step_name}** ({r.workflow}): {r.status} — {r.message}")
+            lines.append("")
+
+        # Gate results
+        gate_steps = [r for r in report.step_results if r.gate_results]
+        if gate_steps:
+            lines.append("## Gate Results")
+            lines.append("")
+            for r in gate_steps:
+                lines.append(f"### {r.step_name}")
+                for expr, passed in r.gate_results:
+                    icon = "PASS" if passed else "FAIL"
+                    lines.append(f"- [{icon}] `{expr}`")
+                lines.append("")
+
+        content = "\n".join(lines)
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_text(content, encoding="utf-8")
 
     # -- public API ----------------------------------------------------------
 
