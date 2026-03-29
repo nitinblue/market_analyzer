@@ -608,6 +608,442 @@ def run_entry(
 
 
 # ---------------------------------------------------------------------------
+# Phase 4 — Monitoring
+# ---------------------------------------------------------------------------
+
+
+def run_monitoring(
+    ma: Any,
+    tickers: list[str],
+    meta: Any,
+    session: HarnessSession,
+    interactive: bool = True,
+    verbose: bool = False,
+) -> None:
+    from challenge.harness_support import (
+        build_demo_positions,
+        print_error,
+        print_signature,
+        print_table,
+        wait_for_input,
+    )
+
+    phase = "4-Monitoring"
+    cur = _cur(meta.market)
+    positions = build_demo_positions(meta.market)
+
+    # --- 1. Monitor Positions ---
+    try:
+        from income_desk.workflow import monitor_positions
+        from income_desk.workflow.monitor_positions import MonitorRequest
+
+        req = MonitorRequest(positions=positions, market=meta.market)
+        print_signature("monitor_positions", req, cli_command="analyzer-cli> monitor")
+        resp = monitor_positions(req, ma)
+
+        print(f"  Actions needed : {resp.actions_needed}")
+        print(f"  Critical count : {resp.critical_count}")
+
+        if resp.statuses:
+            rows = [
+                [
+                    s.trade_id,
+                    s.ticker,
+                    s.action,
+                    s.urgency,
+                    f"{s.pnl_pct:.1%}" if s.pnl_pct is not None else "N/A",
+                    _trunc(s.rationale, 40),
+                ]
+                for s in resp.statuses
+            ]
+            print_table(
+                "Position Statuses",
+                ["TradeID", "Ticker", "Action", "Urgency", "PnL%", "Rationale"],
+                rows,
+            )
+
+        session.record(phase, "monitor_positions", "OK")
+    except Exception as exc:
+        print_error("monitor_positions", exc)
+        if verbose:
+            traceback.print_exc()
+        session.record(phase, "monitor_positions", f"FAIL: {exc}")
+
+    action = wait_for_input(interactive)
+    if action == "q":
+        sys.exit(0)
+    if action == "s":
+        return
+
+    # --- 2. Adjust Position ---
+    try:
+        from income_desk.workflow import adjust_position
+        from income_desk.workflow.adjust_position import AdjustRequest
+
+        pos = positions[0]
+        req = AdjustRequest(
+            trade_id=pos.trade_id,
+            ticker=pos.ticker,
+            structure_type=pos.structure_type,
+            order_side=pos.order_side,
+            entry_price=pos.entry_price,
+            current_mid_price=pos.current_mid_price,
+            contracts=pos.contracts,
+            dte_remaining=pos.dte_remaining,
+            regime_id=pos.regime_id,
+            pnl_pct=(pos.entry_price - pos.current_mid_price) / pos.entry_price if pos.entry_price > 0 else 0,
+        )
+        print_signature("adjust_position", req, cli_command=f"analyzer-cli> adjust {pos.trade_id}")
+        resp = adjust_position(req, ma)
+
+        print(f"  Trade ID    : {resp.trade_id}")
+        print(f"  Ticker      : {resp.ticker}")
+        if resp.recommendation:
+            print(f"  Action      : {resp.recommendation.action}")
+            print(f"  Urgency     : {resp.recommendation.urgency}")
+            print(f"  Rationale   : {_trunc(resp.recommendation.rationale, 60)}")
+
+        if resp.alternatives:
+            rows = [
+                [a.action, a.urgency, _trunc(a.rationale, 50)]
+                for a in resp.alternatives
+            ]
+            print_table("Alternatives", ["Action", "Urgency", "Rationale"], rows)
+
+        session.record(phase, "adjust_position", "OK")
+    except Exception as exc:
+        print_error("adjust_position", exc)
+        if verbose:
+            traceback.print_exc()
+        session.record(phase, "adjust_position", f"FAIL: {exc}")
+
+    action = wait_for_input(interactive)
+    if action == "q":
+        sys.exit(0)
+    if action == "s":
+        return
+
+    # --- 3. Overnight Risk ---
+    try:
+        from income_desk.workflow import assess_overnight_risk
+        from income_desk.workflow.overnight_risk import OvernightRiskRequest
+
+        req = OvernightRiskRequest(positions=positions, market=meta.market)
+        print_signature("assess_overnight_risk", req, cli_command="analyzer-cli> overnight")
+        resp = assess_overnight_risk(req, ma)
+
+        print(f"  High risk count       : {resp.high_risk_count}")
+        print(f"  Close-before-close    : {resp.close_before_close_count}")
+
+        if resp.entries:
+            rows = [
+                [
+                    e.trade_id,
+                    e.ticker,
+                    e.risk_level,
+                    e.action,
+                    _trunc(e.rationale, 40),
+                ]
+                for e in resp.entries
+            ]
+            print_table(
+                "Overnight Risk",
+                ["TradeID", "Ticker", "Risk", "Action", "Rationale"],
+                rows,
+            )
+
+        session.record(phase, "assess_overnight_risk", "OK")
+    except Exception as exc:
+        print_error("assess_overnight_risk", exc)
+        if verbose:
+            traceback.print_exc()
+        session.record(phase, "assess_overnight_risk", f"FAIL: {exc}")
+
+    wait_for_input(interactive)
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 — Portfolio Risk
+# ---------------------------------------------------------------------------
+
+
+def run_portfolio_risk(
+    ma: Any,
+    tickers: list[str],
+    meta: Any,
+    session: HarnessSession,
+    interactive: bool = True,
+    verbose: bool = False,
+) -> None:
+    from challenge.harness_support import (
+        build_demo_positions,
+        print_error,
+        print_signature,
+        print_table,
+        wait_for_input,
+    )
+
+    phase = "5-PortfolioRisk"
+    cur = _cur(meta.market)
+    capital = meta.account_nlv or 50_000.0
+    positions = build_demo_positions(meta.market)
+
+    # --- 1. Aggregate Portfolio Greeks ---
+    try:
+        from income_desk.workflow import aggregate_portfolio_greeks
+        from income_desk.workflow.portfolio_greeks import PortfolioGreeksRequest, PositionLeg
+
+        legs = [
+            PositionLeg(
+                ticker=pos.ticker,
+                option_type="put",
+                strike=0,
+                expiration="2026-04-17",
+                contracts=pos.contracts,
+                lot_size=pos.lot_size,
+                action="short",
+                delta=-0.15,
+                gamma=0.02,
+                theta=-0.05,
+                vega=0.10,
+                implied_volatility=0.20,
+                market_value=pos.entry_price * pos.contracts * pos.lot_size,
+            )
+            for pos in positions
+        ]
+
+        req = PortfolioGreeksRequest(legs=legs, market=meta.market)
+        print_signature("aggregate_portfolio_greeks", req, cli_command="analyzer-cli> greeks")
+        resp = aggregate_portfolio_greeks(req, ma)
+
+        print(f"  Portfolio Delta : {resp.portfolio_delta:+.2f}")
+        print(f"  Portfolio Gamma : {resp.portfolio_gamma:+.4f}")
+        print(f"  Portfolio Theta : {cur}{resp.portfolio_theta:+.2f}")
+        print(f"  Portfolio Vega  : {resp.portfolio_vega:+.2f}")
+        if resp.portfolio_market_value is not None:
+            print(f"  Market Value    : {cur}{resp.portfolio_market_value:,.0f}")
+        if resp.largest_delta_exposure:
+            print(f"  Largest Delta   : {resp.largest_delta_exposure}")
+        if resp.largest_vega_exposure:
+            print(f"  Largest Vega    : {resp.largest_vega_exposure}")
+
+        if resp.by_underlying:
+            rows = [
+                [
+                    t,
+                    u.position_count,
+                    f"{u.net_delta:+.2f}",
+                    f"{u.net_gamma:+.4f}",
+                    f"{cur}{u.net_theta:+.2f}",
+                    f"{u.net_vega:+.2f}",
+                    f"{u.weighted_iv:.0%}" if u.weighted_iv else "N/A",
+                ]
+                for t, u in resp.by_underlying.items()
+            ]
+            print_table(
+                "Greeks by Underlying",
+                ["Ticker", "Legs", "Delta", "Gamma", "Theta", "Vega", "IV"],
+                rows,
+            )
+
+        if resp.risk_warnings:
+            for w in resp.risk_warnings:
+                print(f"  ⚠ {w}")
+
+        session.record(phase, "aggregate_portfolio_greeks", "OK")
+    except Exception as exc:
+        print_error("aggregate_portfolio_greeks", exc)
+        if verbose:
+            traceback.print_exc()
+        session.record(phase, "aggregate_portfolio_greeks", f"FAIL: {exc}")
+
+    action = wait_for_input(interactive)
+    if action == "q":
+        sys.exit(0)
+    if action == "s":
+        return
+
+    # --- 2. Stress Test Portfolio ---
+    try:
+        from income_desk.workflow import stress_test_portfolio
+        from income_desk.workflow.stress_test import StressTestRequest
+
+        req = StressTestRequest(
+            positions=positions,
+            capital=capital,
+            market=meta.market,
+        )
+        print_signature("stress_test_portfolio", req, cli_command="analyzer-cli> stress")
+        resp = stress_test_portfolio(req, ma)
+
+        print(f"  Worst scenario  : {resp.worst_scenario}")
+        print(f"  Worst PnL       : {cur}{resp.worst_scenario_pnl:,.0f} ({resp.worst_scenario_pnl_pct:.1%})")
+        print(f"  Best scenario   : {resp.best_scenario}")
+        print(f"  Risk score      : {resp.risk_score}")
+        print(f"  Portfolio at risk: {cur}{resp.portfolio_at_risk:,.0f}")
+
+        if resp.scenarios_breaching_limit:
+            print(f"  Breaching limit : {', '.join(resp.scenarios_breaching_limit)}")
+
+        if resp.scenario_results:
+            rows = [
+                [
+                    s.scenario_name,
+                    f"{cur}{s.portfolio_pnl:,.0f}",
+                    f"{s.portfolio_pnl_pct:.1%}",
+                    "YES" if s.breaches_limit else "no",
+                ]
+                for s in resp.scenario_results[:10]  # top 10
+            ]
+            print_table(
+                "Scenario Results (top 10)",
+                ["Scenario", "PnL", "PnL%", "Breach?"],
+                rows,
+            )
+
+        if resp.most_vulnerable_positions:
+            print(f"  Most vulnerable : {', '.join(str(v) for v in resp.most_vulnerable_positions[:5])}")
+
+        session.record(phase, "stress_test_portfolio", "OK")
+    except Exception as exc:
+        print_error("stress_test_portfolio", exc)
+        if verbose:
+            traceback.print_exc()
+        session.record(phase, "stress_test_portfolio", f"FAIL: {exc}")
+
+    wait_for_input(interactive)
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 — Calendar
+# ---------------------------------------------------------------------------
+
+
+def run_calendar(
+    ma: Any,
+    meta: Any,
+    session: HarnessSession,
+    interactive: bool = True,
+    verbose: bool = False,
+) -> None:
+    from challenge.harness_support import (
+        build_demo_positions,
+        print_error,
+        print_signature,
+        print_table,
+        wait_for_input,
+    )
+
+    phase = "6-Calendar"
+    positions = build_demo_positions(meta.market)
+
+    # --- 1. Expiry Day Check ---
+    try:
+        from income_desk.workflow import check_expiry_day
+        from income_desk.workflow.expiry_day import ExpiryDayRequest
+
+        req = ExpiryDayRequest(positions=positions, market=meta.market)
+        print_signature("check_expiry_day", req, cli_command="analyzer-cli> expiry")
+        resp = check_expiry_day(req, ma)
+
+        print(f"  Expiry index       : {resp.expiry_index or 'None'}")
+        print(f"  Expiry positions   : {resp.expiry_positions_count}")
+        print(f"  Critical count     : {resp.critical_count}")
+
+        if resp.positions:
+            rows = [
+                [
+                    p.trade_id,
+                    p.ticker,
+                    "YES" if p.is_expiry_today else "no",
+                    p.urgency,
+                    p.action,
+                    p.deadline or "N/A",
+                    _trunc(p.rationale, 35),
+                ]
+                for p in resp.positions
+            ]
+            print_table(
+                "Expiry Positions",
+                ["TradeID", "Ticker", "Expiry?", "Urgency", "Action", "Deadline", "Rationale"],
+                rows,
+            )
+
+        session.record(phase, "check_expiry_day", "OK")
+    except Exception as exc:
+        print_error("check_expiry_day", exc)
+        if verbose:
+            traceback.print_exc()
+        session.record(phase, "check_expiry_day", f"FAIL: {exc}")
+
+    wait_for_input(interactive)
+
+
+# ---------------------------------------------------------------------------
+# Phase 7 — Reporting
+# ---------------------------------------------------------------------------
+
+
+def run_reporting(
+    ma: Any,
+    meta: Any,
+    session: HarnessSession,
+    interactive: bool = True,
+    verbose: bool = False,
+) -> None:
+    from challenge.harness_support import (
+        print_error,
+        print_signature,
+        wait_for_input,
+    )
+
+    phase = "7-Reporting"
+    cur = _cur(meta.market)
+    capital = meta.account_nlv or 50_000.0
+
+    # --- 1. Daily Report ---
+    try:
+        from income_desk.workflow import generate_daily_report
+        from income_desk.workflow.daily_report import DailyReportRequest
+
+        req = DailyReportRequest(
+            trades_today=[],
+            positions_open=3,
+            capital=capital,
+            market=meta.market,
+        )
+        print_signature("generate_daily_report", req, cli_command="analyzer-cli> report")
+        resp = generate_daily_report(req, ma)
+
+        print(f"  Date           : {resp.date}")
+        print(f"  Trades opened  : {resp.trades_opened}")
+        print(f"  Trades closed  : {resp.trades_closed}")
+        print(f"  Trades adjusted: {resp.trades_adjusted}")
+        print(f"  Realized PnL   : {cur}{resp.realized_pnl:,.2f}")
+        print(f"  Win/Loss       : {resp.win_count}W / {resp.loss_count}L")
+        if resp.win_rate is not None:
+            print(f"  Win rate       : {resp.win_rate:.0%}")
+        if resp.best_trade:
+            print(f"  Best trade     : {_trunc(resp.best_trade, 50)}")
+        if resp.worst_trade:
+            print(f"  Worst trade    : {_trunc(resp.worst_trade, 50)}")
+        if resp.risk_deployed_pct is not None:
+            print(f"  Risk deployed  : {resp.risk_deployed_pct:.1f}%")
+        print(f"  Positions open : {resp.positions_open}")
+        if resp.summary:
+            print(f"  Summary        : {_trunc(resp.summary, 70)}")
+
+        session.record(phase, "generate_daily_report", "OK")
+    except Exception as exc:
+        print_error("generate_daily_report", exc)
+        if verbose:
+            traceback.print_exc()
+        session.record(phase, "generate_daily_report", f"FAIL: {exc}")
+
+    wait_for_input(interactive)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -659,17 +1095,13 @@ def main() -> None:
         elif p == 3:
             run_entry(ma, tickers, proposals, meta, session, interactive, args.verbose)
         elif p == 4:
-            # Phase 4 — Monitoring (next task)
-            print("  [Phase 4 not yet implemented]")
+            run_monitoring(ma, tickers, meta, session, interactive, args.verbose)
         elif p == 5:
-            # Phase 5 — Portfolio Risk (next task)
-            print("  [Phase 5 not yet implemented]")
+            run_portfolio_risk(ma, tickers, meta, session, interactive, args.verbose)
         elif p == 6:
-            # Phase 6 — Calendar (next task)
-            print("  [Phase 6 not yet implemented]")
+            run_calendar(ma, meta, session, interactive, args.verbose)
         elif p == 7:
-            # Phase 7 — Reporting (next task)
-            print("  [Phase 7 not yet implemented]")
+            run_reporting(ma, meta, session, interactive, args.verbose)
 
     # Summary — always print for non-interactive / run-all; for interactive only if multiple phases
     if not interactive or len(phases) > 1:
