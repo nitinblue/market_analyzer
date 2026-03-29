@@ -1,5 +1,7 @@
 # Integration Guide
 
+> Type: LIVING | Last reviewed: 2026-03-29
+
 How to integrate with income_desk as a library. APIs, broker connections, boundaries, collaboration protocol.
 
 ---

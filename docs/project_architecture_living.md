@@ -1,5 +1,6 @@
 # income_desk -- Architecture
 
+> Type: LIVING | Last reviewed: 2026-03-29
 > How the system is built. Read time: 10 minutes.
 
 ---

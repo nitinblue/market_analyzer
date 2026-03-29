@@ -145,21 +145,34 @@ def main():
                     print(f"       {item['key']}: {item['description']} ({item['age_days']}d old, {item['status']})")
             print()
 
-    # Report living docs
+    # Report living docs (freshness by header date, not row items)
     if living_files:
         print("  --- Living Documents (docs/) ---")
         print()
         for path in sorted(living_files):
-            doc = parse_tracked_doc(path)
-            total_items += doc["total"]
-            total_stale += doc["stale_count"]
-            total_aging += doc["aging_count"]
+            text = path.read_text(encoding="utf-8")
+            # Get freshness from "Last reviewed" or "Last updated" header
+            date_match = re.search(r"Last (?:reviewed|updated):\s*(\d{4}-\d{2}-\d{2})", text)
+            if date_match:
+                try:
+                    reviewed = datetime.strptime(date_match.group(1), "%Y-%m-%d").date()
+                    age = (date.today() - reviewed).days
+                except ValueError:
+                    age = 999
+            else:
+                age = 999
 
-            icon = {"FRESH": "OK", "AGING": "!!", "STALE": "XX", "DRAINED": "--"}
-            staleness = doc["staleness"]
+            if age <= STALENESS_THRESHOLDS["FRESH"]:
+                staleness = "FRESH"
+            elif age <= STALENESS_THRESHOLDS["AGING"]:
+                staleness = "AGING"
+            else:
+                staleness = "STALE"
 
-            print(f"  [{icon.get(staleness, '??')}] {doc['path']}: {staleness}")
-            print(f"       Items: {doc['total']} (FRESH:{doc['fresh_count']} AGING:{doc['aging_count']} STALE:{doc['stale_count']})")
+            icon = {"FRESH": "OK", "AGING": "!!", "STALE": "XX"}
+            print(f"  [{icon.get(staleness, '??')}] {path.name}: {staleness} (reviewed {age}d ago)")
+            if staleness == "STALE":
+                print(f"       ** Needs refresh — last reviewed {date_match.group(1) if date_match else 'unknown'} **")
 
             for item in doc["items"]:
                 if item["staleness"] in ("STALE", "AGING"):
