@@ -82,8 +82,14 @@ def print_signature(workflow_name: str, request: Any, cli_command: str = "") -> 
 
         func = getattr(wf_mod, workflow_name, None)
         if func is not None:
-            hints = typing.get_type_hints(func)
-            ret = hints.get("return")
+            # Try get_type_hints first, fall back to __annotations__
+            ret = None
+            try:
+                hints = typing.get_type_hints(func)
+                ret = hints.get("return")
+            except Exception:
+                ann = getattr(func, "__annotations__", {})
+                ret = ann.get("return")
             if ret is not None:
                 return_type_name = getattr(ret, "__name__", str(ret))
     except Exception:
@@ -216,8 +222,24 @@ def setup(market: str) -> tuple:
     if market == "India":
         meta.currency = "INR"
 
-    # --- 1. Try broker ---
+    # --- 1. Try broker (suppress DXLink probe warnings) ---
+    import logging
     broker_ok = False
+    _loggers_to_quiet = [
+        "income_desk.broker.tastytrade",
+        "income_desk.broker.tastytrade.session",
+        "income_desk.broker.tastytrade.dxlink",
+        "tastytrade",
+        "income_desk.broker.dhan",
+        "income_desk",
+    ]
+    _saved_levels = {name: logging.getLogger(name).level for name in _loggers_to_quiet}
+    for name in _loggers_to_quiet:
+        logging.getLogger(name).setLevel(logging.CRITICAL)
+    # Also suppress root logger warnings during connection
+    _root_level = logging.getLogger().level
+    logging.getLogger().setLevel(logging.CRITICAL)
+
     if market == "India":
         try:
             from income_desk.broker.dhan import connect_dhan
@@ -236,6 +258,11 @@ def setup(market: str) -> tuple:
             broker_ok = True
         except Exception as exc:
             print(f"  [broker] TastyTrade connection failed: {exc}")
+
+    # Restore log levels
+    for name, level in _saved_levels.items():
+        logging.getLogger(name).setLevel(level)
+    logging.getLogger().setLevel(_root_level)
 
     # --- 2. Determine data source ---
     if broker_ok and is_market_open(market):
