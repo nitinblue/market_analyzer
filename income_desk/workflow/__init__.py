@@ -112,6 +112,13 @@ from income_desk.workflow.stress_test import (
     stress_test_portfolio,
 )
 
+# --- Benchmarking ---
+from income_desk.workflow.benchmarking import (
+    BenchmarkRequest,
+    BenchmarkResponse,
+    run_benchmark,
+)
+
 # --- Reporting ---
 from income_desk.workflow.daily_report import (
     DailyReportRequest,
@@ -146,6 +153,7 @@ __all__ = [
     "check_portfolio_health",
     "check_expiry_day",
     "generate_daily_report",
+    "run_benchmark",
     # Request types
     "DailyPlanRequest",
     "SnapshotRequest",
@@ -160,6 +168,7 @@ __all__ = [
     "PortfolioGreeksRequest",
     "HealthRequest",
     "ExpiryDayRequest",
+    "BenchmarkRequest",
     "DailyReportRequest",
     # Response types
     "DailyPlanResponse",
@@ -175,6 +184,7 @@ __all__ = [
     "PortfolioGreeksResponse",
     "HealthResponse",
     "ExpiryDayResponse",
+    "BenchmarkResponse",
     "DailyReportResponse",
     # Shared types
     "WorkflowMeta",

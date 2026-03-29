@@ -76,6 +76,7 @@ _MODULE_MAP = {
     "assess_overnight_risk": "overnight_risk",
     "aggregate_portfolio_greeks": "portfolio_greeks",
     "stress_test_portfolio": "stress_test",
+    "run_benchmark": "benchmarking",
     "check_expiry_day": "expiry_day",
     "generate_daily_report": "daily_report",
 }

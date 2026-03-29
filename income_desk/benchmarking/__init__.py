@@ -33,6 +33,7 @@ from income_desk.benchmarking.models import (
     PredictionRecord,
     RegimeAccuracy,
 )
+from income_desk.benchmarking.loader import load_outcomes, load_predictions
 from income_desk.benchmarking.report import format_calibration_report
 
 __all__ = [
@@ -43,6 +44,8 @@ __all__ = [
     "RegimeAccuracy",
     "calibrate_pop",
     "format_calibration_report",
+    "load_outcomes",
+    "load_predictions",
     "generate_calibration_report",
     "regime_accuracy",
     "score_vs_outcome",
