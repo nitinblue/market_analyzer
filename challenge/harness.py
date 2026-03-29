@@ -273,7 +273,7 @@ def run_premarket(
             tickers=tickers,
             market=meta.market,
         )
-        cli_tickers = " ".join(tickers[:4])
+        cli_tickers = " ".join(tickers[:3]) + (" ..." if len(tickers) > 3 else "")
         print_signature("snapshot_market", req, cli_command=f"analyzer-cli> snapshot {cli_tickers}")
         resp = snapshot_market(req, ma)
 
@@ -378,7 +378,7 @@ def run_scanning(
             market=meta.market,
             iv_rank_map=iv_map or None,
         )
-        cli_tickers = " ".join(tickers[:4])
+        cli_tickers = " ".join(tickers[:3]) + (" ..." if len(tickers) > 3 else "")
         print_signature("rank_opportunities", req, cli_command=f"analyzer-cli> rank {cli_tickers}")
         resp = rank_opportunities(req, ma)
 
