@@ -6,3 +6,9 @@ from income_desk.trader_md.parser import (  # noqa: F401
     parse_risk,
     resolve_references,
 )
+from income_desk.trader_md.runner import (  # noqa: F401
+    TradingRunner,
+    ExecutionContext,
+    ExecutionReport,
+    StepResult,
+)
