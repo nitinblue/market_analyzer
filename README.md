@@ -117,6 +117,140 @@ After running all phases, the harness prints a summary:
 
 ---
 
+## v2.0: Markdown-Driven Trading (trader_md)
+
+**Define your entire trading strategy in markdown. No Python needed.**
+
+income-desk v2 introduces `trader_md` — a declarative trading platform where `.workflow.md` files ARE the strategy, `.risk.md` files ARE the risk rules, and `.universe.md` files ARE the ticker lists. The Python engine runs underneath, but you never touch it.
+
+```bash
+# Validate your workflow
+python -m income_desk.trader_md validate workflows/daily_us.workflow.md
+
+# See what would execute (no API calls)
+python -m income_desk.trader_md dry-run workflows/daily_us.workflow.md
+
+# Execute the full trading workflow
+python -m income_desk.trader_md run workflows/daily_us.workflow.md
+
+# Interactive mode — pause between steps
+python -m income_desk.trader_md run workflows/daily_us.workflow.md --interactive
+```
+
+### How it works
+
+Your entire trading platform is a set of markdown files:
+
+```
+trader_md/
+  workflows/
+    daily_us.workflow.md          <- your strategy
+    daily_india.workflow.md
+  broker_profiles/
+    tastytrade_live.broker.md     <- broker config (no secrets)
+    dhan_live.broker.md
+    simulated.broker.md
+  universes/
+    us_large_cap.universe.md      <- ticker lists
+    india_fno.universe.md
+  risk_profiles/
+    conservative.risk.md          <- risk rules
+    moderate.risk.md
+    aggressive.risk.md
+  scenarios/
+    black_monday.scenario.md      <- 18 stress test scenarios
+    ...
+  .env.trading                    <- credentials (gitignored)
+```
+
+### The workflow format
+
+```markdown
+---
+name: daily_us_income
+broker: tastytrade_live
+universe: us_large_cap
+risk_profile: moderate
+---
+
+## Phase 1: Market Assessment
+
+### Step: Market Pulse
+workflow: check_portfolio_health
+inputs:
+  tickers: $universe
+  capital: $capital
+outputs:
+  pulse: $result.sentinel_signal
+gate:
+  - pulse != "RED"
+on_fail: HALT "Market pulse {pulse} -- trading halted"
+
+### Step: Rank Opportunities
+workflow: rank_opportunities
+inputs:
+  tickers: $universe
+  capital: $capital
+  min_pop: $risk.min_pop
+gate:
+  - len(proposals) > 0
+on_fail: SKIP "No opportunities"
+```
+
+### Variable bindings
+
+| Syntax | Resolves to |
+|--------|------------|
+| `$universe` | Tickers from `.universe.md` |
+| `$capital` | Account NLV from broker |
+| `$risk.min_pop` | Field from `.risk.md` |
+| `$result.sentinel_signal` | Current step's response field |
+| `$phase1.iv_rank_map` | Output from a previous phase |
+| `$phase2.proposals[0].ticker` | Indexed access into list output |
+| `$positions` | Live/demo positions for monitoring |
+
+### Gate actions
+
+| Action | Behavior |
+|--------|----------|
+| `HALT` | Stop entire workflow |
+| `SKIP` | Skip this step, continue |
+| `BLOCK` | Block this step, continue to next phase |
+| `ALERT` | Log warning, continue |
+| `WARN` | Soft warning, continue |
+
+### 5 file types, 1 runner
+
+| File Type | What it defines | Example |
+|-----------|----------------|---------|
+| `.workflow.md` | Phases, steps, gates, bindings | `daily_us.workflow.md` |
+| `.broker.md` | Broker type, mode, credentials source | `tastytrade_live.broker.md` |
+| `.universe.md` | Ticker lists with descriptions | `us_large_cap.universe.md` |
+| `.risk.md` | Position limits, POP filters, regime rules | `moderate.risk.md` |
+| `.scenario.md` | Stress test scenarios with factor shocks | `black_monday.scenario.md` |
+
+### Why markdown?
+
+- **A portfolio manager** edits `min_pop: 0.50` to `min_pop: 0.60` in the risk file. Behavior changes. No Python.
+- **A new developer** reads the workflow file and understands the entire trading pipeline in 5 minutes.
+- **An auditor** gets the `.workflow.md` file — it IS the complete trading logic. Every gate, every threshold.
+- **Git diff** shows exactly what changed in a strategy. PR review catches "you removed the overnight risk gate."
+- **AI generates strategies** — describe in English, Claude produces the `.workflow.md`.
+
+### Two paths, same engine
+
+```bash
+# v1: Python path (interactive harness)
+python -m income_desk.trader --all --market=US          # 15/15 workflows
+
+# v2: MD path (declarative workflows)
+python -m income_desk.trader_md run daily_us.workflow.md  # same engine, defined in markdown
+```
+
+Both call the same 15 workflow APIs. Choose your style.
+
+---
+
 ## The Trading Workflow
 
 Trading doesn't start with placing an order. It starts with setting up your desk.
