@@ -89,7 +89,7 @@ def _parse_tt_symbol(
     """
     ticker = underlying or symbol
 
-    if "Option" not in instrument_type:
+    if "option" not in instrument_type.lower():
         return ticker, None, None, None
 
     # OCC format: SPY   260417P00570000  (ticker padded to 6, YYMMDD, C/P, strike*1000)
