@@ -18,6 +18,8 @@
 | BUG-010 | Stress test PnL% values absurd: -1260% for Black Monday on demo positions. Breach column shows "no" for -1260% loss which is clearly a breach | 2026-03-29 | 2026-03-29 | OPEN | Claude | PnL% calculation uses wrong base (dividing by premium instead of capital?). Breach detection threshold broken | — | — |
 | BUG-011 | Account NLV shows INR 0, BP N/A in harness banner — Dhan get_balance returning zero/null | 2026-03-29 | 2026-03-30 | DELIVERED | Claude | Fixed 3 bugs: 0.0 falsy in or-chain, NLV missing collateral/sodLimit, SDK failure not detected. 4 new tests. | — | dhan/account.py |
 
+| BUG-012 | TastyTrade get_option_chain subscribes to EVERY strike via DXLink WebSocket — 1000+ subscriptions for QQQ. Takes 3+ minutes per ticker, harness times out. Dhan returns full chain in 1 API call (~1s) | 2026-03-30 | 2026-03-30 | OPEN | Claude | Use TastyTrade REST API for bulk chain data (not DXLink streaming), or limit to ATM +/- N strikes | — | — |
+
 ## Archive
 
 | Key | Item | Delivered | Resolution |
