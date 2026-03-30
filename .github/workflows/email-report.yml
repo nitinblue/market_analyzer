@@ -1,0 +1,52 @@
+name: Email Daily Report
+
+on:
+  push:
+    paths:
+      - 'reports/daily/**'
+
+jobs:
+  email:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find latest report
+        id: report
+        run: |
+          FILE=$(ls -t reports/daily/*.md | head -1)
+          echo "file=$FILE" >> $GITHUB_OUTPUT
+          echo "filename=$(basename $FILE)" >> $GITHUB_OUTPUT
+          # Extract market from filename (india or us)
+          if [[ "$FILE" == *india* ]]; then
+            echo "market=India" >> $GITHUB_OUTPUT
+          else
+            echo "market=US" >> $GITHUB_OUTPUT
+          fi
+          # Check for PASS/FAIL in content
+          if grep -q "Failed: 0" "$FILE"; then
+            echo "verdict=PASS" >> $GITHUB_OUTPUT
+          else
+            echo "verdict=FAIL" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.GMAIL_USER }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: "income_desk ${{ steps.report.outputs.market }} Trader: ${{ steps.report.outputs.verdict }} - ${{ steps.report.outputs.filename }}"
+          to: rnitin@gmail.com, priyankajain242003@gmail.com
+          from: income_desk <${{ secrets.GMAIL_USER }}>
+          body: |
+            Daily trader report attached.
+
+            Market: ${{ steps.report.outputs.market }}
+            Verdict: ${{ steps.report.outputs.verdict }}
+            File: ${{ steps.report.outputs.filename }}
+
+            View full report: https://github.com/nitinblue/income-desk/blob/main/${{ steps.report.outputs.file }}
+          content_type: text/plain
