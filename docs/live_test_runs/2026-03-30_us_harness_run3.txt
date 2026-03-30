@@ -1,0 +1,594 @@
+
+  Connecting to US market...
+
+  Loaded 23 positions from tastytrade (LIVE)
+
+  Broker Positions
++----------+---------------+-------+-------------+------------------------------+
+| Ticker   | Description   |   Qty | Avg Price   | Type                         |
++==========+===============+=======+=============+==============================+
+| BAC      | equity        |   100 | $54.50      | InstrumentType.EQUITY        |
++----------+---------------+-------+-------------+------------------------------+
+| GLD      | equity        |    -1 | $17.20      | InstrumentType.EQUITY_OPTION |
++----------+---------------+-------+-------------+------------------------------+
+| GLD      | equity        |     1 | $21.93      | InstrumentType.EQUITY_OPTION |
++----------+---------------+-------+-------------+------------------------------+
+| GOOGL    | equity        |    -1 | $13.63      | InstrumentType.EQUITY_OPTION |
++----------+---------------+-------+-------------+------------------------------+
+| GOOGL    | equity        |    -1 | $14.47      | InstrumentType.EQUITY_OPTION |
++----------+---------------+-------+-------------+------------------------------+
+| GOOGL    | equity        |     1 | $7.77       | InstrumentType.EQUITY_OPTION |
++----------+---------------+-------+-------------+------------------------------+
+| GOOGL    | equity        |     1 | $7.94       | InstrumentType.EQUITY_OPTION |
++----------+---------------+-------+-------------+------------------------------+
+| IWM      | equity        |     1 | $4.63       | InstrumentType.EQUITY_OPTION |
++----------+---------------+-------+-------------+------------------------------+
+| IWM      | equity        |     1 | $3.08       | InstrumentType.EQUITY_OPTION |
++----------+---------------+-------+-------------+------------------------------+
+| IWM      | equity        |    -1 | $5.90       | InstrumentType.EQUITY_OPTION |
++----------+---------------+-------+-------------+------------------------------+
+| IWM      | equity        |    -1 | $4.77       | InstrumentType.EQUITY_OPTION |
++----------+---------------+-------+-------------+------------------------------+
+| QQQ      | equity        |    -1 | $0.11       | InstrumentType.EQUITY_OPTION |
++----------+---------------+-------+-------------+------------------------------+
+| QQQ      | equity        |    -1 | $0.34       | InstrumentType.EQUITY_OPTION |
++----------+---------------+-------+-------------+------------------------------+
+| SPX      | equity        |     1 | $7.04       | InstrumentType.EQUITY_OPTION |
++----------+---------------+-------+-------------+------------------------------+
+| SPX      | equity        |    -1 | $9.44       | InstrumentType.EQUITY_OPTION |
++----------+---------------+-------+-------------+------------------------------+
+| SPY      | equity        |     1 | $0.30       | InstrumentType.EQUITY_OPTION |
++----------+---------------+-------+-------------+------------------------------+
+| SPY      | equity        |    -1 | $0.59       | InstrumentType.EQUITY_OPTION |
++----------+---------------+-------+-------------+------------------------------+
+| SPY      | equity        |     1 | $0.49       | InstrumentType.EQUITY_OPTION |
++----------+---------------+-------+-------------+------------------------------+
+| SPY      | equity        |    -1 | $1.30       | InstrumentType.EQUITY_OPTION |
++----------+---------------+-------+-------------+------------------------------+
+| TSLA     | equity        |    -1 | $24.08      | InstrumentType.EQUITY_OPTION |
++----------+---------------+-------+-------------+------------------------------+
+| TSLA     | equity        |    -1 | $20.32      | InstrumentType.EQUITY_OPTION |
++----------+---------------+-------+-------------+------------------------------+
+| TSLA     | equity        |     1 | $16.66      | InstrumentType.EQUITY_OPTION |
++----------+---------------+-------+-------------+------------------------------+
+| TSLA     | equity        |     1 | $14.48      | InstrumentType.EQUITY_OPTION |
++----------+---------------+-------+-------------+------------------------------+
+
++------------------------------------------------------------------+
+|                         WORKFLOW HARNESS                         |
++------------------------------------------------------------------+
+| Market: US                                                       |
+| Broker: tastytrade (LIVE)                                        |
+| Data:   LIVE quotes (market open)                                |
+| Account: NLV USD 32,848  |  BP USD 17,800                        |
++------------------------------------------------------------------+
+
+
+############################################################
+  PHASE 1: PRE-MARKET -health check, daily plan, market snapshot
+############################################################
+
+============================================================
+  MARKET CONTEXT
+============================================================
+  CLI: analyzer-cli> context
+
+  Environment   : cautious
+  Trading       : ALLOWED
+  Size Factor   : 75%
+  Risk Level    : elevated (score: 0.27)
+
+  Macro events next 7 days:
+
+  Upcoming Events
++------------+-------------------+----------+
+| Date       | Event             | Impact   |
++============+===================+==========+
+| 2026-04-03 | Non-Farm Payrolls | high     |
++------------+-------------------+----------+
+
+
+  Intermarket Dashboard
++----------+----------+--------------+-------------+
+| Ticker   | Regime   | Confidence   | Direction   |
++==========+==========+==============+=============+
+| SPY      | R4       | 83%          | bearish     |
++----------+----------+--------------+-------------+
+| QQQ      | R1       | 48%          |             |
++----------+----------+--------------+-------------+
+| TLT      | R2       | 100%         |             |
++----------+----------+--------------+-------------+
+| GLD      | R4       | 100%         | bearish     |
++----------+----------+--------------+-------------+
+| HYG      | R2       | 82%          |             |
++----------+----------+--------------+-------------+
+
+
+  Environment: cautious | Black swan: elevated | Macro events next 7d: 1 | Intermarket divergence detected
+
+============================================================
+  WORKFLOW: snapshot_market
+============================================================
+  Request:  SnapshotRequest
+  Returns:  MarketSnapshot
+  ----------------------------------------
+    tickers: ['SPY', 'QQQ', 'IWM', 'GLD', 'TLT', 'AAPL', 'MSFT', 'NVDA']
+    include_chains: False
+    include_regime: True
+    market: 'US'
+
+  CLI: analyzer-cli> snapshot SPY QQQ IWM ...
+
+
+  Market Snapshot
++----------+---------+-------------------+-------+--------+-------+
+| Ticker   | Price   | Regime            |   IVR | ATR%   |   RSI |
++==========+=========+===================+=======+========+=======+
+| SPY      | $635.59 | R4 High-Vol Trend |    47 | 1.51%  |  27.3 |
++----------+---------+-------------------+-------+--------+-------+
+| QQQ      | $561.96 | R1 Low-Vol MR     |    51 | 1.73%  |  28.5 |
++----------+---------+-------------------+-------+--------+-------+
+| IWM      | $241.53 | R3 Low-Vol Trend  |    55 | 2.21%  |  38.7 |
++----------+---------+-------------------+-------+--------+-------+
+| GLD      | $417.07 | R4 High-Vol Trend |    85 | 3.04%  |  38.4 |
++----------+---------+-------------------+-------+--------+-------+
+| TLT      | $86.75  | R2 High-Vol MR    |    36 | 0.96%  |  37.8 |
++----------+---------+-------------------+-------+--------+-------+
+| AAPL     | $246.25 | R4 High-Vol Trend |    32 | 2.04%  |  38.2 |
++----------+---------+-------------------+-------+--------+-------+
+| MSFT     | $361.90 | R3 Low-Vol Trend  |    57 | 2.16%  |  22.3 |
++----------+---------+-------------------+-------+--------+-------+
+| NVDA     | $166.47 | R3 Low-Vol Trend  |    16 | 3.00%  |  35.7 |
++----------+---------+-------------------+-------+--------+-------+
+
+
+============================================================
+  WORKFLOW: check_portfolio_health
+============================================================
+  Request:  HealthRequest
+  Returns:  HealthResponse
+  ----------------------------------------
+    tickers: ['SPY', 'QQQ', 'IWM', 'GLD', 'TLT', 'AAPL', 'MSFT', 'NVDA']
+    capital: 32848.039
+    total_risk_deployed: 0.0
+    market: 'US'
+
+  CLI: analyzer-cli> health
+
+  Market Safety : RED
+  Safe to Trade : False
+  Risk %        : 0.0%
+  Risk Budget   : 9,854
+  Data Trust    : medium (80%)
+
+  Regime Map
++----------+------+-------------------+-------------+
+| Ticker   |   ID | Label             | Tradeable   |
++==========+======+===================+=============+
+| SPY      |    4 | R4 High-Vol Trend | N           |
++----------+------+-------------------+-------------+
+| QQQ      |    1 | R1 Low-Vol MR     | Y           |
++----------+------+-------------------+-------------+
+| IWM      |    3 | R3 Low-Vol Trend  | Y           |
++----------+------+-------------------+-------------+
+| GLD      |    4 | R4 High-Vol Trend | N           |
++----------+------+-------------------+-------------+
+| TLT      |    2 | R2 High-Vol MR    | Y           |
++----------+------+-------------------+-------------+
+| AAPL     |    4 | R4 High-Vol Trend | N           |
++----------+------+-------------------+-------------+
+| MSFT     |    3 | R3 Low-Vol Trend  | Y           |
++----------+------+-------------------+-------------+
+| NVDA     |    3 | R3 Low-Vol Trend  | Y           |
++----------+------+-------------------+-------------+
+
+
+============================================================
+  WORKFLOW: generate_daily_plan
+============================================================
+  Request:  DailyPlanRequest
+  Returns:  DailyPlanResponse
+  ----------------------------------------
+    tickers: ['SPY', 'QQQ', 'IWM', 'GLD', 'TLT', 'AAPL', 'MSFT', 'NVDA']
+    capital: 32848.039
+    market: 'US'
+    risk_tolerance: 'moderate'
+    total_risk_deployed: 0.0
+    max_new_trades: 5
+    iv_rank_map: {'AAPL': 32.07, 'GLD': 85.48, 'IWM': 55.0, 'MSFT': 57.19, 'NVDA': 15.84, 'QQQ': 51.09, 'SPY': 46.82, 'TLT': 35.93}
+
+  CLI: analyzer-cli> plan
+
+  Market Safety : RED
+  Safe to Trade : False
+  Tradeable     : 
+  Capital       : $32,848
+  Risk Deployed : 0.0%
+  Risk Budget   : 9,854
+  Summary  : Market Safety: RED — trading halted. 8 tickers scanned.
+
+############################################################
+  PHASE 2: SCANNING -scan universe, rank opportunities
+############################################################
+
+============================================================
+  WORKFLOW: scan_universe
+============================================================
+  Request:  ScanRequest
+  Returns:  ScanResponse
+  ----------------------------------------
+    tickers: ['SPY', 'QQQ', 'IWM', 'GLD', 'TLT', 'AAPL', 'MSFT', 'NVDA']
+    market: 'US'
+    min_score: 0.3
+    top_n: 20
+
+  CLI: analyzer-cli> scan
+
+  Scanned: 8  |  Passed: 7
+
+  Scan Candidates
++----------+---------+------------------+----------------------------------------------------+
+| Ticker   |   Score | Regime           | Rationale                                          |
++==========+=========+==================+====================================================+
+| TLT      |    0.9  | R2 High-Vol MR   | R2 selective income; RSI 38 (neutral range); AT... |
++----------+---------+------------------+----------------------------------------------------+
+| QQQ      |    0.75 | R1 Low-Vol MR    | RSI 29 (approaching oversold); Below lower Boll... |
++----------+---------+------------------+----------------------------------------------------+
+| MSFT     |    0.7  | R3 Low-Vol Trend | RSI 22 (oversold); Below lower Bollinger band; ... |
++----------+---------+------------------+----------------------------------------------------+
+| IWM      |    0.6  | R3 Low-Vol Trend | RSI 39 (neutral range); ATR% 2.21 (moderate); H... |
++----------+---------+------------------+----------------------------------------------------+
+| NVDA     |    0.35 | R3 Low-Vol Trend | Below lower Bollinger band; Stochastic oversold    |
++----------+---------+------------------+----------------------------------------------------+
+
+
+============================================================
+  WORKFLOW: rank_opportunities
+============================================================
+  Request:  RankRequest
+  Returns:  RankResponse
+  ----------------------------------------
+    tickers: ['TLT', 'QQQ', 'MSFT', 'IWM', 'NVDA']
+    capital: 32848.039
+    market: 'US'
+    risk_tolerance: 'moderate'
+    iv_rank_map: {'IWM': 55.0, 'MSFT': 57.19, 'NVDA': 15.84, 'QQQ': 51.09, 'TLT': 35.93}
+    skip_intraday: True
+    max_trades: 10
+    min_pop: 0.4
+
+  CLI: analyzer-cli> rank TLT QQQ MSFT ...
+
+  Tradeable: 5  |  Total assessed: 55
+
+  Blocked
++----------+---------------+---------+----------------------------------------------------+
+| Ticker   | Structure     |   Score | Reason                                             |
++==========+===============+=========+====================================================+
+| TLT      | credit_spread |    0.55 | Degenerate trade: all legs at same strike ({85.0}) |
++----------+---------------+---------+----------------------------------------------------+
+| IWM      | debit_spread  |    0.38 | Degenerate trade: all legs at same strike ({245... |
++----------+---------------+---------+----------------------------------------------------+
+| TLT      | credit_spread |    0.32 | Degenerate trade: all legs at same strike ({86.0}) |
++----------+---------------+---------+----------------------------------------------------+
+| QQQ      | credit_spread |    0.53 | Illiquid strikes (wide spread or low OI)           |
++----------+---------------+---------+----------------------------------------------------+
+| IWM      | debit_spread  |    0.52 | Illiquid strikes (wide spread or low OI)           |
++----------+---------------+---------+----------------------------------------------------+
+| NVDA     | debit_spread  |    0.49 | Missing strikes in liquid chain                    |
++----------+---------------+---------+----------------------------------------------------+
+| MSFT     | debit_spread  |    0.47 | Illiquid strikes (wide spread or low OI)           |
++----------+---------------+---------+----------------------------------------------------+
+| NVDA     | debit_spread  |    0.42 | Missing strikes in liquid chain                    |
++----------+---------------+---------+----------------------------------------------------+
+| MSFT     | debit_spread  |    0.38 | Illiquid strikes (wide spread or low OI)           |
++----------+---------------+---------+----------------------------------------------------+
+| QQQ      | iron_condor   |    0.37 | Illiquid strikes (wide spread or low OI)           |
++----------+---------------+---------+----------------------------------------------------+
+
+
+############################################################
+  PHASE 3: TRADE ENTRY -validate, size, price
+############################################################
+
+  (Using demo proposal for SPY)
+
+============================================================
+  WORKFLOW: validate_trade
+============================================================
+  Request:  ValidateRequest
+  Returns:  ValidateResponse
+  ----------------------------------------
+    ticker: 'SPY'
+    entry_credit: 2.8
+    regime_id: 1
+    atr_pct: 1.1
+    current_price: 565.0
+    dte: 35
+    rsi: 50.0
+    iv_rank: 50.0
+    contracts: 1
+    avg_bid_ask_spread_pct: 0.03
+    trade_spec: None
+
+  CLI: analyzer-cli> validate SPY
+
+  Ready?       : True
+  Failed gates : []
+  Warnings     : trade_spec auto-generated for validation (no actual legs provided)
+
+  Gate Scorecard
++-------------------+----------+------------+----------------------------------------------------+
+| Gate              | Status   | Severity   | Detail                                             |
++===================+==========+============+====================================================+
+| commission_drag   | PASS     | pass       |                                                    |
++-------------------+----------+------------+----------------------------------------------------+
+| fill_quality      | PASS     | pass       |                                                    |
++-------------------+----------+------------+----------------------------------------------------+
+| margin_efficiency | PASS     | warn       |                                                    |
++-------------------+----------+------------+----------------------------------------------------+
+| pop_gate          | PASS     | pass       | pop_pct: 83.6% from regime R1, atr_pct 1.10%, p... |
++-------------------+----------+------------+----------------------------------------------------+
+| ev_positive       | PASS     | warn       | expected_value: $0.00/contract from POP 83.6% ×... |
++-------------------+----------+------------+----------------------------------------------------+
+| entry_quality     | PASS     | pass       | score: 1.00 (threshold 0.60), regime R1, iv_ran... |
++-------------------+----------+------------+----------------------------------------------------+
+| exit_discipline   | PASS     | warn       | profit_target_pct=None, stop_loss_pct=None, exi... |
++-------------------+----------+------------+----------------------------------------------------+
+| strike_proximity  | PASS     | warn       | Pass levels from ma.levels.analyze() for strike... |
++-------------------+----------+------------+----------------------------------------------------+
+| earnings_blackout | PASS     | pass       |                                                    |
++-------------------+----------+------------+----------------------------------------------------+
+| iv_rank_quality   | PASS     | pass       |                                                    |
++-------------------+----------+------------+----------------------------------------------------+
+
+
+============================================================
+  WORKFLOW: size_position
+============================================================
+  Request:  SizeRequest
+  Returns:  SizeResponse
+  ----------------------------------------
+    pop_pct: 72.0
+    max_profit: 280.0
+    max_loss: 220.00000000000003
+    capital: 32848.039
+    risk_per_contract: 500.0
+    regime_id: 1
+    wing_width: 5.0
+    safety_factor: 0.5
+    max_contracts: 20
+
+  CLI: analyzer-cli> size
+
+  Contracts    : 0
+  Kelly Sizing : 0.000
+  Risk/contract: $500
+  Total risk   : $0
+  Risk % Capital: 0.0%
+
+============================================================
+  WORKFLOW: price_trade
+============================================================
+  Request:  PriceRequest
+  Returns:  PriceResponse
+  ----------------------------------------
+    ticker: 'SPY'
+    legs: [{'strike': 556.0, 'option_type': 'put', 'action': 'sell'}, {'strike': 546.0, 'option_type': 'put', 'action': 'buy'}]
+    market: 'US'
+
+  CLI: analyzer-cli> price SPY
+
+  Underlying   : $635.45
+  Net credit   : $0.00
+  Net debit    : $-0.00
+  Avg spread % : 0.00%
+  Fill quality : tight
+
+  Leg Quotes
++--------------+----------+-------+-------+-------+------+---------+
+| Instrument   | Action   | Bid   | Ask   | Mid   | IV   | Delta   |
++==============+==========+=======+=======+=======+======+=========+
+| SPY  556 PE  | sell     | $0.00 | $0.00 | $0.00 | N/A  | N/A     |
++--------------+----------+-------+-------+-------+------+---------+
+| SPY  546 PE  | buy      | $0.00 | $0.00 | $0.00 | N/A  | N/A     |
++--------------+----------+-------+-------+-------+------+---------+
+
+
+############################################################
+  PHASE 4: MONITORING -monitor positions, adjust, overnight risk
+############################################################
+
+  Using 0 positions from broker
+
+============================================================
+  WORKFLOW: monitor_positions
+============================================================
+  Request:  MonitorRequest
+  Returns:  MonitorResponse
+  ----------------------------------------
+    positions: []
+    market: 'US'
+
+  CLI: analyzer-cli> monitor
+
+  Actions needed : 0
+  Critical count : 0
+  No positions to adjust — skipping adjust and overnight risk.
+
+############################################################
+  PHASE 5: PORTFOLIO RISK -Greeks aggregation, stress test
+############################################################
+
+  Using 0 positions from broker
+
+============================================================
+  WORKFLOW: aggregate_portfolio_greeks
+============================================================
+  Request:  PortfolioGreeksRequest
+  Returns:  PortfolioGreeksResponse
+  ----------------------------------------
+    legs: []
+    market: 'US'
+
+  CLI: analyzer-cli> greeks
+
+  Portfolio Delta : +0.00
+  Portfolio Gamma : +0.0000
+  Portfolio Theta : $+0.00
+  Portfolio Vega  : +0.00
+  Market Value    : $0
+  Largest Delta   : none
+  Largest Vega    : none
+
+============================================================
+  WORKFLOW: stress_test_portfolio
+============================================================
+  Request:  StressTestRequest
+  Returns:  StressTestResponse
+  ----------------------------------------
+    positions: []
+    capital: 32848.039
+    market: 'US'
+    risk_limit_pct: 0.3
+    scenarios: None
+
+  CLI: analyzer-cli> stress
+
+  Worst scenario  : sp500_down_5
+  Worst PnL       : $0 (0.0%)
+  Best scenario   : geopolitical_shock
+  Risk score      : safe
+  Portfolio at risk: $0
+
+  Scenario Results (top 10)
++---------------------------------+-------+--------+-----------+
+| Scenario                        | PnL   | PnL%   | Breach?   |
++=================================+=======+========+===========+
+| S&P 500 -5% Correction          | $0    | 0.0%   | no        |
++---------------------------------+-------+--------+-----------+
+| S&P 500 -10% Correction         | $0    | 0.0%   | no        |
++---------------------------------+-------+--------+-----------+
+| S&P 500 -20% Bear Market        | $0    | 0.0%   | no        |
++---------------------------------+-------+--------+-----------+
+| Black Monday (-30% Flash Crash) | $0    | 0.0%   | no        |
++---------------------------------+-------+--------+-----------+
+| NIFTY -10% + INR Depreciation   | $0    | 0.0%   | no        |
++---------------------------------+-------+--------+-----------+
+| RBI Surprise Rate Hike          | $0    | 0.0%   | no        |
++---------------------------------+-------+--------+-----------+
+| FII Mass Selling                | $0    | 0.0%   | no        |
++---------------------------------+-------+--------+-----------+
+| Gold -10% Crash                 | $0    | 0.0%   | no        |
++---------------------------------+-------+--------+-----------+
+| Commodity Super-Cycle Meltup    | $0    | 0.0%   | no        |
++---------------------------------+-------+--------+-----------+
+| 10Y Yield +100bp Spike          | $0    | 0.0%   | no        |
++---------------------------------+-------+--------+-----------+
+
+
+############################################################
+  PHASE 6: CALENDAR -expiry day check
+############################################################
+  No what-if portfolio at test_portfolio_us.json — using demo positions
+
+============================================================
+  WORKFLOW: check_expiry_day
+============================================================
+  Request:  ExpiryDayRequest
+  Returns:  ExpiryDayResponse
+  ----------------------------------------
+    positions: [OpenPosition(trade_id='DEMO-US-001', ticker='SPY', structure_type='iron_condor', order_side='credit', entry_price=2.8, current_mid_price=1.9, contracts=2, dte_remaining=18, regime_id=1, lot_size=100, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='DEMO-US-002', ticker='QQQ', structure_type='credit_spread', order_side='credit', entry_price=1.5, current_mid_price=1.1, contracts=3, dte_remaining=8, regime_id=2, lot_size=100, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='DEMO-US-003', ticker='IWM', structure_type='iron_condor', order_side='credit', entry_price=3.2, current_mid_price=2.4, contracts=1, dte_remaining=25, regime_id=1, lot_size=100, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe')]
+    market: 'US'
+    today: None
+
+  CLI: analyzer-cli> expiry
+
+  Expiry index       : None
+  Expiry positions   : 0
+  Critical count     : 0
+
+  Expiry Positions
++-------------+----------+-----------+-----------+----------+------------+-------------+
+| TradeID     | Ticker   | Expiry?   | Urgency   | Action   | Deadline   | Rationale   |
++=============+==========+===========+===========+==========+============+=============+
+| DEMO-US-001 | SPY      | no        | none      | hold     | N/A        |             |
++-------------+----------+-----------+-----------+----------+------------+-------------+
+| DEMO-US-002 | QQQ      | no        | none      | hold     | N/A        |             |
++-------------+----------+-----------+-----------+----------+------------+-------------+
+| DEMO-US-003 | IWM      | no        | none      | hold     | N/A        |             |
++-------------+----------+-----------+-----------+----------+------------+-------------+
+
+
+############################################################
+  PHASE 7: REPORTING -daily report
+############################################################
+
+============================================================
+  WORKFLOW: generate_daily_report
+============================================================
+  Request:  DailyReportRequest
+  Returns:  DailyReportResponse
+  ----------------------------------------
+    trades_today: []
+    positions_open: 3
+    capital: 32848.039
+    total_risk_deployed: 0.0
+    regime_summary: {}
+    market: 'US'
+
+  CLI: analyzer-cli> report
+
+  Date           : 2026-03-30
+  Trades opened  : 0
+  Trades closed  : 0
+  Trades adjusted: 0
+  Realized PnL   : $0.00
+  Win/Loss       : 0W / 0L
+  Best trade     : none
+  Worst trade    : none
+  Risk deployed  : 0.0%
+  Positions open : 3
+  Summary        : 0 opened, 0 closed, 0 adjusted. Realized P&L: USD 0. 3 positions op...
+
+  HARNESS SUMMARY
++-----------------+----------------------------+---------------------+
+| Phase           | Workflow                   | Status              |
++=================+============================+=====================+
+| 1-PreMarket     | market_context             | OK                  |
++-----------------+----------------------------+---------------------+
+| 1-PreMarket     | snapshot_market            | OK                  |
++-----------------+----------------------------+---------------------+
+| 1-PreMarket     | check_portfolio_health     | OK                  |
++-----------------+----------------------------+---------------------+
+| 1-PreMarket     | generate_daily_plan        | OK                  |
++-----------------+----------------------------+---------------------+
+| 2-Scanning      | scan_universe              | OK                  |
++-----------------+----------------------------+---------------------+
+| 2-Scanning      | rank_opportunities         | OK                  |
++-----------------+----------------------------+---------------------+
+| 3-Entry         | validate_trade             | OK                  |
++-----------------+----------------------------+---------------------+
+| 3-Entry         | size_position              | OK                  |
++-----------------+----------------------------+---------------------+
+| 3-Entry         | price_trade                | OK                  |
++-----------------+----------------------------+---------------------+
+| 4-Monitoring    | monitor_positions          | OK                  |
++-----------------+----------------------------+---------------------+
+| 4-Monitoring    | adjust_position            | SKIP (no positions) |
++-----------------+----------------------------+---------------------+
+| 4-Monitoring    | assess_overnight_risk      | SKIP (no positions) |
++-----------------+----------------------------+---------------------+
+| 5-PortfolioRisk | aggregate_portfolio_greeks | OK                  |
++-----------------+----------------------------+---------------------+
+| 5-PortfolioRisk | stress_test_portfolio      | OK                  |
++-----------------+----------------------------+---------------------+
+| 6-Calendar      | check_expiry_day           | OK                  |
++-----------------+----------------------------+---------------------+
+| 7-Reporting     | generate_daily_report      | OK                  |
++-----------------+----------------------------+---------------------+
+
+  Total: 16  |  Passed: 14  |  Failed: 2
+
+  Harness complete.
+
