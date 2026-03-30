@@ -39,6 +39,9 @@ class TradeProposal(BaseModel):
     wing_width: float | None = None
     target_dte: int | None = None
     expiry: str | None = None  # Expiration date (ISO string from TradeSpec legs)
+    current_price: float | None = None  # Underlying price at time of ranking
+    regime_id: int | None = None  # Regime at time of ranking
+    atr_pct: float | None = None  # ATR% at time of ranking
     lot_size: int | None = None
     currency: str = "USD"
     rationale: str = ""
