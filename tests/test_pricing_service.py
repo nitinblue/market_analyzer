@@ -1,7 +1,7 @@
-"""Tests for RepricedTrade, LegDetail models and reprice_trade function."""
+"""Tests for RepricedTrade, LegDetail models and reprice_trade / batch_reprice."""
 
 from datetime import date
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from pydantic import ValidationError
@@ -10,6 +10,7 @@ from income_desk.models.opportunity import LegAction
 from income_desk.workflow.pricing_service import (
     LegDetail,
     RepricedTrade,
+    batch_reprice,
     reprice_trade,
 )
 
@@ -254,3 +255,63 @@ class TestRepriceTradeFunction:
         assert result.legs_found is True
         assert result.liquidity_ok is False
         assert result.block_reason is None
+
+
+# ── batch_reprice tests ──
+
+
+def _make_entry(ticker: str, regime_id: int = 1, **overrides) -> dict:
+    """Build a minimal entry dict for batch_reprice."""
+    legs, _ = _ic_chain_and_legs()
+    ts = _mock_trade_spec(legs)
+    entry = {"ticker": ticker, "trade_spec": ts, "regime_id": regime_id}
+    entry.update(overrides)
+    return entry
+
+
+class TestBatchRepriceFetchesChainOnce:
+    @patch("income_desk.workflow.pricing_service.time.sleep")
+    def test_batch_reprice_fetches_chain_once(self, mock_sleep):
+        """Two entries for the same ticker -> get_option_chain called once."""
+        _, chain = _ic_chain_and_legs()
+        md = MagicMock()
+        md.get_option_chain.return_value = chain
+        md.get_underlying_price.return_value = 555.0
+
+        entries = [_make_entry("SPY"), _make_entry("SPY")]
+        results = batch_reprice(entries, market_data=md)
+
+        assert len(results) == 2
+        md.get_option_chain.assert_called_once_with("SPY")
+        # No sleep needed — only one ticker
+        mock_sleep.assert_not_called()
+
+
+class TestBatchRepriceDifferentTickers:
+    @patch("income_desk.workflow.pricing_service.time.sleep")
+    def test_batch_reprice_different_tickers(self, mock_sleep):
+        """Two entries for different tickers -> get_option_chain called twice."""
+        _, chain = _ic_chain_and_legs()
+        md = MagicMock()
+        md.get_option_chain.return_value = chain
+        md.get_underlying_price.return_value = 555.0
+
+        entries = [_make_entry("SPY"), _make_entry("QQQ")]
+        results = batch_reprice(entries, market_data=md)
+
+        assert len(results) == 2
+        assert md.get_option_chain.call_count == 2
+        # Sleep between tickers (not before the first)
+        mock_sleep.assert_called_once_with(4)
+
+
+class TestBatchRepriceNoMarketData:
+    def test_batch_reprice_no_market_data(self):
+        """market_data=None -> all entries blocked."""
+        entries = [_make_entry("SPY"), _make_entry("QQQ")]
+        results = batch_reprice(entries, market_data=None)
+
+        assert len(results) == 2
+        for r in results:
+            assert r.credit_source == "blocked"
+            assert "No market_data" in r.block_reason

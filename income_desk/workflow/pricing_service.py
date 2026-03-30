@@ -6,10 +6,15 @@ No downstream code should overwrite entry_credit after this.
 
 from __future__ import annotations
 
+import logging
+import time
+
 from pydantic import BaseModel
 
 from income_desk.models.opportunity import TradeSpec
 from income_desk.models.quotes import OptionQuote
+
+logger = logging.getLogger(__name__)
 
 
 class LegDetail(BaseModel):
@@ -216,3 +221,99 @@ def reprice_trade(
         block_reason=None,
         leg_details=leg_details,
     )
+
+
+# ── Batch repricing ──
+
+
+def batch_reprice(
+    entries: list[dict],
+    market_data=None,
+    technicals_service=None,
+) -> list[RepricedTrade]:
+    """Reprice multiple trades, fetching chain once per ticker.
+
+    Groups entries by ticker so that ``get_option_chain`` is called at most
+    once per unique ticker.  A 4-second sleep is inserted between tickers
+    to respect Dhan's rate limit (1 req / 3 s).
+
+    Args:
+        entries: list of dicts with keys:
+            - ticker (str)
+            - trade_spec (TradeSpec)
+            - regime_id (int)
+            - atr_pct (float, optional)
+            - current_price (float, optional)
+        market_data: MarketDataProvider (has get_option_chain,
+            get_underlying_price).
+        technicals_service: Optional service with
+            ``.snapshot(ticker)`` returning an object with
+            ``.current_price`` and ``.atr_pct``.
+
+    Returns:
+        list of RepricedTrade in the same order as *entries*.
+    """
+    if not entries:
+        return []
+
+    # --- per-ticker cache ---
+    ticker_cache: dict[str, dict] = {}  # ticker -> {price, atr_pct, chain}
+    unique_tickers = list(dict.fromkeys(e["ticker"] for e in entries))
+
+    for idx, ticker in enumerate(unique_tickers):
+        # Price resolution
+        price = 0.0
+        atr_pct = 1.0
+
+        if technicals_service is not None:
+            try:
+                snap = technicals_service.snapshot(ticker)
+                if snap is not None:
+                    if hasattr(snap, "current_price") and snap.current_price:
+                        price = snap.current_price
+                    if hasattr(snap, "atr_pct") and snap.atr_pct:
+                        atr_pct = snap.atr_pct
+            except Exception:
+                logger.debug("technicals_service.snapshot(%s) failed", ticker)
+
+        if price <= 0 and market_data is not None:
+            try:
+                price = market_data.get_underlying_price(ticker) or 0.0
+            except Exception:
+                logger.debug("market_data.get_underlying_price(%s) failed", ticker)
+
+        # Chain fetch (rate-limited)
+        chain: list = []
+        if market_data is not None:
+            if idx > 0:
+                time.sleep(4)
+            try:
+                chain = market_data.get_option_chain(ticker) or []
+            except Exception:
+                logger.debug("market_data.get_option_chain(%s) failed", ticker)
+
+        ticker_cache[ticker] = {"price": price, "atr_pct": atr_pct, "chain": chain}
+
+    # --- reprice each entry ---
+    results: list[RepricedTrade] = []
+    for entry in entries:
+        ticker = entry["ticker"]
+        trade_spec = entry["trade_spec"]
+        regime_id = entry["regime_id"]
+
+        cached = ticker_cache[ticker]
+        price = entry.get("current_price") or cached["price"]
+        atr = entry.get("atr_pct") or cached["atr_pct"]
+        chain = cached["chain"]
+
+        if market_data is None:
+            results.append(
+                _blocked(ticker, trade_spec, price, atr, regime_id,
+                         "No market_data provider")
+            )
+        else:
+            results.append(
+                reprice_trade(trade_spec, chain, ticker, price, atr, regime_id)
+            )
+
+    return results
