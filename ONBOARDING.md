@@ -175,6 +175,57 @@ Just open Claude in the project directory. Claude reads the memory files and kno
 | `docs/project_integration_living.md` | APIs, contracts, boundaries |
 | `docs/project_vision_info.md` | Mission, philosophy |
 
+## Setting Up Other Projects (Cleaning Up Existing MD Mess)
+
+If you have a project with scattered .md files and no structure, open Claude in that project directory and say:
+
+```
+Read ~/.claude/skills/project-management.md.
+This project has scattered MD files that need consolidation.
+Set up the standard memory structure, migrate everything
+relevant into the 10 intake/info files, archive the rest.
+Run project_status.py when done.
+```
+
+### What Claude will do automatically:
+
+1. Read the global skill (knows the full system)
+2. Scan ALL existing .md files in the project
+3. For each file, categorize: decision? bug? feature? learning? reference? gap? risk?
+4. Create `<package>/memory/` with the 10 standard files
+5. Migrate content from scattered files into the right intake/info file
+6. Archive originals to `docs/archive/`
+7. Create `MEMORY.md` registry
+8. Copy `scripts/project_status.py` (auto-discovers memory dir)
+9. Ask for business objectives — populate `objectives_info.md` with go-live checklist
+10. Run `python scripts/project_status.py` to show the clean state
+11. Identify all action items discovered during migration — add to intake files with keys
+12. Map blockers to objectives
+13. Report: "Found X bugs, Y features, Z gaps. Skin in the Game: N/100."
+
+### What YOU do:
+
+Nothing. One prompt. Claude does the cleanup. The skill is the instruction manual.
+
+### For Priyanka's machine setup:
+
+```bash
+# 1. Install the skill (one-time)
+mkdir -p ~/.claude/skills
+# Copy project-management.md from Nitin's machine or download from repo
+
+# 2. Create user profile (one-time)
+# Create ~/.claude/user_info.md with your details
+
+# 3. Clone any project — memory files are already in the repo
+git clone <repo>
+cd <project>
+python scripts/project_status.py   # see where things stand
+
+# 4. Start Claude — it knows what to do
+claude
+```
+
 ## Team
 
 | Name | Role |
