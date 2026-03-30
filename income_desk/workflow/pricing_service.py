@@ -350,11 +350,12 @@ def batch_reprice(
             except Exception:
                 logger.debug("market_data.get_underlying_price(%s) failed", ticker)
 
-        # Chain fetch (rate-limited)
+        # Chain fetch (rate-limited for Dhan only — TastyTrade/DXLink has no rate limit)
         chain: list = []
         if market_data is not None:
-            if idx > 0:
-                time.sleep(4)
+            provider = getattr(market_data, "provider_name", "")
+            if idx > 0 and provider == "dhan":
+                time.sleep(4)  # Dhan: 1 req / 3 sec
             try:
                 chain = market_data.get_option_chain(ticker) or []
             except Exception:
