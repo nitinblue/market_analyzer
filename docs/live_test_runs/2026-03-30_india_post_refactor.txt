@@ -1,0 +1,629 @@
+
+  Connecting to India market...
+
+  No open positions found in broker account.
+
+  No broker positions — using demo positions.
++------------------------------------------------------------------+
+|                         WORKFLOW HARNESS                         |
++------------------------------------------------------------------+
+| Market: India                                                    |
+| Broker: dhan                                                     |
+| Data:   LIVE quotes (market open)                                |
+| Account: NLV INR 0  |  BP N/A                                    |
++------------------------------------------------------------------+
+
+
+############################################################
+  PHASE 1: PRE-MARKET -health check, daily plan, market snapshot
+############################################################
+
+============================================================
+  MARKET CONTEXT
+============================================================
+  CLI: analyzer-cli> context
+
+  Environment   : cautious
+  Trading       : ALLOWED
+  Size Factor   : 75%
+  Risk Level    : elevated (score: 0.29)
+
+  Macro events next 7 days:
+
+  Upcoming Events
++------------+-------------------+----------+
+| Date       | Event             | Impact   |
++============+===================+==========+
+| 2026-04-03 | Non-Farm Payrolls | high     |
++------------+-------------------+----------+
+
+
+  Intermarket Dashboard
++-------------+----------+--------------+-------------+
+| Ticker      | Regime   | Confidence   | Direction   |
++=============+==========+==============+=============+
+| ^NSEI       | R4       | 100%         | bearish     |
++-------------+----------+--------------+-------------+
+| ^NSEBANK    | R3       | 100%         | bearish     |
++-------------+----------+--------------+-------------+
+| GOLDBEES.NS | R4       | 92%          | bearish     |
++-------------+----------+--------------+-------------+
+
+
+  Environment: cautious | Black swan: elevated | Macro events next 7d: 1
+
+============================================================
+  WORKFLOW: snapshot_market
+============================================================
+  Request:  SnapshotRequest
+  Returns:  MarketSnapshot
+  ----------------------------------------
+    tickers: ['NIFTY', 'BANKNIFTY', 'RELIANCE', 'TCS', 'HDFCBANK', 'ICICIBANK', 'SBIN']
+    include_chains: False
+    include_regime: True
+    market: 'India'
+
+  CLI: analyzer-cli> snapshot NIFTY BANKNIFTY RELIANCE ...
+
+
+  Market Snapshot
++-----------+---------------+-------------------+-------+--------+-------+
+| Ticker    | Price         | Regime            |   IVR | ATR%   |   RSI |
++===========+===============+===================+=======+========+=======+
+| NIFTY     | INR 22,457.65 | R4 High-Vol Trend |    22 | 2.06%  |  33.4 |
++-----------+---------------+-------------------+-------+--------+-------+
+| BANKNIFTY | INR 50,647.90 | R4 High-Vol Trend |    61 | 2.68%  |  30.1 |
++-----------+---------------+-------------------+-------+--------+-------+
+| RELIANCE  | INR 1,345.20  | R1 Low-Vol MR     |     0 | 2.37%  |  38.1 |
++-----------+---------------+-------------------+-------+--------+-------+
+| TCS       | INR 2,366.00  | R2 High-Vol MR    |     0 | 2.44%  |  29.6 |
++-----------+---------------+-------------------+-------+--------+-------+
+| HDFCBANK  | INR 737.20    | R4 High-Vol Trend |    16 | 3.55%  |  28.2 |
++-----------+---------------+-------------------+-------+--------+-------+
+| ICICIBANK | INR 1,214.60  | R2 High-Vol MR    |     0 | 2.42%  |  32.8 |
++-----------+---------------+-------------------+-------+--------+-------+
+| SBIN      | INR 988.50    | R2 High-Vol MR    |     5 | 3.25%  |  31.6 |
++-----------+---------------+-------------------+-------+--------+-------+
+
+
+============================================================
+  WORKFLOW: check_portfolio_health
+============================================================
+  Request:  HealthRequest
+  Returns:  HealthResponse
+  ----------------------------------------
+    tickers: ['NIFTY', 'BANKNIFTY', 'RELIANCE', 'TCS', 'HDFCBANK', 'ICICIBANK', 'SBIN']
+    capital: 50000.0
+    total_risk_deployed: 0.0
+    market: 'India'
+
+  CLI: analyzer-cli> health
+
+  Market Safety : RED
+  Safe to Trade : False
+  Risk %        : 0.0%
+  Risk Budget   : 15,000
+  Data Trust    : medium (80%)
+
+  Regime Map
++-----------+------+-------------------+-------------+
+| Ticker    |   ID | Label             | Tradeable   |
++===========+======+===================+=============+
+| NIFTY     |    4 | R4 High-Vol Trend | N           |
++-----------+------+-------------------+-------------+
+| BANKNIFTY |    4 | R4 High-Vol Trend | N           |
++-----------+------+-------------------+-------------+
+| RELIANCE  |    1 | R1 Low-Vol MR     | Y           |
++-----------+------+-------------------+-------------+
+| TCS       |    2 | R2 High-Vol MR    | Y           |
++-----------+------+-------------------+-------------+
+| HDFCBANK  |    4 | R4 High-Vol Trend | N           |
++-----------+------+-------------------+-------------+
+| ICICIBANK |    2 | R2 High-Vol MR    | Y           |
++-----------+------+-------------------+-------------+
+| SBIN      |    2 | R2 High-Vol MR    | Y           |
++-----------+------+-------------------+-------------+
+
+
+============================================================
+  WORKFLOW: generate_daily_plan
+============================================================
+  Request:  DailyPlanRequest
+  Returns:  DailyPlanResponse
+  ----------------------------------------
+    tickers: ['NIFTY', 'BANKNIFTY', 'RELIANCE', 'TCS', 'HDFCBANK', 'ICICIBANK', 'SBIN']
+    capital: 50000.0
+    market: 'India'
+    risk_tolerance: 'moderate'
+    total_risk_deployed: 0.0
+    max_new_trades: 5
+    iv_rank_map: {'NIFTY': 22.4, 'BANKNIFTY': 61.2, 'RELIANCE': 0.0, 'TCS': 0.0, 'HDFCBANK': 16.0, 'ICICIBANK': 0.0, 'SBIN': 3.1}
+
+  CLI: analyzer-cli> plan
+
+  Market Safety : RED
+  Safe to Trade : False
+  Tradeable     : 
+  Capital       : INR 50,000
+  Risk Deployed : 0.0%
+  Risk Budget   : 15,000
+  Summary  : Market Safety: RED — trading halted. 7 tickers scanned.
+
+############################################################
+  PHASE 2: SCANNING -scan universe, rank opportunities
+############################################################
+
+============================================================
+  WORKFLOW: scan_universe
+============================================================
+  Request:  ScanRequest
+  Returns:  ScanResponse
+  ----------------------------------------
+    tickers: ['NIFTY', 'BANKNIFTY', 'RELIANCE', 'TCS', 'HDFCBANK', 'ICICIBANK', 'SBIN']
+    market: 'India'
+    min_score: 0.3
+    top_n: 20
+
+  CLI: analyzer-cli> scan
+
+  Scanned: 7  |  Passed: 7
+
+  Scan Candidates
++-----------+---------+----------------+----------------------------------------------------+
+| Ticker    |   Score | Regime         | Rationale                                          |
++===========+=========+================+====================================================+
+| RELIANCE  |    0.95 | R1 Low-Vol MR  | R1 ideal for income; RSI 38 (neutral range); AT... |
++-----------+---------+----------------+----------------------------------------------------+
+| TCS       |    0.65 | R2 High-Vol MR | R2 selective income; ATR% 2.44 (moderate); High... |
++-----------+---------+----------------+----------------------------------------------------+
+| ICICIBANK |    0.65 | R2 High-Vol MR | R2 selective income; ATR% 2.42 (moderate); High... |
++-----------+---------+----------------+----------------------------------------------------+
+
+
+============================================================
+  WORKFLOW: rank_opportunities
+============================================================
+  Request:  RankRequest
+  Returns:  RankResponse
+  ----------------------------------------
+    tickers: ['RELIANCE', 'TCS', 'ICICIBANK']
+    capital: 50000.0
+    market: 'India'
+    risk_tolerance: 'moderate'
+    iv_rank_map: {'RELIANCE': 0.0, 'TCS': 0.0, 'ICICIBANK': 0.0}
+    skip_intraday: True
+    max_trades: 10
+    min_pop: 0.4
+
+  CLI: analyzer-cli> rank RELIANCE TCS ICICIBANK
+
+  Tradeable: 3  |  Total assessed: 33
+
+  Blocked
++-----------+---------------+---------+---------------------------------+
+| Ticker    | Structure     |   Score | Reason                          |
++===========+===============+=========+=================================+
+| ICICIBANK | credit_spread |    0.58 | Missing strikes in liquid chain |
++-----------+---------------+---------+---------------------------------+
+| RELIANCE  | credit_spread |    0.44 | Missing strikes in liquid chain |
++-----------+---------------+---------+---------------------------------+
+| ICICIBANK | credit_spread |    0.31 | Missing strikes in liquid chain |
++-----------+---------------+---------+---------------------------------+
+
+
+############################################################
+  PHASE 3: TRADE ENTRY -validate, size, price
+############################################################
+
+  (Using demo proposal for NIFTY)
+
+============================================================
+  WORKFLOW: validate_trade
+============================================================
+  Request:  ValidateRequest
+  Returns:  ValidateResponse
+  ----------------------------------------
+    ticker: 'NIFTY'
+    entry_credit: 85.0
+    regime_id: 1
+    atr_pct: 2.1
+    current_price: 23000.0
+    dte: 21
+    rsi: 50.0
+    iv_rank: 50.0
+    contracts: 1
+    avg_bid_ask_spread_pct: 0.03
+    trade_spec: None
+
+  CLI: analyzer-cli> validate NIFTY
+
+  Ready?       : True
+  Failed gates : []
+  Warnings     : trade_spec auto-generated for validation (no actual legs provided)
+
+  Gate Scorecard
++-------------------+----------+------------+----------------------------------------------------+
+| Gate              | Status   | Severity   | Detail                                             |
++===================+==========+============+====================================================+
+| commission_drag   | PASS     | pass       |                                                    |
++-------------------+----------+------------+----------------------------------------------------+
+| fill_quality      | PASS     | pass       |                                                    |
++-------------------+----------+------------+----------------------------------------------------+
+| margin_efficiency | PASS     | warn       |                                                    |
++-------------------+----------+------------+----------------------------------------------------+
+| pop_gate          | PASS     | pass       | pop_pct: 68.6% from regime R1, atr_pct 2.10%, p... |
++-------------------+----------+------------+----------------------------------------------------+
+| ev_positive       | PASS     | warn       | expected_value: $0.00/contract from POP 68.6% ×... |
++-------------------+----------+------------+----------------------------------------------------+
+| entry_quality     | PASS     | pass       | score: 0.80 (threshold 0.60), regime R1, iv_ran... |
++-------------------+----------+------------+----------------------------------------------------+
+| exit_discipline   | PASS     | warn       | profit_target_pct=None, stop_loss_pct=None, exi... |
++-------------------+----------+------------+----------------------------------------------------+
+| strike_proximity  | PASS     | warn       | Pass levels from ma.levels.analyze() for strike... |
++-------------------+----------+------------+----------------------------------------------------+
+| earnings_blackout | PASS     | pass       |                                                    |
++-------------------+----------+------------+----------------------------------------------------+
+| iv_rank_quality   | PASS     | pass       |                                                    |
++-------------------+----------+------------+----------------------------------------------------+
+
+
+============================================================
+  WORKFLOW: size_position
+============================================================
+  Request:  SizeRequest
+  Returns:  SizeResponse
+  ----------------------------------------
+    pop_pct: 68.0
+    max_profit: 2125.0
+    max_loss: 10375.0
+    capital: 50000.0
+    risk_per_contract: 12500.0
+    regime_id: 1
+    wing_width: 500.0
+    safety_factor: 0.5
+    max_contracts: 20
+
+  CLI: analyzer-cli> size
+
+  Contracts    : 0
+  Kelly Sizing : 0.000
+  Risk/contract: INR 12,500
+  Total risk   : INR 0
+  Risk % Capital: 0.0%
+
+============================================================
+  WORKFLOW: price_trade
+============================================================
+  Request:  PriceRequest
+  Returns:  PriceResponse
+  ----------------------------------------
+    ticker: 'NIFTY'
+    legs: [{'strike': 22275.0, 'option_type': 'put', 'action': 'sell'}, {'strike': 21551.0, 'option_type': 'put', 'action': 'buy'}]
+    market: 'India'
+
+  CLI: analyzer-cli> price NIFTY
+
+  Underlying   : INR 22,465.15
+  Net credit   : INR 0.00
+  Net debit    : INR -0.00
+  Avg spread % : 0.00%
+  Fill quality : tight
+
+  Leg Quotes
++-----------------+----------+----------+----------+----------+------+---------+
+| Instrument      | Action   | Bid      | Ask      | Mid      | IV   | Delta   |
++=================+==========+==========+==========+==========+======+=========+
+| NIFTY  22275 PE | sell     | INR 0.00 | INR 0.00 | INR 0.00 | N/A  | N/A     |
++-----------------+----------+----------+----------+----------+------+---------+
+| NIFTY  21551 PE | buy      | INR 0.00 | INR 0.00 | INR 0.00 | N/A  | N/A     |
++-----------------+----------+----------+----------+----------+------+---------+
+
+
+############################################################
+  PHASE 4: MONITORING -monitor positions, adjust, overnight risk
+############################################################
+  Loaded 7 what-if positions from test_portfolio_india.json
+
+  Using 7 demo positions
+
+============================================================
+  WORKFLOW: monitor_positions
+============================================================
+  Request:  MonitorRequest
+  Returns:  MonitorResponse
+  ----------------------------------------
+    positions: [OpenPosition(trade_id='NIFTY-iron_butterfly-2026-03-30', ticker='NIFTY', structure_type='iron_butterfly', order_side='credit', entry_price=115.22, current_mid_price=92.176, contracts=1, dte_remaining=0, regime_id=1, lot_size=25, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='NIFTY-debit_spread_put-2026-03-30', ticker='NIFTY', structure_type='debit_spread', order_side='debit', entry_price=0.56, current_mid_price=0.44800000000000006, contracts=1, dte_remaining=0, regime_id=1, lot_size=25, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='BANKNIFTY-iron_condor-2026-03-30', ticker='BANKNIFTY', structure_type='iron_condor', order_side='credit', entry_price=1.48, current_mid_price=1.184, contracts=1, dte_remaining=0, regime_id=1, lot_size=15, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='BANKNIFTY-iron_butterfly-2026-03-30', ticker='BANKNIFTY', structure_type='iron_butterfly', order_side='credit', entry_price=259.08, current_mid_price=207.264, contracts=1, dte_remaining=0, regime_id=1, lot_size=15, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='BANKNIFTY-debit_spread_put-2026-03-30', ticker='BANKNIFTY', structure_type='debit_spread', order_side='debit', entry_price=1.43, current_mid_price=1.144, contracts=1, dte_remaining=0, regime_id=1, lot_size=15, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='BANKNIFTY-strangle-2026-03-30', ticker='BANKNIFTY', structure_type='strangle', order_side='credit', entry_price=3.09, current_mid_price=2.472, contracts=1, dte_remaining=0, regime_id=1, lot_size=15, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='TATAMOTORS-debit_spread_put-2026-03-30', ticker='TATAMOTORS', structure_type='debit_spread', order_side='debit', entry_price=0.32, current_mid_price=0.256, contracts=1, dte_remaining=0, regime_id=1, lot_size=1125, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe')]
+    market: 'India'
+
+  CLI: analyzer-cli> monitor
+
+  Actions needed : 0
+  Critical count : 7
+
+  Position Statuses
++----------------------------------------+------------+----------+-----------+--------+-------------+
+| TradeID                                | Ticker     | Action   | Urgency   | PnL%   | Rationale   |
++========================================+============+==========+===========+========+=============+
+| NIFTY-iron_butterfly-2026-03-30        | NIFTY      | hold     | critical  | 20.0%  |             |
++----------------------------------------+------------+----------+-----------+--------+-------------+
+| NIFTY-debit_spread_put-2026-03-30      | NIFTY      | hold     | critical  | -20.0% |             |
++----------------------------------------+------------+----------+-----------+--------+-------------+
+| BANKNIFTY-iron_condor-2026-03-30       | BANKNIFTY  | hold     | critical  | 20.0%  |             |
++----------------------------------------+------------+----------+-----------+--------+-------------+
+| BANKNIFTY-iron_butterfly-2026-03-30    | BANKNIFTY  | hold     | critical  | 20.0%  |             |
++----------------------------------------+------------+----------+-----------+--------+-------------+
+| BANKNIFTY-debit_spread_put-2026-03-30  | BANKNIFTY  | hold     | critical  | -20.0% |             |
++----------------------------------------+------------+----------+-----------+--------+-------------+
+| BANKNIFTY-strangle-2026-03-30          | BANKNIFTY  | hold     | critical  | 20.0%  |             |
++----------------------------------------+------------+----------+-----------+--------+-------------+
+| TATAMOTORS-debit_spread_put-2026-03-30 | TATAMOTORS | hold     | critical  | -20.0% |             |
++----------------------------------------+------------+----------+-----------+--------+-------------+
+
+
+============================================================
+  WORKFLOW: adjust_position
+============================================================
+  Request:  AdjustRequest
+  Returns:  AdjustResponse
+  ----------------------------------------
+    trade_id: 'NIFTY-iron_butterfly-2026-03-30'
+    ticker: 'NIFTY'
+    structure_type: 'iron_butterfly'
+    order_side: 'credit'
+    entry_price: 115.22
+    current_mid_price: 92.176
+    contracts: 1
+    dte_remaining: 0
+    regime_id: 1
+    pnl_pct: 0.19999999999999998
+
+  CLI: analyzer-cli> adjust NIFTY-iron_butterfly-2026-03-30
+
+  Trade ID    : NIFTY-iron_butterfly-2026-03-30
+  Ticker      : NIFTY
+  Action      : roll_out
+  Urgency     : medium
+  Rationale   : Low DTE (0d) with unrealized profit < 30%
+
+  Alternatives
++----------+-----------+---------------------------------------+
+| Action   | Urgency   | Rationale                             |
++==========+===========+=======================================+
+| close    | medium    | Take current P&L and redeploy capital |
++----------+-----------+---------------------------------------+
+
+
+============================================================
+  WORKFLOW: assess_overnight_risk
+============================================================
+  Request:  OvernightRiskRequest
+  Returns:  OvernightRiskResponse
+  ----------------------------------------
+    positions: [OpenPosition(trade_id='NIFTY-iron_butterfly-2026-03-30', ticker='NIFTY', structure_type='iron_butterfly', order_side='credit', entry_price=115.22, current_mid_price=92.176, contracts=1, dte_remaining=0, regime_id=1, lot_size=25, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='NIFTY-debit_spread_put-2026-03-30', ticker='NIFTY', structure_type='debit_spread', order_side='debit', entry_price=0.56, current_mid_price=0.44800000000000006, contracts=1, dte_remaining=0, regime_id=1, lot_size=25, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='BANKNIFTY-iron_condor-2026-03-30', ticker='BANKNIFTY', structure_type='iron_condor', order_side='credit', entry_price=1.48, current_mid_price=1.184, contracts=1, dte_remaining=0, regime_id=1, lot_size=15, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='BANKNIFTY-iron_butterfly-2026-03-30', ticker='BANKNIFTY', structure_type='iron_butterfly', order_side='credit', entry_price=259.08, current_mid_price=207.264, contracts=1, dte_remaining=0, regime_id=1, lot_size=15, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='BANKNIFTY-debit_spread_put-2026-03-30', ticker='BANKNIFTY', structure_type='debit_spread', order_side='debit', entry_price=1.43, current_mid_price=1.144, contracts=1, dte_remaining=0, regime_id=1, lot_size=15, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='BANKNIFTY-strangle-2026-03-30', ticker='BANKNIFTY', structure_type='strangle', order_side='credit', entry_price=3.09, current_mid_price=2.472, contracts=1, dte_remaining=0, regime_id=1, lot_size=15, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='TATAMOTORS-debit_spread_put-2026-03-30', ticker='TATAMOTORS', structure_type='debit_spread', order_side='debit', entry_price=0.32, current_mid_price=0.256, contracts=1, dte_remaining=0, regime_id=1, lot_size=1125, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe')]
+    market: 'India'
+
+  CLI: analyzer-cli> overnight
+
+  High risk count       : 7
+  Close-before-close    : 7
+
+  Overnight Risk
++----------------------------------------+------------+--------------------+----------+-------------+
+| TradeID                                | Ticker     | Risk               | Action   | Rationale   |
++========================================+============+====================+==========+=============+
+| NIFTY-iron_butterfly-2026-03-30        | NIFTY      | close_before_close | hold     |             |
++----------------------------------------+------------+--------------------+----------+-------------+
+| NIFTY-debit_spread_put-2026-03-30      | NIFTY      | close_before_close | hold     |             |
++----------------------------------------+------------+--------------------+----------+-------------+
+| BANKNIFTY-iron_condor-2026-03-30       | BANKNIFTY  | close_before_close | hold     |             |
++----------------------------------------+------------+--------------------+----------+-------------+
+| BANKNIFTY-iron_butterfly-2026-03-30    | BANKNIFTY  | close_before_close | hold     |             |
++----------------------------------------+------------+--------------------+----------+-------------+
+| BANKNIFTY-debit_spread_put-2026-03-30  | BANKNIFTY  | close_before_close | hold     |             |
++----------------------------------------+------------+--------------------+----------+-------------+
+| BANKNIFTY-strangle-2026-03-30          | BANKNIFTY  | close_before_close | hold     |             |
++----------------------------------------+------------+--------------------+----------+-------------+
+| TATAMOTORS-debit_spread_put-2026-03-30 | TATAMOTORS | close_before_close | hold     |             |
++----------------------------------------+------------+--------------------+----------+-------------+
+
+
+############################################################
+  PHASE 5: PORTFOLIO RISK -Greeks aggregation, stress test
+############################################################
+  Loaded 7 what-if positions from test_portfolio_india.json
+
+  Using 7 demo positions
+
+============================================================
+  WORKFLOW: aggregate_portfolio_greeks
+============================================================
+  Request:  PortfolioGreeksRequest
+  Returns:  PortfolioGreeksResponse
+  ----------------------------------------
+    legs: [PositionLeg(ticker='NIFTY', option_type='put', strike=0.0, expiration='2026-04-17', contracts=1, lot_size=25, action='short', delta=-0.15, gamma=0.02, theta=-0.05, vega=0.1, implied_volatility=0.2, market_value=2880.5), PositionLeg(ticker='NIFTY', option_type='put', strike=0.0, expiration='2026-04-17', contracts=1, lot_size=25, action='short', delta=-0.15, gamma=0.02, theta=-0.05, vega=0.1, implied_volatility=0.2, market_value=14.000000000000002), PositionLeg(ticker='BANKNIFTY', option_type='put', strike=0.0, expiration='2026-04-17', contracts=1, lot_size=15, action='short', delta=-0.15, gamma=0.02, theta=-0.05, vega=0.1, implied_volatility=0.2, market_value=22.2), PositionLeg(ticker='BANKNIFTY', option_type='put', strike=0.0, expiration='2026-04-17', contracts=1, lot_size=15, action='short', delta=-0.15, gamma=0.02, theta=-0.05, vega=0.1, implied_volatility=0.2, market_value=3886.2), PositionLeg(ticker='BANKNIFTY', option_type='put', strike=0.0, expiration='2026-04-17', contracts=1, lot_size=15, action='short', delta=-0.15, gamma=0.02, theta=-0.05, vega=0.1, implied_volatility=0.2, market_value=21.45), PositionLeg(ticker='BANKNIFTY', option_type='put', strike=0.0, expiration='2026-04-17', contracts=1, lot_size=15, action='short', delta=-0.15, gamma=0.02, theta=-0.05, vega=0.1, implied_volatility=0.2, market_value=46.349999999999994), PositionLeg(ticker='TATAMOTORS', option_type='put', strike=0.0, expiration='2026-04-17', contracts=1, lot_size=1125, action='short', delta=-0.15, gamma=0.02, theta=-0.05, vega=0.1, implied_volatility=0.2, market_value=360.0)]
+    market: 'India'
+
+  CLI: analyzer-cli> greeks
+
+  Portfolio Delta : +185.25
+  Portfolio Gamma : -24.7000
+  Portfolio Theta : INR +61.75
+  Portfolio Vega  : -123.50
+  Market Value    : INR -7,231
+  Largest Delta   : TATAMOTORS: +169 delta
+  Largest Vega    : TATAMOTORS: -112.5 vega
+
+  Greeks by Underlying
++------------+--------+---------+---------+------------+--------+------+
+| Ticker     |   Legs |   Delta |   Gamma | Theta      |   Vega | IV   |
++============+========+=========+=========+============+========+======+
+| NIFTY      |      2 |    7.5  |    -1   | INR +2.50  |   -5   | 20%  |
++------------+--------+---------+---------+------------+--------+------+
+| BANKNIFTY  |      4 |    9    |    -1.2 | INR +3.00  |   -6   | 20%  |
++------------+--------+---------+---------+------------+--------+------+
+| TATAMOTORS |      1 |  168.75 |   -22.5 | INR +56.25 | -112.5 | 20%  |
++------------+--------+---------+---------+------------+--------+------+
+
+
+  [ERROR] aggregate_portfolio_greeks: UnicodeEncodeError: 'charmap' codec can't encode character '\u26a0' in position 2: character maps to <undefined>
+
+============================================================
+  WORKFLOW: stress_test_portfolio
+============================================================
+  Request:  StressTestRequest
+  Returns:  StressTestResponse
+  ----------------------------------------
+    positions: [OpenPosition(trade_id='NIFTY-iron_butterfly-2026-03-30', ticker='NIFTY', structure_type='iron_butterfly', order_side='credit', entry_price=115.22, current_mid_price=92.176, contracts=1, dte_remaining=0, regime_id=1, lot_size=25, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='NIFTY-debit_spread_put-2026-03-30', ticker='NIFTY', structure_type='debit_spread', order_side='debit', entry_price=0.56, current_mid_price=0.44800000000000006, contracts=1, dte_remaining=0, regime_id=1, lot_size=25, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='BANKNIFTY-iron_condor-2026-03-30', ticker='BANKNIFTY', structure_type='iron_condor', order_side='credit', entry_price=1.48, current_mid_price=1.184, contracts=1, dte_remaining=0, regime_id=1, lot_size=15, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='BANKNIFTY-iron_butterfly-2026-03-30', ticker='BANKNIFTY', structure_type='iron_butterfly', order_side='credit', entry_price=259.08, current_mid_price=207.264, contracts=1, dte_remaining=0, regime_id=1, lot_size=15, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='BANKNIFTY-debit_spread_put-2026-03-30', ticker='BANKNIFTY', structure_type='debit_spread', order_side='debit', entry_price=1.43, current_mid_price=1.144, contracts=1, dte_remaining=0, regime_id=1, lot_size=15, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='BANKNIFTY-strangle-2026-03-30', ticker='BANKNIFTY', structure_type='strangle', order_side='credit', entry_price=3.09, current_mid_price=2.472, contracts=1, dte_remaining=0, regime_id=1, lot_size=15, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='TATAMOTORS-debit_spread_put-2026-03-30', ticker='TATAMOTORS', structure_type='debit_spread', order_side='debit', entry_price=0.32, current_mid_price=0.256, contracts=1, dte_remaining=0, regime_id=1, lot_size=1125, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe')]
+    capital: 50000.0
+    market: 'India'
+    risk_limit_pct: 0.3
+    scenarios: None
+
+  CLI: analyzer-cli> stress
+
+  Worst scenario  : black_monday
+  Worst PnL       : INR -4,460 (-890.0%)
+  Best scenario   : gold_crash_10
+  Risk score      : caution
+  Portfolio at risk: INR 4,460
+
+  Scenario Results (top 10)
++-------------------------------------+------------+---------+-----------+
+| Scenario                            | PnL        | PnL%    | Breach?   |
++=====================================+============+=========+===========+
+| Black Monday (-30% Flash Crash)     | INR -4,460 | -890.0% | no        |
++-------------------------------------+------------+---------+-----------+
+| Correlation Spike (All Assets Down) | INR -3,098 | -620.0% | no        |
++-------------------------------------+------------+---------+-----------+
+| S&P 500 -20% Bear Market            | INR -2,481 | -500.0% | no        |
++-------------------------------------+------------+---------+-----------+
+| S&P 500 -10% Correction             | INR -1,335 | -270.0% | no        |
++-------------------------------------+------------+---------+-----------+
+| NIFTY -10% + INR Depreciation       | INR -1,104 | -220.0% | no        |
++-------------------------------------+------------+---------+-----------+
+| Geopolitical Shock                  | INR -960   | -190.0% | no        |
++-------------------------------------+------------+---------+-----------+
+| Rate Collapse / Flight to Safety    | INR -876   | -180.0% | no        |
++-------------------------------------+------------+---------+-----------+
+| FII Mass Selling                    | INR -844   | -170.0% | no        |
++-------------------------------------+------------+---------+-----------+
+| Risk-On Rally (+8%)                 | INR -811   | -160.0% | no        |
++-------------------------------------+------------+---------+-----------+
+| 10Y Yield +100bp Spike              | INR -709   | -140.0% | no        |
++-------------------------------------+------------+---------+-----------+
+
+  Most vulnerable : {'ticker': 'NIFTY', 'avg_scenario_loss': -212.41, 'worst_scenario': 'fii_selloff', 'worst_loss': -1784.28}, {'ticker': 'BANKNIFTY', 'avg_scenario_loss': -156.85, 'worst_scenario': 'tech_rotation', 'worst_loss': -2469.22}, {'ticker': 'TATAMOTORS', 'avg_scenario_loss': -17.88, 'worst_scenario': 'black_monday', 'worst_loss': -64.8}
+
+############################################################
+  PHASE 6: CALENDAR -expiry day check
+############################################################
+  Loaded 7 what-if positions from test_portfolio_india.json
+
+============================================================
+  WORKFLOW: check_expiry_day
+============================================================
+  Request:  ExpiryDayRequest
+  Returns:  ExpiryDayResponse
+  ----------------------------------------
+    positions: [OpenPosition(trade_id='NIFTY-iron_butterfly-2026-03-30', ticker='NIFTY', structure_type='iron_butterfly', order_side='credit', entry_price=115.22, current_mid_price=92.176, contracts=1, dte_remaining=0, regime_id=1, lot_size=25, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='NIFTY-debit_spread_put-2026-03-30', ticker='NIFTY', structure_type='debit_spread', order_side='debit', entry_price=0.56, current_mid_price=0.44800000000000006, contracts=1, dte_remaining=0, regime_id=1, lot_size=25, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='BANKNIFTY-iron_condor-2026-03-30', ticker='BANKNIFTY', structure_type='iron_condor', order_side='credit', entry_price=1.48, current_mid_price=1.184, contracts=1, dte_remaining=0, regime_id=1, lot_size=15, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='BANKNIFTY-iron_butterfly-2026-03-30', ticker='BANKNIFTY', structure_type='iron_butterfly', order_side='credit', entry_price=259.08, current_mid_price=207.264, contracts=1, dte_remaining=0, regime_id=1, lot_size=15, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='BANKNIFTY-debit_spread_put-2026-03-30', ticker='BANKNIFTY', structure_type='debit_spread', order_side='debit', entry_price=1.43, current_mid_price=1.144, contracts=1, dte_remaining=0, regime_id=1, lot_size=15, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='BANKNIFTY-strangle-2026-03-30', ticker='BANKNIFTY', structure_type='strangle', order_side='credit', entry_price=3.09, current_mid_price=2.472, contracts=1, dte_remaining=0, regime_id=1, lot_size=15, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='TATAMOTORS-debit_spread_put-2026-03-30', ticker='TATAMOTORS', structure_type='debit_spread', order_side='debit', entry_price=0.32, current_mid_price=0.256, contracts=1, dte_remaining=0, regime_id=1, lot_size=1125, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe')]
+    market: 'India'
+    today: None
+
+  CLI: analyzer-cli> expiry
+
+  Expiry index       : None
+  Expiry positions   : 7
+  Critical count     : 0
+
+  Expiry Positions
++----------------------------------------+------------+-----------+--------------------+----------+------------+-------------------------------------+
+| TradeID                                | Ticker     | Expiry?   | Urgency            | Action   | Deadline   | Rationale                           |
++========================================+============+===========+====================+==========+============+=====================================+
+| NIFTY-iron_butterfly-2026-03-30        | NIFTY      | YES       | close_before_close | close    | 15:00 IST  | Expiry day — close before 15:00 ... |
++----------------------------------------+------------+-----------+--------------------+----------+------------+-------------------------------------+
+| NIFTY-debit_spread_put-2026-03-30      | NIFTY      | YES       | close_before_close | close    | 15:00 IST  | Expiry day — close before 15:00 ... |
++----------------------------------------+------------+-----------+--------------------+----------+------------+-------------------------------------+
+| BANKNIFTY-iron_condor-2026-03-30       | BANKNIFTY  | YES       | close_before_close | close    | 15:00 IST  | Expiry day — close before 15:00 ... |
++----------------------------------------+------------+-----------+--------------------+----------+------------+-------------------------------------+
+| BANKNIFTY-iron_butterfly-2026-03-30    | BANKNIFTY  | YES       | close_before_close | close    | 15:00 IST  | Expiry day — close before 15:00 ... |
++----------------------------------------+------------+-----------+--------------------+----------+------------+-------------------------------------+
+| BANKNIFTY-debit_spread_put-2026-03-30  | BANKNIFTY  | YES       | close_before_close | close    | 15:00 IST  | Expiry day — close before 15:00 ... |
++----------------------------------------+------------+-----------+--------------------+----------+------------+-------------------------------------+
+| BANKNIFTY-strangle-2026-03-30          | BANKNIFTY  | YES       | close_before_close | close    | 15:00 IST  | Expiry day — close before 15:00 ... |
++----------------------------------------+------------+-----------+--------------------+----------+------------+-------------------------------------+
+| TATAMOTORS-debit_spread_put-2026-03-30 | TATAMOTORS | YES       | close_before_close | close    | 15:00 IST  | Expiry day — close before 15:00 ... |
++----------------------------------------+------------+-----------+--------------------+----------+------------+-------------------------------------+
+
+
+############################################################
+  PHASE 7: REPORTING -daily report
+############################################################
+
+============================================================
+  WORKFLOW: generate_daily_report
+============================================================
+  Request:  DailyReportRequest
+  Returns:  DailyReportResponse
+  ----------------------------------------
+    trades_today: []
+    positions_open: 3
+    capital: 50000.0
+    total_risk_deployed: 0.0
+    regime_summary: {}
+    market: 'India'
+
+  CLI: analyzer-cli> report
+
+  Date           : 2026-03-30
+  Trades opened  : 0
+  Trades closed  : 0
+  Trades adjusted: 0
+  Realized PnL   : INR 0.00
+  Win/Loss       : 0W / 0L
+  Best trade     : none
+  Worst trade    : none
+  Risk deployed  : 0.0%
+  Positions open : 3
+  Summary        : 0 opened, 0 closed, 0 adjusted. Realized P&L: INR 0. 3 positions op...
+
+  HARNESS SUMMARY
++-----------------+----------------------------+----------------------------------------------------------------------------------------------------+
+| Phase           | Workflow                   | Status                                                                                             |
++=================+============================+====================================================================================================+
+| 1-PreMarket     | market_context             | OK                                                                                                 |
++-----------------+----------------------------+----------------------------------------------------------------------------------------------------+
+| 1-PreMarket     | snapshot_market            | OK                                                                                                 |
++-----------------+----------------------------+----------------------------------------------------------------------------------------------------+
+| 1-PreMarket     | check_portfolio_health     | OK                                                                                                 |
++-----------------+----------------------------+----------------------------------------------------------------------------------------------------+
+| 1-PreMarket     | generate_daily_plan        | OK                                                                                                 |
++-----------------+----------------------------+----------------------------------------------------------------------------------------------------+
+| 2-Scanning      | scan_universe              | OK                                                                                                 |
++-----------------+----------------------------+----------------------------------------------------------------------------------------------------+
+| 2-Scanning      | rank_opportunities         | OK                                                                                                 |
++-----------------+----------------------------+----------------------------------------------------------------------------------------------------+
+| 3-Entry         | validate_trade             | OK                                                                                                 |
++-----------------+----------------------------+----------------------------------------------------------------------------------------------------+
+| 3-Entry         | size_position              | OK                                                                                                 |
++-----------------+----------------------------+----------------------------------------------------------------------------------------------------+
+| 3-Entry         | price_trade                | OK                                                                                                 |
++-----------------+----------------------------+----------------------------------------------------------------------------------------------------+
+| 4-Monitoring    | monitor_positions          | OK                                                                                                 |
++-----------------+----------------------------+----------------------------------------------------------------------------------------------------+
+| 4-Monitoring    | adjust_position            | OK                                                                                                 |
++-----------------+----------------------------+----------------------------------------------------------------------------------------------------+
+| 4-Monitoring    | assess_overnight_risk      | OK                                                                                                 |
++-----------------+----------------------------+----------------------------------------------------------------------------------------------------+
+| 5-PortfolioRisk | aggregate_portfolio_greeks | FAIL: 'charmap' codec can't encode character '\u26a0' in position 2: character maps to <undefined> |
++-----------------+----------------------------+----------------------------------------------------------------------------------------------------+
+| 5-PortfolioRisk | stress_test_portfolio      | OK                                                                                                 |
++-----------------+----------------------------+----------------------------------------------------------------------------------------------------+
+| 6-Calendar      | check_expiry_day           | OK                                                                                                 |
++-----------------+----------------------------+----------------------------------------------------------------------------------------------------+
+| 7-Reporting     | generate_daily_report      | OK                                                                                                 |
++-----------------+----------------------------+----------------------------------------------------------------------------------------------------+
+
+  Total: 16  |  Passed: 15  |  Failed: 1
+
+  Harness complete.
+

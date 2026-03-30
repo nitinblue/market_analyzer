@@ -457,12 +457,13 @@ def run_scanning(
                     f"{cur}{t.entry_credit:.2f}",
                     f"{cur}{t.max_risk:,.0f}",
                     t.contracts,
+                    t.credit_source or "?",
                 ]
                 for t in resp.trades
             ]
             print_table(
                 "Ranked Trades",
-                ["#", "Ticker", "Structure", "Expiry", "Score", "Verdict", "POP", "Credit", "MaxRisk", "Cts"],
+                ["#", "Ticker", "Structure", "Expiry", "Score", "Verdict", "POP", "Credit", "MaxRisk", "Cts", "Src"],
                 rows,
             )
             proposals = resp.trades
