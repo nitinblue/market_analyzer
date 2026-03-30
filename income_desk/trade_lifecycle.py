@@ -768,7 +768,10 @@ def estimate_pop(
         pop = max(0.0, min(1.0, pop))
 
         # Expected value
-        wing = trade_spec.wing_width_points or 5.0
+        wing = trade_spec.wing_width_points
+        if not wing or wing <= 0:
+            # Cannot compute EV without wing width — return current pop/ev without EV
+            wing = 0.0  # Will produce max_loss=0, EV=0 — safe default
         lot_size = trade_spec.lot_size
         if trade_spec.order_side == "credit":
             max_profit = entry_price * lot_size * contracts

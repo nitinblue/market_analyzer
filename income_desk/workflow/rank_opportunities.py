@@ -131,7 +131,16 @@ def rank_opportunities(
         ticker = entry.ticker
         st = ts.structure_type or ""
         regime_id = regimes.get(ticker, TickerRegime(ticker=ticker, regime_id=1, regime_label="", confidence=0, tradeable=True)).regime_id
-        lot_size = ts.lot_size or 100
+        # Get lot size from registry (market-specific) — never default to US 100
+        lot_size = ts.lot_size
+        if not lot_size or lot_size <= 0:
+            try:
+                from income_desk import MarketRegistry
+                _reg = MarketRegistry()
+                _inst = _reg.get_instrument(ticker)
+                lot_size = _inst.lot_size if _inst and _inst.lot_size else 100
+            except Exception:
+                lot_size = 100
         currency = ts.currency or ("INR" if request.market == "India" else "USD")
 
         # Get technicals for POP
