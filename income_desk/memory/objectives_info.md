@@ -14,20 +14,26 @@
 
 ## Go-Live Checklist (OBJ-1 and OBJ-2)
 
-| # | Check | US Status | India 2026-03-29 | India 2026-03-30 |
+| # | Check | US Status | India 2026-03-29 | India 2026-03-30 (final) |
 |---|-------|-----------|-------------------|-------------------|
-| 1 | Broker connected (not simulated) | UNTESTED | PASS | PASS — Dhan connected, 0 errors |
-| 2 | All 16 workflows execute without error | PASS (simulated) | PASS (garbage output) | PASS — 16/16 OK, no crashes |
-| 3 | Data trust > 90% on all outputs | UNTESTED | FAIL — POP 1%, credits 0.15 | NEEDS RETEST — BUG-002 fixed, yfinance data flowing |
-| 4 | No $0.00 prices in price_trade | UNTESTED | FAIL — current_price=0 | NEEDS RETEST — BUG-005 fix in progress |
-| 5 | IV rank populated from broker (not None) | UNTESTED | PASS — IVR 21-62 | PASS — IVR from Dhan live |
-| 6 | Ranked trades have real strikes from chain | UNTESTED | FAIL — estimation | PARTIAL — pricing regression 25/25 from chain, but harness workflow still uses estimation |
+| 1 | Broker connected (not simulated) | UNTESTED | PASS | PASS — Dhan connected, 0 HTTP errors |
+| 2 | All 16 workflows execute without error | PASS (simulated) | PASS (garbage output) | PASS — 16/16 OK, real data flowing |
+| 3 | Data trust > 90% on all outputs | UNTESTED | FAIL — POP 1%, credits 0.15 | PARTIAL — RELIANCE IC credit=14.67 (real), POP still needs DTE fix |
+| 4 | No $0.00 prices in price_trade | UNTESTED | FAIL — current_price=0 | PASS — current_price=1349.90 from Dhan, gates reject price=0 |
+| 5 | IV rank populated from broker (not None) | UNTESTED | PASS — IVR 21-62 | PASS — IVR from Dhan live, IV display fixed (60% not 0.6%) |
+| 6 | Ranked trades have real strikes from chain | UNTESTED | FAIL — estimation | PASS — chain repricing gives real credits, blocked trades have rationale |
 | 7 | Stress test uses live portfolio positions | UNTESTED | FAIL — DEMO | FAIL — still DEMO (no Dhan positions open) |
-| 8 | No simulated data flagged anywhere in output | UNTESTED | FAIL — FRED, demo | IMPROVED — FRED suppressed, but demo positions still used in phases 4-7 |
-| 9 | Gate scorecard passes with real data | UNTESTED | FAIL — rubber-stamp | NEEDS RETEST — BUG-005 fix in progress |
-| 10 | Position sizing uses real account NLV/BP | PASS (TT connected) | FAIL — NLV=0 | NEEDS RETEST — BUG-011 fix delivered |
+| 8 | No simulated data flagged anywhere in output | UNTESTED | FAIL — FRED, demo | PARTIAL — FRED suppressed, phases 1-3 use real data, phases 4-7 still demo |
+| 9 | Gate scorecard passes with real data | UNTESTED | FAIL — rubber-stamp | PASS — gates with detail text, price=0 correctly FAILS |
+| 10 | Position sizing uses real account NLV/BP | PASS (TT connected) | FAIL — NLV=0 | NEEDS RETEST — BUG-011 fix delivered but banner still shows 0 |
 
-### India Go-Live Confidence Score: 35% (up from 20% on 2026-03-29)
+### India Go-Live Confidence Score: 45% (was 20% on 2026-03-29, 35% earlier today)
+
+**Today's progression: 20% → 35% → 45%**
+- Checks 1,2,4,5,6,9 now PASS (was 1,2,5 yesterday)
+- Check 3 partial (credit real, POP needs DTE fix — agent in progress)
+- Check 10 fix delivered, needs live verification
+- Checks 7,8 blocked by no real positions
 
 **What improved (20% → 35%):**
 - Broker connection clean, zero HTTP errors (was 22+ per run)

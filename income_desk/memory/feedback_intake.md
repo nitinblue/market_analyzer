@@ -24,6 +24,7 @@
 | FB-015 | Full record of all tradeable trades should be maintained. Shadow list for non-tradeable with rationale. Portfolio fitment + risk limits should be a clear, separate gate stage | 2026-03-30 | 2026-03-30 | OPEN | Claude | The pricing regression portfolio (test_portfolio_india.json) is the start of this. Need to integrate into harness flow: scan→rank→gate(portfolio fit)→size | — | — |
 
 | FB-016 | Phase order wrong: Portfolio Greeks (phase 5) should come BEFORE Monitoring (phase 4) — need to know Greek exposure before deciding on adjustments. Expiry check (phase 6) should be merged into Monitoring, not separate | 2026-03-30 | 2026-03-30 | OPEN | Claude | Reorder phases: 1-PreMarket, 2-Scanning, 3-Entry, 4-PortfolioRisk (Greeks+stress), 5-Monitoring (includes expiry check), 6-Reporting. daily_plan stays at end of phase 1 | — | — |
+| FB-017 | Phases 4-7 must work WITHOUT real broker positions. Use pricing regression portfolio (real chain-built trades) as what-if positions. System must be testable BEFORE booking real trades — not the other way around | 2026-03-30 | 2026-03-30 | OPEN | Claude | Load test_portfolio_india.json as positions for phases 4-7 when no broker positions exist. These are chain-validated trades with real strikes/expiry/credit. Convert to OpenPosition format for monitoring workflows | — | — |
 
 ## Archive
 (Previous feedback captured in user_info.md and decisions_info.md during consolidation)

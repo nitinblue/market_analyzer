@@ -595,6 +595,76 @@ def build_demo_positions(market: str) -> list:
     ]
 
 
+def load_whatif_positions(market: str) -> list:
+    """Load what-if positions from the pricing regression portfolio.
+
+    Uses real chain-built trades (from test_portfolio_india.json or
+    test_portfolio_us.json) instead of hardcoded demo data.
+    Falls back to build_demo_positions() if no portfolio exists.
+    """
+    from datetime import date as date_type
+    from pathlib import Path
+
+    from income_desk.workflow._types import OpenPosition
+
+    portfolio_file = (
+        Path.home() / ".income_desk" / f"test_portfolio_{market.lower()}.json"
+    )
+
+    if not portfolio_file.exists():
+        print(f"  No what-if portfolio at {portfolio_file.name} — using demo positions")
+        return build_demo_positions(market)
+
+    try:
+        import json
+        with open(portfolio_file) as f:
+            trades = json.load(f)
+    except Exception:
+        return build_demo_positions(market)
+
+    # Filter out expired trades
+    today = date_type.today()
+    active = [t for t in trades if not t.get("expiry") or t["expiry"] >= today.isoformat()]
+    if not active:
+        print(f"  All what-if trades expired — using demo positions")
+        return build_demo_positions(market)
+
+    positions: list[OpenPosition] = []
+    lot_size_default = 25 if market == "India" else 100
+
+    for t in active[:10]:  # Cap at 10 for performance
+        # Determine structure from trade
+        structure = t.get("structure", "iron_condor")
+        credit = t.get("net_credit", 0)
+
+        # Estimate DTE from expiry
+        dte = 30
+        if t.get("expiry"):
+            try:
+                exp = date_type.fromisoformat(t["expiry"])
+                dte = max((exp - today).days, 0)
+            except ValueError:
+                pass
+
+        positions.append(OpenPosition(
+            trade_id=t.get("id", f"WIF-{t['ticker']}-001"),
+            ticker=t["ticker"],
+            structure_type=structure.replace("_put", "").replace("_call", ""),
+            order_side="credit" if credit >= 0 else "debit",
+            entry_price=abs(credit),
+            current_mid_price=abs(credit) * 0.8,  # Assume 20% profit for monitoring test
+            contracts=1,
+            dte_remaining=dte,
+            regime_id=1,
+            lot_size=t.get("lot_size", lot_size_default),
+            profit_target_pct=0.50,
+            stop_loss_pct=2.0,
+        ))
+
+    print(f"  Loaded {len(positions)} what-if positions from {portfolio_file.name}")
+    return positions
+
+
 def build_demo_proposal(market: str) -> dict:
     """Fallback trade proposal when phase 2 was not run."""
     if market == "India":

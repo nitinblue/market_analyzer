@@ -755,7 +755,7 @@ def run_monitoring(
     broker_positions: list | None = None,
 ) -> None:
     from income_desk.trader.support import (
-        build_demo_positions,
+        load_whatif_positions,
         broker_positions_to_open,
         print_error,
         print_signature,
@@ -771,7 +771,7 @@ def run_monitoring(
         positions = broker_positions_to_open(broker_positions, meta.market)
         print(f"\n  Using {len(positions)} positions from broker")
     else:
-        positions = build_demo_positions(meta.market)
+        positions = load_whatif_positions(meta.market)
         print(f"\n  Using {len(positions)} demo positions")
 
     # --- 1. Monitor Positions ---
@@ -926,7 +926,7 @@ def run_portfolio_risk(
     broker_positions: list | None = None,
 ) -> None:
     from income_desk.trader.support import (
-        build_demo_positions,
+        load_whatif_positions,
         broker_positions_to_open,
         print_error,
         print_signature,
@@ -943,7 +943,7 @@ def run_portfolio_risk(
         positions = broker_positions_to_open(broker_positions, meta.market)
         print(f"\n  Using {len(positions)} positions from broker")
     else:
-        positions = build_demo_positions(meta.market)
+        positions = load_whatif_positions(meta.market)
         print(f"\n  Using {len(positions)} demo positions")
 
     # --- 1. Aggregate Portfolio Greeks ---
@@ -1085,7 +1085,7 @@ def run_calendar(
     verbose: bool = False,
 ) -> None:
     from income_desk.trader.support import (
-        build_demo_positions,
+        load_whatif_positions,
         print_error,
         print_signature,
         print_table,
@@ -1093,7 +1093,7 @@ def run_calendar(
     )
 
     phase = "6-Calendar"
-    positions = build_demo_positions(meta.market)
+    positions = load_whatif_positions(meta.market)
 
     # --- 1. Expiry Day Check ---
     try:
