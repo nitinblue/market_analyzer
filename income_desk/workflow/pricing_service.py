@@ -223,6 +223,74 @@ def reprice_trade(
     )
 
 
+def _estimate_credit(
+    trade_spec: TradeSpec,
+    current_price: float,
+    atr_pct: float,
+    regime_id: int,
+    ticker: str,
+) -> RepricedTrade:
+    """Produce an estimated RepricedTrade when no broker is connected.
+
+    Uses TradeSpec.max_entry_price if available, otherwise rough
+    estimate from wing width.  credit_source = "estimated".
+    """
+    wing_width = trade_spec.wing_width_points or 0.0
+    if wing_width == 0.0 and trade_spec.legs and len(trade_spec.legs) >= 2:
+        strikes = sorted(set(leg.strike for leg in trade_spec.legs))
+        if len(strikes) >= 2:
+            wing_width = strikes[1] - strikes[0]
+
+    # Resolve lot_size
+    try:
+        lot_size = trade_spec.lot_size
+        if not isinstance(lot_size, (int, float)) or lot_size <= 0:
+            lot_size = None
+    except Exception:
+        lot_size = None
+    if not lot_size:
+        try:
+            from income_desk import MarketRegistry
+            _reg = MarketRegistry()
+            _inst = _reg.get_instrument(ticker)
+            lot_size = _inst.lot_size if _inst and _inst.lot_size else 100
+        except Exception:
+            lot_size = 100
+
+    # Credit estimate
+    try:
+        max_entry = trade_spec.max_entry_price
+        if isinstance(max_entry, (int, float)) and max_entry > 0:
+            entry_credit = float(max_entry)
+        elif wing_width > 0:
+            entry_credit = wing_width * 0.28  # rough estimate
+        else:
+            entry_credit = 0.0
+    except Exception:
+        entry_credit = wing_width * 0.28 if wing_width > 0 else 0.0
+
+    if entry_credit <= 0 or current_price <= 0:
+        return _blocked(ticker, trade_spec, current_price, atr_pct, regime_id,
+                        "Cannot estimate credit (no broker, no wing width)")
+
+    return RepricedTrade(
+        ticker=ticker,
+        structure=trade_spec.structure_type or "unknown",
+        entry_credit=round(entry_credit, 4),
+        credit_source="estimated",
+        wing_width=wing_width,
+        lot_size=lot_size,
+        current_price=current_price,
+        atr_pct=atr_pct,
+        regime_id=regime_id,
+        expiry=str(trade_spec.target_expiration) if trade_spec.target_expiration else None,
+        legs_found=False,
+        liquidity_ok=True,  # Can't check without broker — assume OK
+        block_reason=None,
+        leg_details=[],
+    )
+
+
 # ── Batch repricing ──
 
 
@@ -307,10 +375,9 @@ def batch_reprice(
         chain = cached["chain"]
 
         if market_data is None:
-            results.append(
-                _blocked(ticker, trade_spec, price, atr, regime_id,
-                         "No market_data provider")
-            )
+            # No broker — produce estimated credit instead of blocking
+            estimated = _estimate_credit(trade_spec, price, atr, regime_id, ticker)
+            results.append(estimated)
         else:
             results.append(
                 reprice_trade(trade_spec, chain, ticker, price, atr, regime_id)

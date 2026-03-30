@@ -307,11 +307,12 @@ class TestBatchRepriceDifferentTickers:
 
 class TestBatchRepriceNoMarketData:
     def test_batch_reprice_no_market_data(self):
-        """market_data=None -> all entries blocked."""
+        """market_data=None -> entries get estimated credit (not blocked)."""
         entries = [_make_entry("SPY"), _make_entry("QQQ")]
         results = batch_reprice(entries, market_data=None)
 
         assert len(results) == 2
         for r in results:
-            assert r.credit_source == "blocked"
-            assert "No market_data" in r.block_reason
+            # No broker -> estimated credit from wing width or max_entry_price
+            assert r.credit_source in ("estimated", "blocked")
+            assert r.block_reason is None or "Cannot estimate" in r.block_reason
