@@ -126,9 +126,6 @@ def rank_opportunities(
             break
         if entry.trade_spec is None:
             continue
-        # Dedup by ticker
-        if entry.ticker in seen_tickers:
-            continue
 
         ts = entry.trade_spec
         ticker = entry.ticker
@@ -183,19 +180,25 @@ def rank_opportunities(
                 if chain_map:
                     leg_credits = []
                     all_found = True
+                    _debug_legs = []
                     for leg in ts.legs:
                         key = (leg.strike, leg.option_type)
                         q = chain_map.get(key)
                         if q:
-                            # sell legs contribute credit, buy legs cost debit
-                            action = getattr(leg, "action", None) or ("sell" if getattr(leg, "quantity", 1) < 0 else "buy")
-                            action_str = getattr(action, "value", str(action)).lower() if action else "buy"
+                            action_str = getattr(leg.action, "value", str(leg.action)).lower()
                             if action_str in ("sell", "sto", "short"):
                                 leg_credits.append(q.mid)
+                                _debug_legs.append(f"+{q.mid:.2f}")
                             else:
                                 leg_credits.append(-q.mid)
+                                _debug_legs.append(f"-{q.mid:.2f}")
                         else:
                             all_found = False
+                            _debug_legs.append(f"MISS({leg.strike}{leg.option_type[0]})")
+                    logger.debug(
+                        "%s %s reprice: legs=[%s] sum=%.2f all_found=%s",
+                        ticker, st, ", ".join(_debug_legs), sum(leg_credits), all_found,
+                    )
                     if all_found and leg_credits:
                         entry_credit = sum(leg_credits)
                         chain_repriced = True
@@ -203,12 +206,20 @@ def rank_opportunities(
                 warnings.append(f"{ticker}: chain reprice failed: {e}")
 
         if not chain_repriced:
-            # Fallback: use TradeSpec max_entry_price or rough estimate
+            if ma.market_data is not None:
+                # Broker connected but strikes not in liquid chain — block this trade
+                blocked.append(BlockedTrade(
+                    ticker=ticker, structure=str(st),
+                    reason=f"No liquid strikes found in broker chain",
+                    score=entry.composite_score,
+                ))
+                continue
+            # No broker — use TradeSpec max_entry_price or rough estimate
             if ts.max_entry_price:
                 entry_credit = ts.max_entry_price
             elif wing_from_spec > 0:
                 entry_credit = wing_from_spec * 0.28  # rough estimate
-            warnings.append(f"{ticker}: using estimated credit (no chain data)")
+            warnings.append(f"{ticker}: using estimated credit (no broker)")
 
         # POP estimation
         pop_pct = None
@@ -318,9 +329,9 @@ def rank_opportunities(
             ))
             continue
 
-        # --- Liquidity verification (only propose what's actually tradeable) ---
+        # --- Liquidity verification (only when chain repricing failed) ---
         liquid_strikes = None
-        if st == "credit_spread" and ma.market_data is not None:
+        if not chain_repriced and st == "credit_spread" and ma.market_data is not None:
             from income_desk.workflow.liquidity_filter import get_liquid_credit_spread_strikes
             import time as _time
             _time.sleep(3.5)
@@ -358,7 +369,7 @@ def rank_opportunities(
                     "put_wing": 0, "call_wing": cs["width"],
                 }
 
-        if st in ("iron_condor", "iron_butterfly") and ma.market_data is not None:
+        if not chain_repriced and st in ("iron_condor", "iron_butterfly") and ma.market_data is not None:
             from income_desk.workflow.liquidity_filter import get_liquid_ic_strikes
             import time as _time
             _time.sleep(3.5)  # Dhan rate limit for chain call
@@ -379,8 +390,6 @@ def rank_opportunities(
             # Recalc profit with real credit
             max_profit_per = entry_credit * lot_size
             max_profit = max_profit_per * contracts
-
-        seen_tickers.add(ticker)
 
         badge = ts.strategy_badge if ts.strategy_badge else str(st)
         trades.append(TradeProposal(
