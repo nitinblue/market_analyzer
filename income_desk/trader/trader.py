@@ -589,7 +589,16 @@ def run_entry(
         from income_desk.workflow.size_position import SizeRequest
 
         capital = meta.account_nlv or 50_000.0
-        wing = prop.get("wing_width") or 5.0
+        # BUG-007: wing_width default of $5 is US-centric; for India, derive
+        # from ATR if no explicit wing_width on the proposal.
+        wing = prop.get("wing_width")
+        if not wing:
+            price = prop.get("current_price", 0)
+            atr_pct = prop.get("atr_pct", 1.0) / 100.0
+            if price > 0 and atr_pct > 0:
+                wing = round(price * atr_pct * 1.5, 1)  # ~1.5 ATR
+            else:
+                wing = 5.0
         lot_size = 25 if meta.market == "India" else 100
         risk_per_contract = wing * lot_size
         pop = prop.get("pop_pct") or 65.0
@@ -649,9 +658,20 @@ def run_entry(
                     {"strike": long_call, "option_type": "call", "action": "buy"},
                 ])
         else:
-            # Fallback: estimate strikes from price
+            # Fallback: estimate strikes from price using ATR-based distance
+            # BUG-007 fix: US-default 3%/7% produces untradeable strikes for
+            # India stocks (e.g. INR 1000 → 975/970 is too narrow).
+            # Use ATR percentage from the proposal to set realistic distances.
             price = prop.get("current_price", 0)
-            if price > 0:
+            atr_pct = prop.get("atr_pct", 1.0) / 100.0  # stored as %, convert to decimal
+            if price > 0 and atr_pct > 0:
+                # Short strike ~1.5 ATR OTM, long strike ~3 ATR OTM
+                short_distance = round(price * atr_pct * 1.5, 0)
+                long_distance = round(price * atr_pct * 3.0, 0)
+                short_strike = round(price - short_distance, 0)
+                long_strike = round(price - long_distance, 0)
+            elif price > 0:
+                # No ATR available — use 3%/7% as last resort (US-like)
                 short_strike = round(price * 0.97, 0)
                 long_strike = round(price * 0.93, 0)
             else:

@@ -23,5 +23,7 @@
 | FB-014 | Greeks by Underlying should show current aggregate Greeks AND max limits allowed per desk/account. Currently shows Greeks but no limits | 2026-03-30 | 2026-03-30 | OPEN | Claude | Add max delta, max vega, max theta limits to Greeks display. Show utilization % against limits | — | — |
 | FB-015 | Full record of all tradeable trades should be maintained. Shadow list for non-tradeable with rationale. Portfolio fitment + risk limits should be a clear, separate gate stage | 2026-03-30 | 2026-03-30 | OPEN | Claude | The pricing regression portfolio (test_portfolio_india.json) is the start of this. Need to integrate into harness flow: scan→rank→gate(portfolio fit)→size | — | — |
 
+| FB-016 | Phase order wrong: Portfolio Greeks (phase 5) should come BEFORE Monitoring (phase 4) — need to know Greek exposure before deciding on adjustments. Expiry check (phase 6) should be merged into Monitoring, not separate | 2026-03-30 | 2026-03-30 | OPEN | Claude | Reorder phases: 1-PreMarket, 2-Scanning, 3-Entry, 4-PortfolioRisk (Greeks+stress), 5-Monitoring (includes expiry check), 6-Reporting. daily_plan stays at end of phase 1 | — | — |
+
 ## Archive
 (Previous feedback captured in user_info.md and decisions_info.md during consolidation)
