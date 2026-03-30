@@ -710,7 +710,18 @@ def estimate_pop(
     be_low, be_high = _compute_breakevens(trade_spec, entry_price)
 
     st = trade_spec.structure_type or ""
-    dte = trade_spec.target_dte or 30
+
+    # Compute actual DTE from leg expiration dates (real calendar days to expiry).
+    # target_dte is set at TradeSpec construction time and may be stale by ranking
+    # time (e.g., a 30-DTE trade built yesterday is now 29-DTE).  Worse, for 0DTE
+    # trades target_dte==0 which is falsy and the old `or 30` fallback wildly
+    # overstates the expected move, collapsing POP to near-zero.
+    _leg_expirations = [leg.expiration for leg in trade_spec.legs if leg.expiration]
+    if _leg_expirations:
+        _real_dte = (min(_leg_expirations) - date.today()).days
+        dte = max(_real_dte, 0) or 1  # floor at 1 to avoid sqrt(0)
+    else:
+        dte = trade_spec.target_dte if trade_spec.target_dte is not None and trade_spec.target_dte > 0 else 30
 
     # Regime-adjusted ATR→sigma conversion.
     # In MR regimes ATR is compressed relative to true sigma; in trending regimes it's inflated.

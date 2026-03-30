@@ -739,6 +739,142 @@ def reprice_portfolio(
 # ---------------------------------------------------------------------------
 
 
+def _format_leg_row(leg: dict, cur: str) -> str:
+    """Format a single leg as a detail row."""
+    action_str = "SELL" if leg["action"] == "sell" else "BUY "
+    opt_type = leg["type"][0].upper()  # P or C
+    iv_str = f"{leg['iv']:.1%}" if leg.get("iv") is not None else "N/A"
+    delta_str = f"{leg['delta']:.3f}" if leg.get("delta") is not None else "N/A"
+    oi_str = f"{leg.get('oi', 0):,}"
+    fmt = "    {action} {strike:>10.2f}{typ}  bid={bid:>8.2f}  ask={ask:>8.2f}  mid={mid:>8.2f}  IV={iv:>7s}  delta={delta:>7s}  OI={oi:>10s}"
+    return fmt.format(
+        action=action_str,
+        strike=leg["strike"],
+        typ=opt_type,
+        bid=leg["bid"],
+        ask=leg["ask"],
+        mid=leg["mid"],
+        iv=iv_str,
+        delta=delta_str,
+        oi=oi_str,
+    )
+
+
+def _compute_wing_width(trade: dict) -> str:
+    """Compute wing width description for a trade."""
+    legs = trade["legs"]
+    structure = trade["structure"]
+    if structure == "iron_condor" and len(legs) == 4:
+        put_width = legs[1]["strike"] - legs[0]["strike"]
+        call_width = legs[3]["strike"] - legs[2]["strike"]
+        return f"put={put_width:.0f} / call={call_width:.0f}"
+    elif structure in ("credit_spread_put", "debit_spread_put") and len(legs) == 2:
+        width = abs(legs[1]["strike"] - legs[0]["strike"])
+        return f"{width:.0f}"
+    elif structure == "credit_spread_call" and len(legs) == 2:
+        width = abs(legs[1]["strike"] - legs[0]["strike"])
+        return f"{width:.0f}"
+    elif structure == "iron_butterfly" and len(legs) == 4:
+        put_width = legs[1]["strike"] - legs[0]["strike"]
+        call_width = legs[3]["strike"] - legs[2]["strike"]
+        return f"put={put_width:.0f} / call={call_width:.0f}"
+    elif structure == "strangle":
+        return "N/A (naked)"
+    return "N/A"
+
+
+def print_full_report(
+    portfolio: list[dict],
+    shadow: list[dict],
+    market: str,
+    detail: bool = False,
+) -> None:
+    """Print full trade evaluation report.
+
+    All trades sorted: APPROVED on top, REJECTED below.
+    --detail flag shows per-leg data for every trade.
+    """
+    cur = "INR" if market == "India" else "$"
+
+    # Build unified list with status
+    all_trades: list[tuple[str, dict, list[str]]] = []
+    for t in portfolio:
+        all_trades.append(("APPROVED", t, []))
+    for t in shadow:
+        all_trades.append(("REJECTED", t, t.get("issues", [])))
+
+    # Sort: APPROVED first, then REJECTED; within each group sort by ticker then structure
+    all_trades.sort(key=lambda x: (0 if x[0] == "APPROVED" else 1, x[1]["ticker"], x[1]["structure"]))
+
+    total = len(all_trades)
+    approved = sum(1 for s, _, _ in all_trades if s == "APPROVED")
+    rejected = total - approved
+
+    print(f"\n{'=' * 100}")
+    print(f"  FULL TRADE EVALUATION REPORT — {market}")
+    print(f"  {total} evaluated | {approved} approved | {rejected} rejected")
+    print(f"{'=' * 100}")
+
+    # Summary table (always shown)
+    hdr_fmt = "  {:<4} {:<10} {:<8} {:<20} {:>10} {:>12} {:>12} {:>5} {:>10}"
+    print()
+    print(hdr_fmt.format("#", "Status", "Ticker", "Structure", "Expiry", "Net Cr/Db", "MaxRisk", "Lot", "Wing"))
+    print(f"  {'-' * 96}")
+
+    for i, (status, t, issues) in enumerate(all_trades, 1):
+        exp = t.get("expiry", "N/A")
+        credit = t["net_credit"]
+        credit_label = "credit" if credit >= 0 else "debit"
+        credit_str = f"{cur} {abs(credit):.2f}"
+        risk_str = f"{cur} {t['max_risk']:,.0f}" if t.get("max_risk") else "undef"
+        lot = t["lot_size"]
+        wing = _compute_wing_width(t)
+        total_prem = abs(credit) * lot
+        total_prem_str = f"{cur} {total_prem:,.2f}"
+
+        print(hdr_fmt.format(
+            i, status, t["ticker"], t["structure"], exp,
+            credit_str, risk_str, lot, wing,
+        ))
+
+        # For rejected trades, always show rejection reason (even without --detail)
+        if status == "REJECTED" and issues:
+            for issue in issues:
+                print(f"         REASON: {issue}")
+
+        # Per-leg detail when --detail is set
+        if detail:
+            for leg in t["legs"]:
+                print(_format_leg_row(leg, cur))
+            # Net line
+            print(f"    NET {credit_label}: {cur} {abs(credit):.2f} x {lot} lot = {total_prem_str} total premium")
+            print()
+
+    # Summary stats by structure
+    print(f"\n{'=' * 100}")
+    print(f"  SUMMARY BY STRUCTURE")
+    print(f"{'=' * 100}\n")
+
+    struct_stats: dict[str, dict[str, int]] = {}
+    for status, t, _ in all_trades:
+        s = t["structure"]
+        if s not in struct_stats:
+            struct_stats[s] = {"approved": 0, "rejected": 0}
+        if status == "APPROVED":
+            struct_stats[s]["approved"] += 1
+        else:
+            struct_stats[s]["rejected"] += 1
+
+    sfmt = "  {:<25} {:>10} {:>10} {:>10}"
+    print(sfmt.format("Structure", "Approved", "Rejected", "Total"))
+    print(f"  {'-' * 57}")
+    for s_name in sorted(struct_stats.keys()):
+        st = struct_stats[s_name]
+        print(sfmt.format(s_name, st["approved"], st["rejected"], st["approved"] + st["rejected"]))
+    print(f"  {'-' * 57}")
+    print(sfmt.format("TOTAL", approved, rejected, total))
+
+
 def print_portfolio(portfolio: list[dict], market: str) -> None:
     """Print portfolio summary table."""
     cur = "INR" if market == "India" else "$"
@@ -809,6 +945,7 @@ def main() -> None:
     parser.add_argument("--rebuild", action="store_true", help="Force rebuild entire portfolio")
     parser.add_argument("--reprice-only", action="store_true", help="Only reprice existing trades")
     parser.add_argument("--target", type=int, default=TARGET_TRADE_COUNT, help="Target trade count")
+    parser.add_argument("--detail", action="store_true", help="Show per-leg detail for every trade")
     args = parser.parse_args()
 
     market = args.market
@@ -858,8 +995,8 @@ def main() -> None:
         results = reprice_portfolio(portfolio, md, market)
         passed, failed, errors = print_validation(results)
 
-        # Shadow list
-        print_shadow(shadow, market)
+        # Full evaluation report (approved + shadow/rejected)
+        print_full_report(portfolio, shadow, market, detail=args.detail)
 
         # Save
         save_portfolio(portfolio, portfolio_file)

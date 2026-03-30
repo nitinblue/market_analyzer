@@ -450,6 +450,7 @@ def run_scanning(
                     t.rank,
                     t.ticker,
                     t.structure,
+                    t.expiry or "N/A",
                     f"{t.composite_score:.2f}",
                     _trunc(t.verdict, 20),
                     f"{t.pop_pct:.0f}%",
@@ -461,7 +462,7 @@ def run_scanning(
             ]
             print_table(
                 "Ranked Trades",
-                ["#", "Ticker", "Structure", "Score", "Verdict", "POP", "Credit", "MaxRisk", "Cts"],
+                ["#", "Ticker", "Structure", "Expiry", "Score", "Verdict", "POP", "Credit", "MaxRisk", "Cts"],
                 rows,
             )
             proposals = resp.trades
@@ -684,22 +685,28 @@ def run_entry(
             print(f"  Fill quality : {resp.fill_quality}")
 
         if resp.leg_quotes:
+            # Build instrument key for each leg (e.g., "ICICIBANK 2026-03-30 1170 PE")
+            exp_str = ""
+            if hasattr(resp, "expiry") and resp.expiry:
+                exp_str = str(resp.expiry)
+            elif resp.leg_quotes and hasattr(resp.leg_quotes[0], "expiration"):
+                exp_str = str(resp.leg_quotes[0].expiration) if resp.leg_quotes[0].expiration else ""
+
             rows = [
                 [
-                    f"{lq.strike:.0f}",
-                    lq.option_type,
+                    f"{ticker} {exp_str} {lq.strike:.0f} {'CE' if lq.option_type == 'call' else 'PE'}",
                     lq.action,
                     f"{cur}{lq.bid:.2f}" if lq.bid is not None else "N/A",
                     f"{cur}{lq.ask:.2f}" if lq.ask is not None else "N/A",
                     f"{cur}{lq.mid:.2f}" if lq.mid is not None else "N/A",
-                    f"{lq.iv:.1f}%" if lq.iv is not None else "N/A",
+                    f"{lq.iv * 100:.1f}%" if lq.iv is not None else "N/A",
                     f"{lq.delta:.3f}" if lq.delta is not None else "N/A",
                 ]
                 for lq in resp.leg_quotes
             ]
             print_table(
                 "Leg Quotes",
-                ["Strike", "Type", "Action", "Bid", "Ask", "Mid", "IV", "Delta"],
+                ["Instrument", "Action", "Bid", "Ask", "Mid", "IV", "Delta"],
                 rows,
             )
 

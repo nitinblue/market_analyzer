@@ -408,6 +408,7 @@ def rank_opportunities(
             entry_credit=entry_credit,
             wing_width=wing_width if liquid_strikes else ts.wing_width_points,
             target_dte=ts.target_dte,
+            expiry=str(ts.legs[0].expiration) if ts.legs else None,
             lot_size=lot_size,
             currency=currency,
             rationale=entry.rationale or "",

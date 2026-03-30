@@ -38,6 +38,7 @@ class TradeProposal(BaseModel):
     entry_credit: float | None = None
     wing_width: float | None = None
     target_dte: int | None = None
+    expiry: str | None = None  # Expiration date (ISO string from TradeSpec legs)
     lot_size: int | None = None
     currency: str = "USD"
     rationale: str = ""
