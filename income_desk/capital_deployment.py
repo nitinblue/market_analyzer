@@ -305,8 +305,9 @@ def compute_market_valuation(
     if fetched_pe is None:
         try:
             import yfinance as yf
+            from income_desk.data.providers.yfinance import resolve_yfinance_ticker
 
-            info = yf.Ticker(ticker).info
+            info = yf.Ticker(resolve_yfinance_ticker(ticker)).info
             fetched_pe = info.get("trailingPE") or info.get("forwardPE")
             if fetched_div_yield is None:
                 raw_yield = info.get("dividendYield")

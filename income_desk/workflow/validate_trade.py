@@ -69,6 +69,27 @@ def validate_trade(request: ValidateRequest, ma: "object | None" = None) -> Vali
         except Exception as e:
             warnings.append(f"Could not build trade_spec: {e}")
 
+    # ── BUG-005 fix: data quality pre-checks ──
+    # current_price=0 means no market data — fail fast before running gates
+    # on garbage data that would all pass vacuously.
+    if request.current_price <= 0:
+        fail_gate = GateResult(
+            name="entry_quality",
+            passed=False,
+            severity="fail",
+            detail=f"current_price is {request.current_price} — no market data",
+        )
+        return ValidateResponse(
+            meta=WorkflowMeta(
+                as_of=timestamp, market="", data_source="validation",
+                warnings=warnings + ["current_price <= 0: skipped all gates"],
+            ),
+            is_ready=False,
+            gates=[fail_gate],
+            failed_gates=["entry_quality"],
+            warnings=warnings + ["current_price <= 0: skipped all gates"],
+        )
+
     try:
         rpt = run_daily_checks(
             ticker=request.ticker, trade_spec=trade_spec,

@@ -93,7 +93,7 @@ def generate_daily_plan(
             capital=request.capital,
             risk_deployed=request.total_risk_deployed,
             risk_budget_remaining=health.risk_budget_remaining,
-            summary=f"SENTINEL {health.sentinel_signal} — trading halted. {len(health.regimes)} tickers scanned.",
+            summary=f"Market Safety: {health.sentinel_signal} — trading halted. {len(health.regimes)} tickers scanned.",
         )
 
     # --- Step 2: Rank opportunities ---
@@ -123,7 +123,7 @@ def generate_daily_plan(
     currency = "INR" if request.market == "India" else "USD"
 
     summary_parts = [
-        f"Sentinel: {health.sentinel_signal}",
+        f"Market Safety: {health.sentinel_signal}",
         f"{len(tradeable)}/{len(request.tickers)} tradeable",
         f"{n_trades} trade(s) proposed",
     ]

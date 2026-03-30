@@ -82,7 +82,30 @@ def run_daily_checks(
     """
     checks: list[CheckResult] = []
 
-    # 0. Minimum credit pre-filter — must be checked first before any other analysis.
+    # ── Pre-filter 0a: Data quality — current_price must be positive ──
+    # current_price=0 means no market data.  Every downstream calculation
+    # (strikes, POP, margin efficiency) is nonsense without a real price.
+    if current_price <= 0:
+        return ValidationReport(
+            ticker=ticker,
+            suite=Suite.DAILY,
+            as_of=date.today(),
+            checks=[
+                CheckResult(
+                    name="data_quality",
+                    severity=Severity.FAIL,
+                    message=(
+                        f"current_price is {current_price} — no market data; "
+                        f"all downstream checks are meaningless"
+                    ),
+                    detail="current_price must be > 0 for any validation to proceed",
+                    value=current_price,
+                    threshold=0.01,
+                )
+            ],
+        )
+
+    # ── Pre-filter 0b: Minimum credit ──
     # Below $0.50/contract the trade is not viable after commissions (~$1.30/contract
     # round-trip on a 2-leg spread). This prevents nonsense trades from passing later gates.
     _MIN_VIABLE_CREDIT = 0.50
@@ -99,6 +122,7 @@ def run_daily_checks(
                         f"Credit too low (${entry_credit:.2f}) — minimum ${_MIN_VIABLE_CREDIT:.2f} "
                         f"for viability after commissions"
                     ),
+                    detail=f"entry_credit ${entry_credit:.2f} < ${_MIN_VIABLE_CREDIT:.2f} minimum viable credit",
                     value=round(entry_credit, 2),
                     threshold=_MIN_VIABLE_CREDIT,
                 )
@@ -138,22 +162,32 @@ def run_daily_checks(
         pop_sev = Severity.PASS if pop_pct >= 65.0 else (
             Severity.WARN if pop_pct >= 55.0 else Severity.FAIL
         )
+        pop_detail = (
+            f"pop_pct: {pop_pct:.1f}% from regime R{regime_id}, "
+            f"atr_pct {atr_pct:.2f}%, price ${current_price:.2f}"
+        )
         checks.append(CheckResult(
             name="pop_gate",
             severity=pop_sev,
             message=f"POP {pop_pct:.1f}% "
                     f"({'≥' if pop_pct >= 65 else '<'} 65% threshold)",
+            detail=pop_detail,
             value=round(pop_pct, 1),
             threshold=65.0,
         ))
 
         ev = pop_estimate.expected_value
         ev_sev = Severity.PASS if ev > 0 else (Severity.WARN if ev > -10 else Severity.FAIL)
+        ev_detail = (
+            f"expected_value: ${ev:.2f}/contract from POP {pop_pct:.1f}% × "
+            f"credit ${entry_credit:.2f}"
+        )
         checks.append(CheckResult(
             name="ev_positive",
             severity=ev_sev,
             message=f"EV {'+' if ev >= 0 else ''}${ev:.0f} per contract "
                     f"({'positive edge' if ev > 0 else 'negative edge — avoid'})",
+            detail=ev_detail,
             value=round(ev, 0),
             threshold=0.0,
         ))
@@ -186,10 +220,15 @@ def run_daily_checks(
     entry_sev = Severity.PASS if entry_check.confirmed else (
         Severity.WARN if entry_check.score >= 0.45 else Severity.FAIL
     )
+    entry_detail = (
+        f"score: {entry_check.score:.2f} (threshold 0.60), "
+        f"regime R{regime_id}, iv_rank {iv_rank}, rsi {rsi:.1f}, dte {dte}"
+    )
     checks.append(CheckResult(
         name="entry_quality",
         severity=entry_sev,
         message=entry_check.summary,
+        detail=entry_detail,
         value=round(entry_check.score, 2),
         threshold=0.60,
     ))
@@ -207,10 +246,16 @@ def run_daily_checks(
         f"exit ≤{trade_spec.exit_dte} DTE"
         if has_exit else "Trade spec missing exit rules — add profit_target_pct, stop_loss_pct, exit_dte"
     )
+    exit_detail = (
+        f"profit_target_pct={trade_spec.profit_target_pct}, "
+        f"stop_loss_pct={trade_spec.stop_loss_pct}, "
+        f"exit_dte={trade_spec.exit_dte}"
+    )
     checks.append(CheckResult(
         name="exit_discipline",
         severity=exit_sev,
         message=exit_msg,
+        detail=exit_detail,
     ))
 
     # ── Check 8: Strike proximity to S/R levels ──

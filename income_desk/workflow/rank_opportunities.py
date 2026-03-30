@@ -173,12 +173,42 @@ def rank_opportunities(
                 ))
                 continue
 
-        # Estimate entry credit
+        # --- Reprice from real chain if broker connected ---
         entry_credit = 0.0
-        if ts.max_entry_price:
-            entry_credit = ts.max_entry_price
-        elif wing_from_spec > 0:
-            entry_credit = wing_from_spec * 0.28  # rough estimate
+        chain_repriced = False
+        if ma.market_data is not None and ts.legs:
+            try:
+                chain = ma.market_data.get_option_chain(ticker)  # hits 30s cache
+                chain_map = {(q.strike, q.option_type): q for q in chain if q.bid > 0 and q.ask > 0} if chain else {}
+                if chain_map:
+                    leg_credits = []
+                    all_found = True
+                    for leg in ts.legs:
+                        key = (leg.strike, leg.option_type)
+                        q = chain_map.get(key)
+                        if q:
+                            # sell legs contribute credit, buy legs cost debit
+                            action = getattr(leg, "action", None) or ("sell" if getattr(leg, "quantity", 1) < 0 else "buy")
+                            action_str = getattr(action, "value", str(action)).lower() if action else "buy"
+                            if action_str in ("sell", "sto", "short"):
+                                leg_credits.append(q.mid)
+                            else:
+                                leg_credits.append(-q.mid)
+                        else:
+                            all_found = False
+                    if all_found and leg_credits:
+                        entry_credit = sum(leg_credits)
+                        chain_repriced = True
+            except Exception as e:
+                warnings.append(f"{ticker}: chain reprice failed: {e}")
+
+        if not chain_repriced:
+            # Fallback: use TradeSpec max_entry_price or rough estimate
+            if ts.max_entry_price:
+                entry_credit = ts.max_entry_price
+            elif wing_from_spec > 0:
+                entry_credit = wing_from_spec * 0.28  # rough estimate
+            warnings.append(f"{ticker}: using estimated credit (no chain data)")
 
         # POP estimation
         pop_pct = None
@@ -221,7 +251,7 @@ def rank_opportunities(
             from income_desk import MarketRegistry
             _reg = MarketRegistry()
 
-            wing_width = wing_from_spec or ts.wing_width_points or 5.0
+            wing_width = wing_from_spec or ts.wing_width_points or (50.0 if request.market == "India" else 5.0)
             order_side = getattr(ts, "order_side", "credit")
             order_side_str = getattr(order_side, "value", str(order_side)) if order_side else "credit"
 

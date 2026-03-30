@@ -375,6 +375,47 @@ class TestService:
         with pytest.raises(ValueError, match="requires a DataService"):
             svc.alert()
 
+    def test_india_market_skips_fred(self) -> None:
+        """BUG-008: FRED is US-only; India market must not call FRED at all."""
+        from income_desk.service.black_swan import BlackSwanService
+
+        ds = MagicMock()
+        ds.get_ohlcv.side_effect = lambda t: _make_ohlcv(
+            base_close={"^VIX": 18.0, "^VIX3M": 20.0, "SPY": 450.0,
+                        "HYG": 80.0, "LQD": 110.0, "TLT": 100.0, "EEM": 40.0}.get(t, 100.0)
+        )
+        fred_mock = MagicMock()
+        svc = BlackSwanService(data_service=ds, fred=fred_mock, market="india")
+        alert = svc.alert()
+        # FRED methods must never be called for India market
+        fred_mock.get_series.assert_not_called()
+        assert alert.alert_level in list(AlertLevel)
+
+    def test_us_market_calls_fred(self) -> None:
+        """Verify US market still calls FRED (default behavior)."""
+        from income_desk.service.black_swan import BlackSwanService
+
+        ds = MagicMock()
+        ds.get_ohlcv.side_effect = lambda t: _make_ohlcv(
+            base_close={"^VIX": 18.0, "^VIX3M": 20.0, "SPY": 450.0,
+                        "HYG": 80.0, "LQD": 110.0, "TLT": 100.0, "EEM": 40.0}.get(t, 100.0)
+        )
+        fred_mock = MagicMock()
+        fred_mock.get_series.return_value = None
+        fred_mock.available = True
+        svc = BlackSwanService(data_service=ds, fred=fred_mock, market="us")
+        svc.alert()
+        # FRED should be called for US market
+        assert fred_mock.get_series.call_count >= 1
+
+    def test_facade_passes_market_to_black_swan(self) -> None:
+        """MarketAnalyzer must forward market to BlackSwanService."""
+        from income_desk.service.analyzer import MarketAnalyzer
+
+        ds = MagicMock()
+        ma = MarketAnalyzer(data_service=ds, market="india")
+        assert ma.black_swan._market == "INDIA"
+
     def test_facade_wiring(self) -> None:
         from income_desk.service.analyzer import MarketAnalyzer
         from income_desk.service.black_swan import BlackSwanService as BSS

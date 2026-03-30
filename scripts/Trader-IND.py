@@ -162,7 +162,7 @@ def main():
         print(f"INDIA DAILY PLAN (Workflow API)")
         print(f"{'='*60}")
         print(f"Capital: INR {args.capital:,.0f} ({args.capital/100000:.0f} lakh)")
-        print(f"Sentinel: {plan.sentinel_signal}")
+        print(f"Market Safety: {plan.sentinel_signal}")
         print(f"Safe to trade: {plan.is_safe_to_trade}")
 
         print(f"\nREGIMES:")
@@ -231,7 +231,7 @@ def main():
     print(f"{'='*60}")
     print(f"Capital: INR {report.capital:,.0f} ({report.capital/100000:.1f} lakh)")
     print(f"Risk tolerance: {report.risk_tolerance}")
-    print(f"Sentinel: {report.sentinel_signal}")
+    print(f"Market Safety: {report.sentinel_signal}")
     print(f"Trust: {report.trust_summary}")
 
     print(f"\nDESKS ({report.desks_created}):")

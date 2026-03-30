@@ -7197,7 +7197,7 @@ stratified by risk category (defined / semi_defined / undefined)."""
             return
 
         _print_header(f"DAILY PLAN — {self.market}")
-        print(f"  Sentinel: {plan.sentinel_signal} | Safe: {plan.is_safe_to_trade}")
+        print(f"  Market Safety: {plan.sentinel_signal} | Safe: {plan.is_safe_to_trade}")
         print(f"  Capital: {currency} {capital:,.0f}")
 
         print(f"\n  REGIMES:")

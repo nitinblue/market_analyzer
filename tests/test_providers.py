@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 from income_desk.data.exceptions import DataFetchError
-from income_desk.data.providers.yfinance import YFinanceProvider
+from income_desk.data.providers.yfinance import YFinanceProvider, resolve_yfinance_ticker
 from income_desk.models.data import DataRequest, DataType, ProviderType
 
 
@@ -105,6 +105,49 @@ class TestYFinanceValidate:
     def test_exception_returns_false(self, provider: YFinanceProvider) -> None:
         with patch("income_desk.data.providers.yfinance.yf.Ticker", side_effect=Exception("fail")):
             assert provider.validate_ticker("SPY") is False
+
+
+class TestResolveYfinanceTicker:
+    """Tests for resolve_yfinance_ticker — BUG-002 fix."""
+
+    def test_us_ticker_unchanged(self) -> None:
+        assert resolve_yfinance_ticker("SPY") == "SPY"
+        assert resolve_yfinance_ticker("AAPL") == "AAPL"
+
+    def test_us_index_alias(self) -> None:
+        assert resolve_yfinance_ticker("SPX") == "^GSPC"
+        assert resolve_yfinance_ticker("VIX") == "^VIX"
+
+    def test_india_index_alias(self) -> None:
+        assert resolve_yfinance_ticker("NIFTY") == "^NSEI"
+        assert resolve_yfinance_ticker("BANKNIFTY") == "^NSEBANK"
+        assert resolve_yfinance_ticker("FINNIFTY") == "NIFTY_FIN_SERVICE.NS"
+
+    def test_india_stock_gets_ns_suffix(self) -> None:
+        """BUG-002: ICICIBANK, SBIN must resolve to .NS suffix."""
+        assert resolve_yfinance_ticker("ICICIBANK") == "ICICIBANK.NS"
+        assert resolve_yfinance_ticker("SBIN") == "SBIN.NS"
+        assert resolve_yfinance_ticker("RELIANCE") == "RELIANCE.NS"
+        assert resolve_yfinance_ticker("TCS") == "TCS.NS"
+        assert resolve_yfinance_ticker("INFY") == "INFY.NS"
+        assert resolve_yfinance_ticker("HDFCBANK") == "HDFCBANK.NS"
+
+    def test_india_stock_special_yfinance_symbols(self) -> None:
+        """India stocks with yfinance overrides (M_M -> M&M.NS, etc.)."""
+        assert resolve_yfinance_ticker("M_M") == "M&M.NS"
+        assert resolve_yfinance_ticker("BAJAJ_AUTO") == "BAJAJ-AUTO.NS"
+
+    def test_dxlink_prefix_stripped(self) -> None:
+        assert resolve_yfinance_ticker("$SPX") == "^GSPC"
+        assert resolve_yfinance_ticker("$SPY") == "SPY"
+
+    def test_already_suffixed_unchanged(self) -> None:
+        """Tickers already having .NS should not be double-suffixed."""
+        assert resolve_yfinance_ticker("RELIANCE.NS") == "RELIANCE.NS"
+
+    def test_unknown_ticker_unchanged(self) -> None:
+        """Unknown tickers not in registry pass through unchanged."""
+        assert resolve_yfinance_ticker("XYZNOTREAL") == "XYZNOTREAL"
 
 
 class TestProviderContract:

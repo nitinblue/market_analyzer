@@ -48,8 +48,8 @@ class FREDFetcher:
             self._available = True
         except ImportError:
             logger.debug("fredapi not installed — FRED indicators disabled")
-        except Exception:
-            logger.warning("Failed to initialize FRED client", exc_info=True)
+        except Exception as exc:
+            logger.warning("Failed to initialize FRED client: %s", exc)
 
     def get_series(
         self, series_id: str, lookback_days: int = 30
@@ -68,6 +68,6 @@ class FREDFetcher:
             if series is None or series.empty:
                 return None
             return series.dropna()
-        except Exception:
-            logger.warning("FRED fetch failed for %s", series_id, exc_info=True)
+        except Exception as exc:
+            logger.debug("FRED fetch failed for %s: %s", series_id, exc)
             return None

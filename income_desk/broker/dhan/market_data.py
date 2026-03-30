@@ -214,6 +214,9 @@ class DhanMarketData(MarketDataProvider):
         self._client = client
         self._price_cache: dict[str, tuple[float, float]] = {}
         self._PRICE_CACHE_TTL = 5.0
+        # Chain cache — avoid re-fetching within 30 seconds (Dhan rate limit: 1/3s)
+        self._chain_cache: dict[str, tuple[list, float]] = {}  # ticker -> (quotes, timestamp)
+        self._CHAIN_CACHE_TTL = 30.0
 
     @property
     def provider_name(self) -> str:
@@ -275,6 +278,10 @@ class DhanMarketData(MarketDataProvider):
     ) -> list[OptionQuote]:
         """Fetch full option chain from DhanHQ.
 
+        Uses a 30-second cache per ticker to avoid hitting Dhan's rate limit
+        (1 unique request per 3 seconds). During ranking/scanning, the same
+        chain may be requested multiple times — the cache prevents failures.
+
         DhanHQ returns ALL strikes for ALL expirations in one call.
         If ``expiration`` is provided, filters to that date only.
         If ``expiration`` is None, returns nearest expiry chain.
@@ -290,9 +297,17 @@ class DhanMarketData(MarketDataProvider):
             List of OptionQuote objects with real Greeks from Dhan.
         """
         from income_desk.models.quotes import OptionQuote
+        import time as _time
 
         if self._client is None:
             return []
+
+        # Check chain cache (30s TTL) — avoids rate limit during ranking/scanning
+        cache_key = f"{ticker.upper()}:{expiration or 'nearest'}"
+        if cache_key in self._chain_cache:
+            cached_chain, cached_at = self._chain_cache[cache_key]
+            if (_time.monotonic() - cached_at) < self._CHAIN_CACHE_TTL:
+                return cached_chain
 
         scrip_code = self._resolve_scrip_code(ticker)
         if scrip_code is None:
@@ -356,16 +371,8 @@ class DhanMarketData(MarketDataProvider):
             logger.warning("Unexpected Dhan option_chain response structure for %s", ticker)
             return []
 
-        # Extract underlying price — cross-validate chain vs ticker_data for indices
-        chain_ltp = _safe_float(inner.get("last_price"))
-        ticker_ltp = self.get_underlying_price(ticker) or 0
-        if chain_ltp > 0 and ticker_ltp > 0:
-            ratio = max(chain_ltp, ticker_ltp) / min(chain_ltp, ticker_ltp)
-            if ratio > 1.5:
-                logger.warning(
-                    "%s option chain last_price=%.2f vs ticker_data=%.2f (%.1fx divergence)",
-                    ticker, chain_ltp, ticker_ltp, ratio,
-                )
+        # Note: inner["last_price"] is the option LTP (not the underlying),
+        # so we don't compare it against ticker_data underlying price.
         oc_data = inner.get("oc", {})
         if not isinstance(oc_data, dict):
             logger.warning("No 'oc' dict in Dhan option_chain for %s", ticker)
@@ -423,6 +430,8 @@ class DhanMarketData(MarketDataProvider):
                     lot_size=lot_size,
                 ))
 
+        # Cache the results
+        self._chain_cache[cache_key] = (results, _time.monotonic())
         return results
 
     def get_quotes(

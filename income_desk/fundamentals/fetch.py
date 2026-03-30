@@ -257,8 +257,11 @@ def fetch_fundamentals(
         if now < expiry:
             return snapshot
 
-    # Fetch from yfinance
-    t = yf.Ticker(ticker)
+    # Fetch from yfinance — resolve India tickers (.NS suffix) etc.
+    from income_desk.data.providers.yfinance import resolve_yfinance_ticker
+
+    yf_symbol = resolve_yfinance_ticker(ticker)
+    t = yf.Ticker(yf_symbol)
     try:
         info = t.info
     except Exception as e:

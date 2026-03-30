@@ -1,0 +1,579 @@
+
+  Connecting to India market...
+
+  No open positions found in broker account.
+
++------------------------------------------------------------------+
+|                         WORKFLOW HARNESS                         |
++------------------------------------------------------------------+
+| Market: India                                                    |
+| Broker: dhan                                                     |
+| Data:   LIVE quotes (market open)                                |
+| Account: NLV INR 0  |  BP N/A                                    |
++------------------------------------------------------------------+
+
+
+############################################################
+  PHASE 1: PRE-MARKET -health check, daily plan, market snapshot
+############################################################
+
+============================================================
+  MARKET CONTEXT
+============================================================
+  CLI: analyzer-cli> context
+
+  Environment   : cautious
+  Trading       : ALLOWED
+  Size Factor   : 75%
+  Risk Level    : elevated (score: 0.29)
+
+  Macro events next 7 days:
+
+  Upcoming Events
++------------+-------------------+----------+
+| Date       | Event             | Impact   |
++============+===================+==========+
+| 2026-04-03 | Non-Farm Payrolls | high     |
++------------+-------------------+----------+
+
+
+  Intermarket Dashboard
++-------------+----------+--------------+-------------+
+| Ticker      | Regime   | Confidence   | Direction   |
++=============+==========+==============+=============+
+| ^NSEI       | R4       | 100%         | bearish     |
++-------------+----------+--------------+-------------+
+| ^NSEBANK    | R3       | 100%         | bearish     |
++-------------+----------+--------------+-------------+
+| GOLDBEES.NS | R4       | 92%          | bearish     |
++-------------+----------+--------------+-------------+
+
+
+  Environment: cautious | Black swan: elevated | Macro events next 7d: 1
+
+============================================================
+  WORKFLOW: snapshot_market
+============================================================
+  Request:  SnapshotRequest
+  Returns:  MarketSnapshot
+  ----------------------------------------
+    tickers: ['NIFTY', 'BANKNIFTY', 'RELIANCE', 'TCS', 'HDFCBANK', 'ICICIBANK', 'SBIN']
+    include_chains: False
+    include_regime: True
+    market: 'India'
+
+  CLI: analyzer-cli> snapshot NIFTY BANKNIFTY RELIANCE ...
+
+
+  Market Snapshot
++-----------+---------------+-------------------+-------+--------+-------+
+| Ticker    | Price         | Regime            |   IVR | ATR%   |   RSI |
++===========+===============+===================+=======+========+=======+
+| NIFTY     | INR 22,496.30 | R4 High-Vol Trend |    21 | 2.06%  |  33.4 |
++-----------+---------------+-------------------+-------+--------+-------+
+| BANKNIFTY | INR 50,878.10 | R4 High-Vol Trend |    43 | 2.68%  |  30.1 |
++-----------+---------------+-------------------+-------+--------+-------+
+| RELIANCE  | INR 1,349.30  | R1 Low-Vol MR     |    29 | 2.37%  |  38.1 |
++-----------+---------------+-------------------+-------+--------+-------+
+| TCS       | INR 2,365.40  | R2 High-Vol MR    |    19 | 2.44%  |  29.6 |
++-----------+---------------+-------------------+-------+--------+-------+
+| HDFCBANK  | INR 745.45    | R4 High-Vol Trend |    55 | 3.55%  |  28.2 |
++-----------+---------------+-------------------+-------+--------+-------+
+| ICICIBANK | INR 1,216.00  | R2 High-Vol MR    |    37 | 2.42%  |  32.8 |
++-----------+---------------+-------------------+-------+--------+-------+
+| SBIN      | INR 993.20    | R2 High-Vol MR    |    65 | 3.25%  |  31.6 |
++-----------+---------------+-------------------+-------+--------+-------+
+
+
+============================================================
+  WORKFLOW: check_portfolio_health
+============================================================
+  Request:  HealthRequest
+  Returns:  HealthResponse
+  ----------------------------------------
+    tickers: ['NIFTY', 'BANKNIFTY', 'RELIANCE', 'TCS', 'HDFCBANK', 'ICICIBANK', 'SBIN']
+    capital: 50000.0
+    total_risk_deployed: 0.0
+    market: 'India'
+
+  CLI: analyzer-cli> health
+
+  Market Safety : RED
+  Safe to Trade : False
+  Risk %        : 0.0%
+  Risk Budget   : 15,000
+  Data Trust    : medium (80%)
+
+  Regime Map
++-----------+------+-------------------+-------------+
+| Ticker    |   ID | Label             | Tradeable   |
++===========+======+===================+=============+
+| NIFTY     |    4 | R4 High-Vol Trend | N           |
++-----------+------+-------------------+-------------+
+| BANKNIFTY |    4 | R4 High-Vol Trend | N           |
++-----------+------+-------------------+-------------+
+| RELIANCE  |    1 | R1 Low-Vol MR     | Y           |
++-----------+------+-------------------+-------------+
+| TCS       |    2 | R2 High-Vol MR    | Y           |
++-----------+------+-------------------+-------------+
+| HDFCBANK  |    4 | R4 High-Vol Trend | N           |
++-----------+------+-------------------+-------------+
+| ICICIBANK |    2 | R2 High-Vol MR    | Y           |
++-----------+------+-------------------+-------------+
+| SBIN      |    2 | R2 High-Vol MR    | Y           |
++-----------+------+-------------------+-------------+
+
+
+============================================================
+  WORKFLOW: generate_daily_plan
+============================================================
+  Request:  DailyPlanRequest
+  Returns:  DailyPlanResponse
+  ----------------------------------------
+    tickers: ['NIFTY', 'BANKNIFTY', 'RELIANCE', 'TCS', 'HDFCBANK', 'ICICIBANK', 'SBIN']
+    capital: 50000.0
+    market: 'India'
+    risk_tolerance: 'moderate'
+    total_risk_deployed: 0.0
+    max_new_trades: 5
+    iv_rank_map: {'NIFTY': 20.8, 'BANKNIFTY': 43.2, 'RELIANCE': 28.5, 'TCS': 19.3, 'HDFCBANK': 55.3, 'ICICIBANK': 37.4, 'SBIN': 64.8}
+
+  CLI: analyzer-cli> plan
+
+  Market Safety : RED
+  Safe to Trade : False
+  Tradeable     : 
+  Capital       : INR 50,000
+  Risk Deployed : 0.0%
+  Risk Budget   : 15,000
+
+############################################################
+  PHASE 2: SCANNING -scan universe, rank opportunities
+############################################################
+
+============================================================
+  WORKFLOW: scan_universe
+============================================================
+  Request:  ScanRequest
+  Returns:  ScanResponse
+  ----------------------------------------
+    tickers: ['NIFTY', 'BANKNIFTY', 'RELIANCE', 'TCS', 'HDFCBANK', 'ICICIBANK', 'SBIN']
+    market: 'India'
+    min_score: 0.3
+    top_n: 20
+
+  CLI: analyzer-cli> scan
+
+  Scanned: 7  |  Passed: 7
+
+  Scan Candidates
++-----------+---------+----------------+----------------------------------------------------+
+| Ticker    |   Score | Regime         | Rationale                                          |
++===========+=========+================+====================================================+
+| RELIANCE  |    0.95 | R1 Low-Vol MR  | R1 ideal for income; RSI 38 (neutral range); AT... |
++-----------+---------+----------------+----------------------------------------------------+
+| TCS       |    0.65 | R2 High-Vol MR | R2 selective income; ATR% 2.44 (moderate); High... |
++-----------+---------+----------------+----------------------------------------------------+
+| ICICIBANK |    0.65 | R2 High-Vol MR | R2 selective income; ATR% 2.42 (moderate); High... |
++-----------+---------+----------------+----------------------------------------------------+
+
+
+============================================================
+  WORKFLOW: rank_opportunities
+============================================================
+  Request:  RankRequest
+  Returns:  RankResponse
+  ----------------------------------------
+    tickers: ['RELIANCE', 'TCS', 'ICICIBANK']
+    capital: 50000.0
+    market: 'India'
+    risk_tolerance: 'moderate'
+    iv_rank_map: {'RELIANCE': 32.6, 'TCS': 19.3, 'ICICIBANK': 22.9}
+    skip_intraday: True
+    max_trades: 10
+    min_pop: 0.4
+
+  CLI: analyzer-cli> rank RELIANCE TCS ICICIBANK
+
+  Tradeable: 3  |  Total assessed: 33
+
+  Ranked Trades
++-----+-----------+---------------+---------+-----------+-------+----------+------------+-------+
+|   # | Ticker    | Structure     |   Score | Verdict   | POP   | Credit   | MaxRisk    |   Cts |
++=====+===========+===============+=========+===========+=======+==========+============+=======+
+|   1 | ICICIBANK | credit_spread |    0.58 | go        | 1%    | INR 0.10 | INR 85,393 |     1 |
++-----+-----------+---------------+---------+-----------+-------+----------+------------+-------+
+|   2 | RELIANCE  | iron_condor   |    0.52 | go        | 1%    | INR 3.53 | INR 33,748 |     1 |
++-----+-----------+---------------+---------+-----------+-------+----------+------------+-------+
+|   3 | TCS       | iron_condor   |    0.36 | caution   | 1%    | INR 0.20 | INR 35,526 |     1 |
++-----+-----------+---------------+---------+-----------+-------+----------+------------+-------+
+
+
+  Blocked
++-----------+----------------+---------+-------------------------+
+| Ticker    | Structure      |   Score | Reason                  |
++===========+================+=========+=========================+
+| ICICIBANK | iron_butterfly |    0.59 | POP 39% below 40% floor |
++-----------+----------------+---------+-------------------------+
+
+
+############################################################
+  PHASE 3: TRADE ENTRY -validate, size, price
+############################################################
+
+============================================================
+  WORKFLOW: validate_trade
+============================================================
+  Request:  ValidateRequest
+  Returns:  ValidateResponse
+  ----------------------------------------
+    ticker: 'ICICIBANK'
+    entry_credit: 0.1
+    regime_id: 1
+    atr_pct: 1.0
+    current_price: 0.0
+    dte: 1
+    rsi: 50.0
+    iv_rank: 50.0
+    contracts: 1
+    avg_bid_ask_spread_pct: 0.03
+    trade_spec: None
+
+  CLI: analyzer-cli> validate ICICIBANK
+
+  Ready?       : False
+  Failed gates : ['minimum_credit']
+  Warnings     : trade_spec auto-generated for validation (no actual legs provided)
+
+  Gate Scorecard
++----------------+----------+------------+----------+
+| Gate           | Status   | Severity   | Detail   |
++================+==========+============+==========+
+| minimum_credit | FAIL     | fail       |          |
++----------------+----------+------------+----------+
+
+
+============================================================
+  WORKFLOW: size_position
+============================================================
+  Request:  SizeRequest
+  Returns:  SizeResponse
+  ----------------------------------------
+    pop_pct: 0.9805
+    max_profit: 70.0
+    max_loss: 85393.00170898438
+    capital: 50000.0
+    risk_per_contract: 250.0
+    regime_id: 1
+    wing_width: 10.0
+    safety_factor: 0.5
+    max_contracts: 20
+
+  CLI: analyzer-cli> size
+
+  Contracts    : 0
+  Kelly Sizing : 0.000
+  Risk/contract: INR 250
+  Total risk   : INR 0
+  Risk % Capital: 0.0%
+
+============================================================
+  WORKFLOW: price_trade
+============================================================
+  Request:  PriceRequest
+  Returns:  PriceResponse
+  ----------------------------------------
+    ticker: 'ICICIBANK'
+    legs: [{'strike': 1170.0, 'option_type': 'put', 'action': 'sell'}, {'strike': 1160.0, 'option_type': 'put', 'action': 'buy'}]
+    market: 'India'
+
+  CLI: analyzer-cli> price ICICIBANK
+
+  Underlying   : INR 1,214.80
+  Net credit   : INR 0.10
+  Net debit    : INR 0.00
+  Avg spread % : 0.31%
+  Fill quality : wide
+
+  Leg Quotes
++----------+--------+----------+----------+----------+----------+------+---------+
+|   Strike | Type   | Action   | Bid      | Ask      | Mid      | IV   |   Delta |
++==========+========+==========+==========+==========+==========+======+=========+
+|     1170 | put    | sell     | INR 0.20 | INR 0.25 | INR 0.23 | 0.6% |  -0.022 |
++----------+--------+----------+----------+----------+----------+------+---------+
+|     1160 | put    | buy      | INR 0.10 | INR 0.15 | INR 0.12 | 0.7% |  -0.015 |
++----------+--------+----------+----------+----------+----------+------+---------+
+
+
+############################################################
+  PHASE 4: MONITORING -monitor positions, adjust, overnight risk
+############################################################
+
+  Using 3 demo positions
+
+============================================================
+  WORKFLOW: monitor_positions
+============================================================
+  Request:  MonitorRequest
+  Returns:  MonitorResponse
+  ----------------------------------------
+    positions: [OpenPosition(trade_id='DEMO-IN-001', ticker='NIFTY', structure_type='iron_condor', order_side='credit', entry_price=85.0, current_mid_price=60.0, contracts=2, dte_remaining=12, regime_id=1, lot_size=25, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='DEMO-IN-002', ticker='BANKNIFTY', structure_type='credit_spread', order_side='credit', entry_price=120.0, current_mid_price=95.0, contracts=1, dte_remaining=5, regime_id=2, lot_size=15, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='DEMO-IN-003', ticker='RELIANCE', structure_type='credit_spread', order_side='credit', entry_price=18.0, current_mid_price=12.0, contracts=1, dte_remaining=20, regime_id=1, lot_size=250, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe')]
+    market: 'India'
+
+  CLI: analyzer-cli> monitor
+
+  Actions needed : 0
+  Critical count : 0
+
+  Position Statuses
++-------------+-----------+----------+-----------+--------+-------------+
+| TradeID     | Ticker    | Action   | Urgency   | PnL%   | Rationale   |
++=============+===========+==========+===========+========+=============+
+| DEMO-IN-001 | NIFTY     | hold     | low       | 29.4%  |             |
++-------------+-----------+----------+-----------+--------+-------------+
+| DEMO-IN-002 | BANKNIFTY | hold     | low       | 20.8%  |             |
++-------------+-----------+----------+-----------+--------+-------------+
+| DEMO-IN-003 | RELIANCE  | hold     | low       | 33.3%  |             |
++-------------+-----------+----------+-----------+--------+-------------+
+
+
+============================================================
+  WORKFLOW: adjust_position
+============================================================
+  Request:  AdjustRequest
+  Returns:  AdjustResponse
+  ----------------------------------------
+    trade_id: 'DEMO-IN-001'
+    ticker: 'NIFTY'
+    structure_type: 'iron_condor'
+    order_side: 'credit'
+    entry_price: 85.0
+    current_mid_price: 60.0
+    contracts: 2
+    dte_remaining: 12
+    regime_id: 1
+    pnl_pct: 0.29411764705882354
+
+  CLI: analyzer-cli> adjust DEMO-IN-001
+
+  Trade ID    : DEMO-IN-001
+  Ticker      : NIFTY
+  Action      : hold
+  Urgency     : low
+  Rationale   : Position within parameters
+
+============================================================
+  WORKFLOW: assess_overnight_risk
+============================================================
+  Request:  OvernightRiskRequest
+  Returns:  OvernightRiskResponse
+  ----------------------------------------
+    positions: [OpenPosition(trade_id='DEMO-IN-001', ticker='NIFTY', structure_type='iron_condor', order_side='credit', entry_price=85.0, current_mid_price=60.0, contracts=2, dte_remaining=12, regime_id=1, lot_size=25, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='DEMO-IN-002', ticker='BANKNIFTY', structure_type='credit_spread', order_side='credit', entry_price=120.0, current_mid_price=95.0, contracts=1, dte_remaining=5, regime_id=2, lot_size=15, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='DEMO-IN-003', ticker='RELIANCE', structure_type='credit_spread', order_side='credit', entry_price=18.0, current_mid_price=12.0, contracts=1, dte_remaining=20, regime_id=1, lot_size=250, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe')]
+    market: 'India'
+
+  CLI: analyzer-cli> overnight
+
+  High risk count       : 0
+  Close-before-close    : 0
+
+  Overnight Risk
++-------------+-----------+--------+----------+-------------+
+| TradeID     | Ticker    | Risk   | Action   | Rationale   |
++=============+===========+========+==========+=============+
+| DEMO-IN-001 | NIFTY     | low    | hold     |             |
++-------------+-----------+--------+----------+-------------+
+| DEMO-IN-002 | BANKNIFTY | low    | hold     |             |
++-------------+-----------+--------+----------+-------------+
+| DEMO-IN-003 | RELIANCE  | low    | hold     |             |
++-------------+-----------+--------+----------+-------------+
+
+
+############################################################
+  PHASE 5: PORTFOLIO RISK -Greeks aggregation, stress test
+############################################################
+
+  Using 3 demo positions
+
+============================================================
+  WORKFLOW: aggregate_portfolio_greeks
+============================================================
+  Request:  PortfolioGreeksRequest
+  Returns:  PortfolioGreeksResponse
+  ----------------------------------------
+    legs: [PositionLeg(ticker='NIFTY', option_type='put', strike=0.0, expiration='2026-04-17', contracts=2, lot_size=25, action='short', delta=-0.15, gamma=0.02, theta=-0.05, vega=0.1, implied_volatility=0.2, market_value=4250.0), PositionLeg(ticker='BANKNIFTY', option_type='put', strike=0.0, expiration='2026-04-17', contracts=1, lot_size=15, action='short', delta=-0.15, gamma=0.02, theta=-0.05, vega=0.1, implied_volatility=0.2, market_value=1800.0), PositionLeg(ticker='RELIANCE', option_type='put', strike=0.0, expiration='2026-04-17', contracts=1, lot_size=250, action='short', delta=-0.15, gamma=0.02, theta=-0.05, vega=0.1, implied_volatility=0.2, market_value=4500.0)]
+    market: 'India'
+
+  CLI: analyzer-cli> greeks
+
+  Portfolio Delta : +47.25
+  Portfolio Gamma : -6.3000
+  Portfolio Theta : INR +15.75
+  Portfolio Vega  : -31.50
+  Market Value    : INR -14,800
+  Largest Delta   : RELIANCE: +38 delta
+  Largest Vega    : RELIANCE: -25.0 vega
+
+  Greeks by Underlying
++-----------+--------+---------+---------+------------+--------+------+
+| Ticker    |   Legs |   Delta |   Gamma | Theta      |   Vega | IV   |
++===========+========+=========+=========+============+========+======+
+| NIFTY     |      1 |    7.5  |    -1   | INR +2.50  |   -5   | 20%  |
++-----------+--------+---------+---------+------------+--------+------+
+| BANKNIFTY |      1 |    2.25 |    -0.3 | INR +0.75  |   -1.5 | 20%  |
++-----------+--------+---------+---------+------------+--------+------+
+| RELIANCE  |      1 |   37.5  |    -5   | INR +12.50 |  -25   | 20%  |
++-----------+--------+---------+---------+------------+--------+------+
+
+
+============================================================
+  WORKFLOW: stress_test_portfolio
+============================================================
+  Request:  StressTestRequest
+  Returns:  StressTestResponse
+  ----------------------------------------
+    positions: [OpenPosition(trade_id='DEMO-IN-001', ticker='NIFTY', structure_type='iron_condor', order_side='credit', entry_price=85.0, current_mid_price=60.0, contracts=2, dte_remaining=12, regime_id=1, lot_size=25, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='DEMO-IN-002', ticker='BANKNIFTY', structure_type='credit_spread', order_side='credit', entry_price=120.0, current_mid_price=95.0, contracts=1, dte_remaining=5, regime_id=2, lot_size=15, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='DEMO-IN-003', ticker='RELIANCE', structure_type='credit_spread', order_side='credit', entry_price=18.0, current_mid_price=12.0, contracts=1, dte_remaining=20, regime_id=1, lot_size=250, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe')]
+    capital: 50000.0
+    market: 'India'
+    risk_limit_pct: 0.3
+    scenarios: None
+
+  CLI: analyzer-cli> stress
+
+  Worst scenario  : black_monday
+  Worst PnL       : INR -6,287 (-1260.0%)
+  Best scenario   : tech_rotation
+  Risk score      : caution
+  Portfolio at risk: INR 6,287
+
+  Scenario Results (top 10)
++-------------------------------------+------------+----------+-----------+
+| Scenario                            | PnL        | PnL%     | Breach?   |
++=====================================+============+==========+===========+
+| Black Monday (-30% Flash Crash)     | INR -6,287 | -1260.0% | no        |
++-------------------------------------+------------+----------+-----------+
+| Correlation Spike (All Assets Down) | INR -4,285 | -860.0%  | no        |
++-------------------------------------+------------+----------+-----------+
+| S&P 500 -20% Bear Market            | INR -3,512 | -700.0%  | no        |
++-------------------------------------+------------+----------+-----------+
+| S&P 500 -10% Correction             | INR -1,780 | -360.0%  | no        |
++-------------------------------------+------------+----------+-----------+
+| NIFTY -10% + INR Depreciation       | INR -1,479 | -300.0%  | no        |
++-------------------------------------+------------+----------+-----------+
+| Rate Collapse / Flight to Safety    | INR -1,211 | -240.0%  | no        |
++-------------------------------------+------------+----------+-----------+
+| Risk-On Rally (+8%)                 | INR -1,144 | -230.0%  | no        |
++-------------------------------------+------------+----------+-----------+
+| FII Mass Selling                    | INR -1,142 | -230.0%  | no        |
++-------------------------------------+------------+----------+-----------+
+| Geopolitical Shock                  | INR -1,008 | -200.0%  | no        |
++-------------------------------------+------------+----------+-----------+
+| S&P 500 -5% Correction              | INR -927   | -190.0%  | no        |
++-------------------------------------+------------+----------+-----------+
+
+  Most vulnerable : {'ticker': 'NIFTY', 'avg_scenario_loss': -631.19, 'worst_scenario': 'black_monday', 'worst_loss': -2664.24}, {'ticker': 'RELIANCE', 'avg_scenario_loss': -573.93, 'worst_scenario': 'black_monday', 'worst_loss': -2458.25}, {'ticker': 'BANKNIFTY', 'avg_scenario_loss': -280.56, 'worst_scenario': 'black_monday', 'worst_loss': -1164.3}
+
+############################################################
+  PHASE 6: CALENDAR -expiry day check
+############################################################
+
+============================================================
+  WORKFLOW: check_expiry_day
+============================================================
+  Request:  ExpiryDayRequest
+  Returns:  ExpiryDayResponse
+  ----------------------------------------
+    positions: [OpenPosition(trade_id='DEMO-IN-001', ticker='NIFTY', structure_type='iron_condor', order_side='credit', entry_price=85.0, current_mid_price=60.0, contracts=2, dte_remaining=12, regime_id=1, lot_size=25, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='DEMO-IN-002', ticker='BANKNIFTY', structure_type='credit_spread', order_side='credit', entry_price=120.0, current_mid_price=95.0, contracts=1, dte_remaining=5, regime_id=2, lot_size=15, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe'), OpenPosition(trade_id='DEMO-IN-003', ticker='RELIANCE', structure_type='credit_spread', order_side='credit', entry_price=18.0, current_mid_price=12.0, contracts=1, dte_remaining=20, regime_id=1, lot_size=250, profit_target_pct=0.5, stop_loss_pct=2.0, exit_dte=5, position_status='safe')]
+    market: 'India'
+    today: None
+
+  CLI: analyzer-cli> expiry
+
+  Expiry index       : None
+  Expiry positions   : 0
+  Critical count     : 0
+
+  Expiry Positions
++-------------+-----------+-----------+-----------+----------+------------+-------------+
+| TradeID     | Ticker    | Expiry?   | Urgency   | Action   | Deadline   | Rationale   |
++=============+===========+===========+===========+==========+============+=============+
+| DEMO-IN-001 | NIFTY     | no        | none      | hold     | N/A        |             |
++-------------+-----------+-----------+-----------+----------+------------+-------------+
+| DEMO-IN-002 | BANKNIFTY | no        | none      | hold     | N/A        |             |
++-------------+-----------+-----------+-----------+----------+------------+-------------+
+| DEMO-IN-003 | RELIANCE  | no        | none      | hold     | N/A        |             |
++-------------+-----------+-----------+-----------+----------+------------+-------------+
+
+
+############################################################
+  PHASE 7: REPORTING -daily report
+############################################################
+
+============================================================
+  WORKFLOW: generate_daily_report
+============================================================
+  Request:  DailyReportRequest
+  Returns:  DailyReportResponse
+  ----------------------------------------
+    trades_today: []
+    positions_open: 3
+    capital: 50000.0
+    total_risk_deployed: 0.0
+    regime_summary: {}
+    market: 'India'
+
+  CLI: analyzer-cli> report
+
+  Date           : 2026-03-30
+  Trades opened  : 0
+  Trades closed  : 0
+  Trades adjusted: 0
+  Realized PnL   : INR 0.00
+  Win/Loss       : 0W / 0L
+  Best trade     : none
+  Worst trade    : none
+  Risk deployed  : 0.0%
+  Positions open : 3
+  Summary        : 0 opened, 0 closed, 0 adjusted. Realized P&L: INR 0. 3 positions op...
+
+  HARNESS SUMMARY
++-----------------+----------------------------+----------+
+| Phase           | Workflow                   | Status   |
++=================+============================+==========+
+| 1-PreMarket     | market_context             | OK       |
++-----------------+----------------------------+----------+
+| 1-PreMarket     | snapshot_market            | OK       |
++-----------------+----------------------------+----------+
+| 1-PreMarket     | check_portfolio_health     | OK       |
++-----------------+----------------------------+----------+
+| 1-PreMarket     | generate_daily_plan        | OK       |
++-----------------+----------------------------+----------+
+| 2-Scanning      | scan_universe              | OK       |
++-----------------+----------------------------+----------+
+| 2-Scanning      | rank_opportunities         | OK       |
++-----------------+----------------------------+----------+
+| 3-Entry         | validate_trade             | OK       |
++-----------------+----------------------------+----------+
+| 3-Entry         | size_position              | OK       |
++-----------------+----------------------------+----------+
+| 3-Entry         | price_trade                | OK       |
++-----------------+----------------------------+----------+
+| 4-Monitoring    | monitor_positions          | OK       |
++-----------------+----------------------------+----------+
+| 4-Monitoring    | adjust_position            | OK       |
++-----------------+----------------------------+----------+
+| 4-Monitoring    | assess_overnight_risk      | OK       |
++-----------------+----------------------------+----------+
+| 5-PortfolioRisk | aggregate_portfolio_greeks | OK       |
++-----------------+----------------------------+----------+
+| 5-PortfolioRisk | stress_test_portfolio      | OK       |
++-----------------+----------------------------+----------+
+| 6-Calendar      | check_expiry_day           | OK       |
++-----------------+----------------------------+----------+
+| 7-Reporting     | generate_daily_report      | OK       |
++-----------------+----------------------------+----------+
+
+  Total: 16  |  Passed: 16  |  Failed: 0
+
+  Harness complete.
+
+Binary file (standard input) matches

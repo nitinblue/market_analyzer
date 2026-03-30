@@ -101,6 +101,63 @@ class TestRunDailyChecks:
         assert "exit_discipline" in check_names
 
 
+    def test_zero_price_fails_data_quality(self) -> None:
+        """BUG-005: current_price=0 must fail immediately, not pass all gates."""
+        report = run_daily_checks(
+            ticker="SPY",
+            trade_spec=_ic_spec(),
+            entry_credit=1.50,
+            regime_id=1,
+            atr_pct=1.0,
+            current_price=0,
+            avg_bid_ask_spread_pct=0.8,
+            dte=30,
+            rsi=50.0,
+        )
+        assert report.is_ready is False
+        assert len(report.checks) == 1
+        assert report.checks[0].name == "data_quality"
+        assert report.checks[0].severity == Severity.FAIL
+        assert "current_price" in report.checks[0].message
+
+    def test_negative_price_fails_data_quality(self) -> None:
+        """BUG-005: negative current_price must also fail."""
+        report = run_daily_checks(
+            ticker="SPY",
+            trade_spec=_ic_spec(),
+            entry_credit=1.50,
+            regime_id=1,
+            atr_pct=1.0,
+            current_price=-5.0,
+            avg_bid_ask_spread_pct=0.8,
+            dte=30,
+            rsi=50.0,
+        )
+        assert report.is_ready is False
+        assert report.checks[0].name == "data_quality"
+        assert report.checks[0].severity == Severity.FAIL
+
+    def test_passing_gates_have_detail(self) -> None:
+        """BUG-005: every passing gate should have non-empty detail."""
+        report = run_daily_checks(
+            ticker="SPY",
+            trade_spec=_ic_spec(),
+            entry_credit=3.00,
+            regime_id=1,
+            atr_pct=1.0,
+            current_price=580.0,
+            avg_bid_ask_spread_pct=0.8,
+            dte=30,
+            rsi=50.0,
+            iv_rank=45.0,
+        )
+        for check in report.checks:
+            if check.severity == Severity.PASS:
+                assert check.detail or check.message, (
+                    f"Gate '{check.name}' passed without detail or message"
+                )
+
+
 class TestRunAdversarialChecks:
     def test_returns_validation_report(self) -> None:
         report = run_adversarial_checks(

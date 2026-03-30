@@ -218,6 +218,14 @@ class AccountProvider(ABC):
         """Fetch current account balance (buying power, NLV, margin)."""
         ...
 
+    def get_positions(self) -> list:
+        """Fetch current open positions from the broker.
+
+        Returns list of :class:`~income_desk.models.quotes.BrokerPosition`.
+        Default: empty list (not all brokers implement this yet).
+        """
+        return []
+
 
 class MarketMetricsProvider(ABC):
     """Abstract provider for market-level metrics (IV rank, etc.)."""

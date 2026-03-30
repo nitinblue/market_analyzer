@@ -25,15 +25,24 @@ class BlackSwanService:
 
     Fetches VIX, VIX3M, SPY, HYG, LQD, TLT, EEM via DataService.
     Fetches yield curve + put/call ratio from FRED (if available).
+
+    FRED data is US-only. When *market* is set to a non-US market (e.g.
+    ``"india"``), FRED fetches are skipped entirely to avoid 400 errors
+    and noisy tracebacks (BUG-008).
     """
+
+    # Markets where FRED indicators are relevant
+    _FRED_MARKETS = frozenset({"us", "US"})
 
     def __init__(
         self,
         data_service: DataService | None = None,
         fred: FREDFetcher | None = None,
+        market: str | None = None,
     ) -> None:
         self.data_service = data_service
         self._fred = fred or FREDFetcher()
+        self._market = (market or "us").upper()
 
     def alert(self, as_of_date: date | None = None) -> BlackSwanAlert:
         """Compute current tail-risk alert.
@@ -85,9 +94,14 @@ class BlackSwanService:
             data.get("EEM"), data.get("SPY"), lookback
         )
 
-        # FRED indicators
-        yield_curve_bps = self._fetch_yield_curve()
-        put_call_ratio = self._fetch_put_call()
+        # FRED indicators (US-only — skip for non-US markets, BUG-008)
+        if self._market == "US":
+            yield_curve_bps = self._fetch_yield_curve()
+            put_call_ratio = self._fetch_put_call()
+        else:
+            logger.debug("Skipping FRED indicators — market=%s (US-only data)", self._market)
+            yield_curve_bps = None
+            put_call_ratio = None
 
         return compute_black_swan_alert(
             vix=vix,

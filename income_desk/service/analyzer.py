@@ -106,7 +106,7 @@ class MarketAnalyzer:
             data_service=data_service,
             vol_surface_service=self.vol_surface,
         )
-        self.black_swan = BlackSwanService(data_service=data_service)
+        self.black_swan = BlackSwanService(data_service=data_service, market=market)
         self.ranking = TradeRankingService(
             opportunity_service=self.opportunity,
             levels_service=self.levels,

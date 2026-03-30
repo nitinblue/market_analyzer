@@ -29,6 +29,8 @@ class BannerMeta:
     ticker_count: int = 0
     currency: str = "USD"
     tickers: list[str] = field(default_factory=list)
+    broker_positions: list = field(default_factory=list)  # BrokerPosition objects
+    account_provider: object = None  # AccountProvider for fetching positions
 
 
 # ── Formatting helpers ───────────────────────────────────────────────────────
@@ -302,6 +304,7 @@ def setup(market: str) -> tuple:
         wl = None
 
     # --- 3. Account info ---
+    meta.account_provider = acct
     if acct is not None:
         try:
             bal = acct.get_balance()
@@ -425,6 +428,74 @@ def load_universe(market: str, path: str | None = None) -> list[str]:
 
 
 # ── Demo data builders ───────────────────────────────────────────────────────
+
+
+def broker_positions_to_open(broker_positions: list, market: str) -> list:
+    """Convert BrokerPosition objects to OpenPosition objects for workflow APIs.
+
+    Groups option legs by ticker into structures (credit spreads, iron condors).
+    Equities are skipped — workflows operate on option positions.
+    """
+    from datetime import date as date_type
+
+    from income_desk.workflow._types import OpenPosition
+
+    # Group option positions by ticker
+    by_ticker: dict[str, list] = {}
+    for p in broker_positions:
+        if p.option_type is None:
+            continue  # Skip equities
+        by_ticker.setdefault(p.ticker, []).append(p)
+
+    positions: list[OpenPosition] = []
+    lot_size = 25 if market == "India" else 100
+
+    for ticker, legs in by_ticker.items():
+        # Determine structure type from leg count and sides
+        short_legs = [l for l in legs if l.quantity < 0]
+        long_legs = [l for l in legs if l.quantity > 0]
+
+        if len(short_legs) >= 2 and len(long_legs) >= 2:
+            structure = "iron_condor"
+        elif short_legs and long_legs:
+            structure = "credit_spread"
+        elif short_legs:
+            structure = "naked_short"
+        elif long_legs:
+            structure = "long_option"
+        else:
+            continue
+
+        # Use the first short leg for entry price, or first leg if no short legs
+        primary = short_legs[0] if short_legs else long_legs[0]
+        entry_price = abs(primary.average_open_price)
+        current_mid = abs(primary.close_price) if primary.close_price is not None else entry_price
+        contracts = abs(primary.quantity)
+
+        # DTE from earliest expiration
+        exps = [l.expiration for l in legs if l.expiration is not None]
+        if exps:
+            earliest = min(exps)
+            dte = (earliest - date_type.today()).days
+        else:
+            dte = 30
+
+        positions.append(OpenPosition(
+            trade_id=f"BRK-{ticker}-001",
+            ticker=ticker,
+            structure_type=structure,
+            order_side="credit" if short_legs else "debit",
+            entry_price=entry_price,
+            current_mid_price=current_mid,
+            contracts=contracts,
+            dte_remaining=max(dte, 0),
+            regime_id=1,
+            lot_size=lot_size,
+            profit_target_pct=0.50,
+            stop_loss_pct=2.0,
+        ))
+
+    return positions
 
 
 def build_demo_positions(market: str) -> list:
@@ -555,6 +626,136 @@ def build_demo_proposal(market: str) -> dict:
         "wing_width": 5.0,
         "dte": 35,
     }
+
+
+# ── Position loading ────────────────────────────────────────────────────────
+
+
+def load_positions(meta: BannerMeta, interactive: bool = True) -> list:
+    """Load positions from broker or CSV file.
+
+    Step 2 of the harness: after broker connects, fetch real positions.
+    Falls back to CSV import or demo positions.
+
+    Returns list of :class:`~income_desk.models.quotes.BrokerPosition`.
+    """
+    from income_desk.models.quotes import BrokerPosition
+
+    # --- 1. Try broker positions ---
+    if meta.account_provider is not None:
+        try:
+            positions = meta.account_provider.get_positions()
+            if positions:
+                print(f"\n  Loaded {len(positions)} positions from {meta.broker_name or 'broker'}")
+                _print_broker_positions(positions, meta.currency)
+                meta.broker_positions = positions
+                return positions
+            else:
+                print(f"\n  No open positions found in broker account.")
+        except Exception as exc:
+            print(f"\n  Could not fetch positions from broker: {exc}")
+
+    # --- 2. Offer CSV import ---
+    if interactive:
+        print("\n  No broker positions available.")
+        print("    1. Load positions from CSV file")
+        print("    2. Continue with demo positions")
+        try:
+            choice = input("  > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            choice = "2"
+
+        if choice == "1":
+            try:
+                csv_path = input("  CSV file path: ").strip().strip('"').strip("'")
+            except (EOFError, KeyboardInterrupt):
+                csv_path = ""
+
+            if csv_path:
+                positions = _load_positions_from_csv(csv_path, meta)
+                if positions:
+                    meta.broker_positions = positions
+                    return positions
+    else:
+        print("\n  No broker positions — using demo positions.")
+
+    return []
+
+
+def _load_positions_from_csv(csv_path: str, meta: BannerMeta) -> list:
+    """Import positions from a broker CSV export."""
+    from pathlib import Path
+
+    from income_desk.adapters.csv_trades import import_trades_csv
+    from income_desk.models.quotes import BrokerPosition
+
+    path = Path(csv_path)
+    if not path.exists():
+        print(f"  File not found: {csv_path}")
+        return []
+
+    result = import_trades_csv(csv_path)
+
+    if result.errors:
+        for err in result.errors[:5]:
+            print(f"  [warn] {err}")
+
+    if not result.positions:
+        print(f"  No positions parsed from {result.broker_detected} CSV.")
+        return []
+
+    # Convert ImportedPosition -> BrokerPosition
+    positions: list[BrokerPosition] = []
+    for p in result.positions:
+        positions.append(BrokerPosition(
+            ticker=p.ticker,
+            symbol=p.raw_symbol,
+            instrument_type="Equity Option" if p.option_type else "Equity",
+            quantity=p.quantity,
+            average_open_price=p.entry_price,
+            multiplier=100 if meta.market == "US" else 25,
+            expiration=p.expiration,
+            strike=p.strike,
+            option_type=p.option_type,
+            source=f"csv:{result.broker_detected}",
+        ))
+
+    print(f"\n  Imported {len(positions)} positions from {result.broker_detected} CSV")
+    _print_broker_positions(positions, meta.currency)
+    return positions
+
+
+def _print_broker_positions(positions: list, currency: str) -> None:
+    """Print a summary table of loaded positions."""
+    cur = "INR " if currency == "INR" else "$"
+
+    # Group by ticker for summary
+    by_ticker: dict[str, list] = {}
+    for p in positions:
+        by_ticker.setdefault(p.ticker, []).append(p)
+
+    rows = []
+    for ticker, pos_list in sorted(by_ticker.items()):
+        for p in pos_list:
+            if p.option_type:
+                desc = f"{p.strike:.0f} {p.option_type[0].upper()}"
+                if p.expiration:
+                    desc += f" {p.expiration.strftime('%m/%d')}"
+            else:
+                desc = "equity"
+            rows.append([
+                ticker,
+                desc,
+                p.quantity,
+                f"{cur}{p.average_open_price:.2f}",
+                p.instrument_type,
+            ])
+
+    print_table(
+        "Broker Positions",
+        ["Ticker", "Description", "Qty", "Avg Price", "Type"],
+        rows,
+    )
 
 
 # ── CLI arg parsing ──────────────────────────────────────────────────────────

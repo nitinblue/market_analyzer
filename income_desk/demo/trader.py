@@ -402,7 +402,7 @@ def run_trader(
     overall_summary = (
         f"{books} trade(s) booked across {desks_created} desks. "
         f"Risk deployed: ${total_risk:,.0f} ({risk_pct:.1%}). "
-        f"Sentinel: {sentinel_signal}."
+        f"Market Safety: {sentinel_signal}."
     )
     if blocked:
         overall_summary += f" {len(blocked)} trade(s) blocked."
@@ -453,7 +453,7 @@ def print_trader_report(report: TraderReport) -> None:
     print(f"TRADER REPORT — {report.market} Market")
     print(f"{'=' * 60}")
     print(f"Capital: ${report.capital:,.0f} | Risk: {report.risk_tolerance}")
-    print(f"Sentinel: {report.sentinel_signal}")
+    print(f"Market Safety: {report.sentinel_signal}")
     print(f"Trust: {report.trust_summary}")
 
     print(f"\nDESKS ({report.desks_created}):")

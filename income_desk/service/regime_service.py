@@ -318,8 +318,10 @@ class RegimeService:
 
         if intraday is None:
             import yfinance as yf
+            from income_desk.data.providers.yfinance import resolve_yfinance_ticker
 
-            intraday = yf.download(ticker, period="1d", interval="5m", progress=False)
+            yf_symbol = resolve_yfinance_ticker(ticker)
+            intraday = yf.download(yf_symbol, period="1d", interval="5m", progress=False)
             if intraday.empty:
                 raise ValueError(f"No intraday data available for {ticker}")
             # Flatten MultiIndex columns if present

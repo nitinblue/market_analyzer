@@ -220,7 +220,7 @@ def stress_test_portfolio(
                 base_value=round(base_pnl, 2),
                 stressed_value=round(stressed_value, 2),
                 scenario_pnl=round(scenario_pnl, 2),
-                scenario_pnl_pct=round(scenario_pnl / max(abs(entry * multiplier), 1) * 100, 1),
+                scenario_pnl_pct=round(scenario_pnl / max(request.capital, 1) * 100, 2),
                 price_move_pct=round(price_move * 100, 1),
                 iv_move=round(iv_move, 4),
             ))
@@ -232,7 +232,7 @@ def stress_test_portfolio(
         worst_pos = min(position_impacts, key=lambda p: p.scenario_pnl) if position_impacts else None
 
         portfolio_pnl_pct = total_pnl / request.capital * 100 if request.capital > 0 else 0
-        breaches = abs(total_pnl) > request.capital * request.risk_limit_pct
+        breaches = abs(portfolio_pnl_pct) > request.risk_limit_pct * 100
 
         all_results.append(ScenarioPortfolioImpact(
             scenario_key=scenario_key,

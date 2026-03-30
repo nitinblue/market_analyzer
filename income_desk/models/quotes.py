@@ -54,6 +54,22 @@ class AccountBalance(BaseModel):
     timezone: str = "US/Eastern"      # Account timezone (market hours reference)
 
 
+class BrokerPosition(BaseModel):
+    """A position fetched from the broker account."""
+
+    ticker: str
+    symbol: str                        # Full option/equity symbol from broker
+    instrument_type: str               # "Equity", "Equity Option", "Future Option", etc.
+    quantity: int                       # Positive = long, negative = short
+    average_open_price: float          # Per-share/contract entry price
+    close_price: float | None = None   # Current mark price
+    multiplier: int = 100              # Contract multiplier
+    expiration: date | None = None     # None for equities
+    strike: float | None = None        # None for equities
+    option_type: str | None = None     # "call" | "put" | None for equities
+    source: str = ""                   # "tastytrade" | "dhan" | etc.
+
+
 class MarketMetrics(BaseModel):
     """Market-level metrics for an underlying (IV rank, beta, etc.)."""
 

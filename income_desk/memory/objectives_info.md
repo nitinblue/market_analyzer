@@ -14,18 +14,44 @@
 
 ## Go-Live Checklist (OBJ-1 and OBJ-2)
 
-| # | Check | US Status | India Status |
-|---|-------|-----------|-------------|
-| 1 | Broker connected (not simulated) | UNTESTED | UNTESTED |
-| 2 | All 15 workflows execute without error | PASS (simulated) | PASS (simulated) |
-| 3 | Data trust > 90% on all outputs | UNTESTED | UNTESTED |
-| 4 | No $0.00 prices in price_trade | UNTESTED | UNTESTED |
-| 5 | IV rank populated from broker (not None) | UNTESTED | UNTESTED |
-| 6 | Ranked trades have real strikes from chain | UNTESTED | UNTESTED |
-| 7 | Stress test uses live portfolio positions | UNTESTED | UNTESTED |
-| 8 | No simulated data flagged anywhere in output | UNTESTED | UNTESTED |
-| 9 | Gate scorecard passes with real data | UNTESTED | UNTESTED |
-| 10 | Position sizing uses real account NLV/BP | PASS (TT connected) | UNTESTED |
+| # | Check | US Status | India 2026-03-29 | India 2026-03-30 |
+|---|-------|-----------|-------------------|-------------------|
+| 1 | Broker connected (not simulated) | UNTESTED | PASS | PASS — Dhan connected, 0 errors |
+| 2 | All 16 workflows execute without error | PASS (simulated) | PASS (garbage output) | PASS — 16/16 OK, no crashes |
+| 3 | Data trust > 90% on all outputs | UNTESTED | FAIL — POP 1%, credits 0.15 | NEEDS RETEST — BUG-002 fixed, yfinance data flowing |
+| 4 | No $0.00 prices in price_trade | UNTESTED | FAIL — current_price=0 | NEEDS RETEST — BUG-005 fix in progress |
+| 5 | IV rank populated from broker (not None) | UNTESTED | PASS — IVR 21-62 | PASS — IVR from Dhan live |
+| 6 | Ranked trades have real strikes from chain | UNTESTED | FAIL — estimation | PARTIAL — pricing regression 25/25 from chain, but harness workflow still uses estimation |
+| 7 | Stress test uses live portfolio positions | UNTESTED | FAIL — DEMO | FAIL — still DEMO (no Dhan positions open) |
+| 8 | No simulated data flagged anywhere in output | UNTESTED | FAIL — FRED, demo | IMPROVED — FRED suppressed, but demo positions still used in phases 4-7 |
+| 9 | Gate scorecard passes with real data | UNTESTED | FAIL — rubber-stamp | NEEDS RETEST — BUG-005 fix in progress |
+| 10 | Position sizing uses real account NLV/BP | PASS (TT connected) | FAIL — NLV=0 | NEEDS RETEST — BUG-011 fix delivered |
+
+### India Go-Live Confidence Score: 35% (up from 20% on 2026-03-29)
+
+**What improved (20% → 35%):**
+- Broker connection clean, zero HTTP errors (was 22+ per run)
+- yfinance .NS suffix fixed — India stock data now flows
+- FRED noise eliminated for India market
+- Phase ordering correct (context → snapshot → health → plan)
+- Scan → rank pipeline wired correctly
+- Pricing regression: 25/25 valid trades from real chain data
+- Dhan NLV calculation fixed (needs live verification)
+- Labels de-jargoned
+
+**What blocks 35% → 70%:**
+- BUG-003/004: POP and credits need retest with BUG-002 fix (likely fixed, needs confirmation)
+- BUG-005: Gates must reject bad data (fix in progress)
+- BUG-007: Harness still uses $5 wing width for India (pricing regression uses chain-based)
+- Phases 4-7 use demo positions (no real positions to test with)
+- Account NLV fix needs live verification
+
+**What blocks 70% → 100%:**
+- Real trades executed and monitored through full lifecycle
+- POP calibration against actual outcomes
+- Overnight risk tested with real overnight positions
+- Stress test with realistic PnL% (BUG-010 fix in progress)
+- 7 consecutive clean daily test runs
 
 ## Blockers to Objectives
 

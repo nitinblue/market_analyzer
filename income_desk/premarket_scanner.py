@@ -358,10 +358,12 @@ def fetch_premarket_data(tickers: list[str]) -> list[dict]:
     """
     import yfinance as yf
 
+    from income_desk.data.providers.yfinance import resolve_yfinance_ticker
+
     results = []
     for ticker in tickers:
         try:
-            info = yf.Ticker(ticker).info
+            info = yf.Ticker(resolve_yfinance_ticker(ticker)).info
             results.append({
                 "ticker": ticker,
                 "name": info.get("shortName", ticker),

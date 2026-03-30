@@ -157,7 +157,99 @@ def run_premarket(
     cur = _cur(meta.market)
     capital = meta.account_nlv or 50_000.0
 
-    # --- 1. Portfolio Health ---
+    # --- 1. Market Context (macro overview) ---
+    try:
+        print(f"\n{'=' * 60}")
+        print(f"  MARKET CONTEXT")
+        print(f"{'=' * 60}")
+        print(f"  CLI: analyzer-cli> context\n")
+
+        ctx = ma.context.assess()
+
+        print(f"  Environment   : {ctx.environment_label}")
+        print(f"  Trading       : {'ALLOWED' if ctx.trading_allowed else 'HALTED'}")
+        print(f"  Size Factor   : {ctx.position_size_factor:.0%}")
+        print(f"  Risk Level    : {ctx.black_swan.alert_level} (score: {ctx.black_swan.composite_score:.2f})")
+
+        # Macro events
+        events_7 = ctx.macro.events_next_7_days
+        if events_7:
+            print(f"\n  Macro events next 7 days:")
+            rows = [
+                [str(e.date), e.name, e.impact]
+                for e in events_7
+            ]
+            print_table("Upcoming Events", ["Date", "Event", "Impact"], rows)
+
+        # Intermarket
+        if ctx.intermarket.entries:
+            rows = [
+                [entry.ticker, f"R{entry.regime}", f"{entry.confidence:.0%}",
+                 entry.trend_direction or ""]
+                for entry in ctx.intermarket.entries
+            ]
+            print_table("Intermarket Dashboard", ["Ticker", "Regime", "Confidence", "Direction"], rows)
+
+        print(f"\n  {ctx.summary}")
+
+        session.record(phase, "market_context", "OK")
+    except Exception as exc:
+        print_error("market_context", exc)
+        if verbose:
+            traceback.print_exc()
+        session.record(phase, "market_context", f"FAIL: {exc}")
+
+    action = wait_for_input(interactive)
+    if action == "q":
+        sys.exit(0)
+    if action == "s":
+        return
+
+    # --- 2. Market Snapshot ---
+    try:
+        from income_desk.workflow import snapshot_market
+        from income_desk.workflow.market_snapshot import SnapshotRequest
+
+        req = SnapshotRequest(
+            tickers=tickers,
+            market=meta.market,
+        )
+        cli_tickers = " ".join(tickers[:3]) + (" ..." if len(tickers) > 3 else "")
+        print_signature("snapshot_market", req, cli_command=f"analyzer-cli> snapshot {cli_tickers}")
+        resp = snapshot_market(req, ma)
+
+        if resp.tickers:
+            rows = [
+                [
+                    t,
+                    f"{cur}{snap.price:,.2f}" if snap.price else "N/A",
+                    snap.regime_label or "?",
+                    f"{snap.iv_rank:.0f}" if snap.iv_rank is not None else "N/A",
+                    f"{snap.atr_pct:.2f}%" if snap.atr_pct is not None else "N/A",
+                    f"{snap.rsi:.1f}" if snap.rsi is not None else "N/A",
+                ]
+                for t, snap in resp.tickers.items()
+            ]
+            print_table(
+                "Market Snapshot",
+                ["Ticker", "Price", "Regime", "IVR", "ATR%", "RSI"],
+                rows,
+            )
+
+        session.record(phase, "snapshot_market", "OK")
+    except Exception as exc:
+        print_error("snapshot_market", exc)
+        if verbose:
+            traceback.print_exc()
+        session.record(phase, "snapshot_market", f"FAIL: {exc}")
+
+    action = wait_for_input(interactive)
+    if action == "q":
+        sys.exit(0)
+    if action == "s":
+        return
+
+    # --- 3. Portfolio Health ---
     try:
         from income_desk.workflow import check_portfolio_health
         from income_desk.workflow.portfolio_health import HealthRequest
@@ -170,11 +262,11 @@ def run_premarket(
         print_signature("check_portfolio_health", req, cli_command="analyzer-cli> health")
         resp = check_portfolio_health(req, ma)
 
-        print(f"  Sentinel : {resp.sentinel_signal}")
-        print(f"  Safe?    : {resp.is_safe_to_trade}")
-        print(f"  Risk %   : {resp.risk_pct:.1f}%")
-        print(f"  Budget   : {resp.risk_budget_remaining:,.0f}")
-        print(f"  Data trust: {resp.data_trust}")
+        print(f"  Market Safety : {resp.sentinel_signal}")
+        print(f"  Safe to Trade : {resp.is_safe_to_trade}")
+        print(f"  Risk %        : {resp.risk_pct:.1f}%")
+        print(f"  Risk Budget   : {resp.risk_budget_remaining:,.0f}")
+        print(f"  Data Trust    : {resp.data_trust}")
 
         # Regime table
         if resp.regimes:
@@ -197,7 +289,7 @@ def run_premarket(
     if action == "s":
         return
 
-    # --- 2. Daily Plan ---
+    # --- 4. Daily Plan ---
     try:
         from income_desk.workflow import generate_daily_plan
         from income_desk.workflow.daily_plan import DailyPlanRequest
@@ -212,12 +304,12 @@ def run_premarket(
         print_signature("generate_daily_plan", req, cli_command="analyzer-cli> plan")
         resp = generate_daily_plan(req, ma)
 
-        print(f"  Sentinel : {resp.sentinel_signal}")
-        print(f"  Safe?    : {resp.is_safe_to_trade}")
-        print(f"  Tradeable: {', '.join(resp.tradeable_tickers)}")
-        print(f"  Capital  : {cur}{resp.capital:,.0f}")
-        print(f"  Risk dep : {resp.risk_deployed:.1f}%")
-        print(f"  Budget   : {resp.risk_budget_remaining:,.0f}")
+        print(f"  Market Safety : {resp.sentinel_signal}")
+        print(f"  Safe to Trade : {resp.is_safe_to_trade}")
+        print(f"  Tradeable     : {', '.join(resp.tradeable_tickers)}")
+        print(f"  Capital       : {cur}{resp.capital:,.0f}")
+        print(f"  Risk Deployed : {resp.risk_deployed:.1f}%")
+        print(f"  Risk Budget   : {resp.risk_budget_remaining:,.0f}")
         if resp.summary:
             print(f"  Summary  : {_trunc(resp.summary, 80)}")
 
@@ -258,50 +350,6 @@ def run_premarket(
             traceback.print_exc()
         session.record(phase, "generate_daily_plan", f"FAIL: {exc}")
 
-    action = wait_for_input(interactive)
-    if action == "q":
-        sys.exit(0)
-    if action == "s":
-        return
-
-    # --- 3. Market Snapshot ---
-    try:
-        from income_desk.workflow import snapshot_market
-        from income_desk.workflow.market_snapshot import SnapshotRequest
-
-        req = SnapshotRequest(
-            tickers=tickers,
-            market=meta.market,
-        )
-        cli_tickers = " ".join(tickers[:3]) + (" ..." if len(tickers) > 3 else "")
-        print_signature("snapshot_market", req, cli_command=f"analyzer-cli> snapshot {cli_tickers}")
-        resp = snapshot_market(req, ma)
-
-        if resp.tickers:
-            rows = [
-                [
-                    t,
-                    f"{cur}{snap.price:,.2f}" if snap.price else "N/A",
-                    snap.regime_label or "?",
-                    f"{snap.iv_rank:.0f}" if snap.iv_rank is not None else "N/A",
-                    f"{snap.atr_pct:.2f}%" if snap.atr_pct is not None else "N/A",
-                    f"{snap.rsi:.1f}" if snap.rsi is not None else "N/A",
-                ]
-                for t, snap in resp.tickers.items()
-            ]
-            print_table(
-                "Market Snapshot",
-                ["Ticker", "Price", "Regime", "IVR", "ATR%", "RSI"],
-                rows,
-            )
-
-        session.record(phase, "snapshot_market", "OK")
-    except Exception as exc:
-        print_error("snapshot_market", exc)
-        if verbose:
-            traceback.print_exc()
-        session.record(phase, "snapshot_market", f"FAIL: {exc}")
-
     wait_for_input(interactive)
 
 
@@ -341,7 +389,15 @@ def run_scanning(
 
         print(f"  Scanned: {resp.total_scanned}  |  Passed: {resp.total_passed}")
 
+        # FB-008: Deduplicate candidates by ticker, keeping highest score
         if resp.candidates:
+            best_by_ticker: dict[str, Any] = {}
+            for c in resp.candidates:
+                if c.ticker not in best_by_ticker or c.score > best_by_ticker[c.ticker].score:
+                    best_by_ticker[c.ticker] = c
+            deduped_candidates = sorted(best_by_ticker.values(), key=lambda c: c.score, reverse=True)
+            resp.candidates = deduped_candidates
+
             rows = [
                 [
                     c.ticker,
@@ -353,12 +409,16 @@ def run_scanning(
             ]
             print_table("Scan Candidates", ["Ticker", "Score", "Regime", "Rationale"], rows)
 
+        # FB-009: Feed scan results into rank input
+        scan_tickers = [c.ticker for c in resp.candidates] if resp.candidates else tickers
+
         session.record(phase, "scan_universe", "OK")
     except Exception as exc:
         print_error("scan_universe", exc)
         if verbose:
             traceback.print_exc()
         session.record(phase, "scan_universe", f"FAIL: {exc}")
+        scan_tickers = tickers  # fallback to full list on scan failure
 
     action = wait_for_input(interactive)
     if action == "q":
@@ -371,14 +431,14 @@ def run_scanning(
         from income_desk.workflow import rank_opportunities
         from income_desk.workflow.rank_opportunities import RankRequest
 
-        iv_map = _fetch_iv_rank_map(ma, tickers)
+        iv_map = _fetch_iv_rank_map(ma, scan_tickers)
         req = RankRequest(
-            tickers=tickers,
+            tickers=scan_tickers,
             capital=capital,
             market=meta.market,
             iv_rank_map=iv_map or None,
         )
-        cli_tickers = " ".join(tickers[:3]) + (" ..." if len(tickers) > 3 else "")
+        cli_tickers = " ".join(scan_tickers[:3]) + (" ..." if len(scan_tickers) > 3 else "")
         print_signature("rank_opportunities", req, cli_command=f"analyzer-cli> rank {cli_tickers}")
         resp = rank_opportunities(req, ma)
 
@@ -548,10 +608,10 @@ def run_entry(
         resp = size_position(req, ma)
 
         print(f"  Contracts    : {resp.recommended_contracts}")
-        print(f"  Kelly frac   : {resp.kelly_fraction:.3f}")
+        print(f"  Kelly Sizing : {resp.kelly_fraction:.3f}")
         print(f"  Risk/contract: {cur}{resp.risk_per_contract:,.0f}")
         print(f"  Total risk   : {cur}{resp.total_risk:,.0f}")
-        print(f"  Risk % cap   : {resp.risk_pct_of_capital:.1f}%")
+        print(f"  Risk % Capital: {resp.risk_pct_of_capital:.1f}%")
 
         session.record(phase, "size_position", "OK")
     except Exception as exc:
@@ -665,9 +725,11 @@ def run_monitoring(
     session: HarnessSession,
     interactive: bool = True,
     verbose: bool = False,
+    broker_positions: list | None = None,
 ) -> None:
     from income_desk.trader.support import (
         build_demo_positions,
+        broker_positions_to_open,
         print_error,
         print_signature,
         print_table,
@@ -676,7 +738,14 @@ def run_monitoring(
 
     phase = "4-Monitoring"
     cur = _cur(meta.market)
-    positions = build_demo_positions(meta.market)
+
+    # Use real broker positions if available, else demo
+    if broker_positions:
+        positions = broker_positions_to_open(broker_positions, meta.market)
+        print(f"\n  Using {len(positions)} positions from broker")
+    else:
+        positions = build_demo_positions(meta.market)
+        print(f"\n  Using {len(positions)} demo positions")
 
     # --- 1. Monitor Positions ---
     try:
@@ -722,6 +791,13 @@ def run_monitoring(
         return
 
     # --- 2. Adjust Position ---
+    if not positions:
+        print("  No positions to adjust — skipping adjust and overnight risk.")
+        session.record(phase, "adjust_position", "SKIP (no positions)")
+        session.record(phase, "assess_overnight_risk", "SKIP (no positions)")
+        wait_for_input(interactive)
+        return
+
     try:
         from income_desk.workflow import adjust_position
         from income_desk.workflow.adjust_position import AdjustRequest
@@ -820,9 +896,11 @@ def run_portfolio_risk(
     session: HarnessSession,
     interactive: bool = True,
     verbose: bool = False,
+    broker_positions: list | None = None,
 ) -> None:
     from income_desk.trader.support import (
         build_demo_positions,
+        broker_positions_to_open,
         print_error,
         print_signature,
         print_table,
@@ -832,7 +910,14 @@ def run_portfolio_risk(
     phase = "5-PortfolioRisk"
     cur = _cur(meta.market)
     capital = meta.account_nlv or 50_000.0
-    positions = build_demo_positions(meta.market)
+
+    # Use real broker positions if available, else demo
+    if broker_positions:
+        positions = broker_positions_to_open(broker_positions, meta.market)
+        print(f"\n  Using {len(positions)} positions from broker")
+    else:
+        positions = build_demo_positions(meta.market)
+        print(f"\n  Using {len(positions)} demo positions")
 
     # --- 1. Aggregate Portfolio Greeks ---
     try:
@@ -1096,6 +1181,7 @@ def run_reporting(
 
 def main() -> None:
     from income_desk.trader.support import (
+        load_positions,
         parse_args,
         pick_market,
         pick_tickers,
@@ -1113,12 +1199,14 @@ def main() -> None:
         logging.getLogger("income_desk").setLevel(logging.ERROR)
         logging.getLogger("fredapi").setLevel(logging.ERROR)
 
-    # Market selection
+    # Step 1: Market selection + broker connection
     market = pick_market(preset=args.market)
 
-    # Setup broker / simulated data
     print(f"\n  Connecting to {market} market...")
     ma, meta = setup(market)
+
+    # Step 2: Load positions (broker or CSV)
+    broker_positions = load_positions(meta, interactive=interactive)
 
     # Tickers
     tickers = pick_tickers(market, meta)
@@ -1148,9 +1236,11 @@ def main() -> None:
         elif p == 3:
             run_entry(ma, tickers, proposals, meta, session, interactive, args.verbose)
         elif p == 4:
-            run_monitoring(ma, tickers, meta, session, interactive, args.verbose)
+            run_monitoring(ma, tickers, meta, session, interactive, args.verbose,
+                           broker_positions=broker_positions)
         elif p == 5:
-            run_portfolio_risk(ma, tickers, meta, session, interactive, args.verbose)
+            run_portfolio_risk(ma, tickers, meta, session, interactive, args.verbose,
+                               broker_positions=broker_positions)
         elif p == 6:
             run_calendar(ma, meta, session, interactive, args.verbose)
         elif p == 7:

@@ -1,7 +1,14 @@
-"""YFinanceProvider: OHLCV data via yfinance."""
+"""YFinanceProvider: OHLCV data via yfinance.
+
+Also exports :func:`resolve_yfinance_ticker` — the single source of truth
+for mapping user-facing tickers to yfinance symbols.  Every call site that
+touches yfinance (fundamentals, premarket scanner, technical, etc.) should
+use this function instead of passing bare tickers.
+"""
 
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 
 import yfinance as yf
@@ -11,6 +18,7 @@ from income_desk.data.exceptions import DataFetchError, InvalidTickerError
 from income_desk.data.providers.base import DataProvider
 from income_desk.models.data import DataRequest, DataType, ProviderType
 
+logger = logging.getLogger(__name__)
 
 # Aliases for tickers whose yfinance symbol differs from the common name.
 # Keys: user-facing ticker.  Values: yfinance symbol.
@@ -35,6 +43,87 @@ _YFINANCE_ALIASES: dict[str, str] = {
 }
 
 
+def resolve_yfinance_ticker(ticker: str) -> str:
+    """Translate user-facing ticker to yfinance symbol.
+
+    Handles DXLink-style ``$SPX`` prefixes, standard aliases,
+    and India NSE stock suffix (.NS) for known Indian instruments.
+
+    This is the **single source of truth** for ticker -> yfinance mapping.
+    All code that calls ``yf.Ticker()`` or ``yf.download()`` should use this.
+
+    Resolution order:
+    1. Strip ``$`` prefix (DXLink convention)
+    2. Check ``_YFINANCE_ALIASES`` (indices, special symbols)
+    3. Check ``MarketRegistry`` — if instrument is market=INDIA, use its
+       ``yfinance_symbol`` (e.g. ``ICICIBANK`` -> ``ICICIBANK.NS``)
+    4. Return ticker unchanged (assumed US equity/ETF)
+    """
+    clean = ticker.lstrip("$").upper()
+    resolved = _YFINANCE_ALIASES.get(clean, clean)
+
+    # If still unresolved and looks like an India stock (check MarketRegistry)
+    if resolved == clean and not clean.startswith("^") and "." not in clean:
+        try:
+            from income_desk.registry import MarketRegistry
+            registry = MarketRegistry()
+            inst = registry.get_instrument(clean)
+            if inst.market == "INDIA":
+                return inst.yfinance_symbol
+        except (KeyError, ImportError):
+            pass
+
+    return resolved
+
+
+def limit_yfinance_retries(max_retries: int = 1) -> None:
+    """Reduce yfinance's HTTP retry count to avoid 11x retry floods on 404.
+
+    yfinance uses a ``requests.Session`` with a ``urllib3.Retry`` adapter
+    that defaults to many retries.  For invalid tickers (HTTP 404), this
+    produces a flood of noisy retry attempts.  Call this once at startup
+    to cap retries.
+    """
+    try:
+        from requests.adapters import HTTPAdapter
+        from urllib3.util.retry import Retry
+
+        retry = Retry(
+            total=max_retries,
+            backoff_factor=0.1,
+            status_forcelist=[429, 500, 502, 503, 504],
+            # Do NOT retry on 404 — that means the ticker doesn't exist
+            allowed_methods=["GET"],
+        )
+        adapter = HTTPAdapter(max_retries=retry)
+
+        # yfinance >= 0.2 uses a module-level session via yf.shared._requests
+        # or the Ticker objects create their own.  The most reliable approach
+        # is to patch the default session if it exists.
+        if hasattr(yf, "shared") and hasattr(yf.shared, "_requests"):
+            session = yf.shared._requests
+            if session is not None:
+                session.mount("https://", adapter)
+                session.mount("http://", adapter)
+                logger.debug("yfinance retries capped at %d", max_retries)
+                return
+
+        # For newer yfinance that uses a cache session or different structure,
+        # try to set it via the utils module.
+        if hasattr(yf, "utils") and hasattr(yf.utils, "get_json"):
+            # Can't easily patch, but the Retry on 404 is the main issue.
+            # Setting yf.set_tz_cache_location won't help, but we tried.
+            pass
+
+        logger.debug("Could not patch yfinance session retries (version may differ)")
+    except Exception as exc:
+        logger.debug("Failed to limit yfinance retries: %s", exc)
+
+
+# Apply retry limits on module import — fail once, not 11 times
+limit_yfinance_retries(max_retries=1)
+
+
 class YFinanceProvider(DataProvider):
     """Fetches OHLCV and options chain data from Yahoo Finance."""
 
@@ -42,24 +131,9 @@ class YFinanceProvider(DataProvider):
     def _resolve_ticker(ticker: str) -> str:
         """Translate user-facing ticker to yfinance symbol.
 
-        Handles DXLink-style ``$SPX`` prefixes, standard aliases,
-        and India NSE stock suffix (.NS) for known Indian instruments.
+        Delegates to :func:`resolve_yfinance_ticker`.
         """
-        clean = ticker.lstrip("$").upper()
-        resolved = _YFINANCE_ALIASES.get(clean, clean)
-
-        # If still unresolved and looks like an India stock (check MarketRegistry)
-        if resolved == clean and not clean.startswith("^") and "." not in clean:
-            try:
-                from income_desk.registry import MarketRegistry
-                registry = MarketRegistry()
-                inst = registry.get_instrument(clean)
-                if inst.market == "INDIA":
-                    return inst.yfinance_symbol
-            except (KeyError, ImportError):
-                pass
-
-        return resolved
+        return resolve_yfinance_ticker(ticker)
 
     @property
     def provider_type(self) -> ProviderType:

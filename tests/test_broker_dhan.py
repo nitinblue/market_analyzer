@@ -341,9 +341,12 @@ class TestDhanAccountBalance:
         class MockClient:
             def get_fund_limits(self):
                 return {"data": {
-                    "clientId": "DH12345",
+                    "dhanClientId": "DH12345",
                     "availabelBalance": 350000.0,  # Dhan typo preserved
                     "utilizedAmount": 150000.0,
+                    "sodLimit": 500000.0,
+                    "collateralAmount": 0.0,
+                    "receiveableAmount": 0.0,
                 }}
 
         acct = DhanAccount(MockClient())
@@ -352,10 +355,71 @@ class TestDhanAccountBalance:
         assert bal.account_number == "DH12345"
         assert bal.cash_balance == pytest.approx(350000.0)
         assert bal.maintenance_requirement == pytest.approx(150000.0)
-        assert bal.net_liquidating_value == pytest.approx(500000.0)  # 350k + 150k
+        assert bal.net_liquidating_value == pytest.approx(500000.0)  # sodLimit
+        assert bal.derivative_buying_power == pytest.approx(350000.0)
         assert bal.source == "dhan"
         assert bal.currency == "INR"
         assert bal.timezone == "Asia/Kolkata"
+
+    def test_balance_nlv_fallback_without_sod_limit(self) -> None:
+        """NLV falls back to available + utilized + collateral when sodLimit absent."""
+        from income_desk.broker.dhan.account import DhanAccount
+
+        class MockClient:
+            def get_fund_limits(self):
+                return {"data": {
+                    "clientId": "DH12345",
+                    "availabelBalance": 350000.0,
+                    "utilizedAmount": 150000.0,
+                }}
+
+        acct = DhanAccount(MockClient())
+        bal = acct.get_balance()
+        assert bal.net_liquidating_value == pytest.approx(500000.0)  # 350k + 150k
+
+    def test_balance_nlv_includes_collateral(self) -> None:
+        """NLV includes collateral (pledged stocks/MFs) when sodLimit absent."""
+        from income_desk.broker.dhan.account import DhanAccount
+
+        class MockClient:
+            def get_fund_limits(self):
+                return {"data": {
+                    "dhanClientId": "DH123",
+                    "availabelBalance": 50000.0,
+                    "utilizedAmount": 100000.0,
+                    "collateralAmount": 200000.0,
+                }}
+
+        acct = DhanAccount(MockClient())
+        bal = acct.get_balance()
+        # 50k + 100k + 200k collateral = 350k
+        assert bal.net_liquidating_value == pytest.approx(350000.0)
+
+    def test_balance_zero_available_not_treated_as_missing(self) -> None:
+        """BUG-011: availabelBalance=0 must not be treated as missing.
+
+        The old ``or``-chain treated 0.0 as falsy and fell through,
+        causing NLV=0 when cash was fully deployed as margin.
+        """
+        from income_desk.broker.dhan.account import DhanAccount
+
+        class MockClient:
+            def get_fund_limits(self):
+                return {"data": {
+                    "dhanClientId": "DH999",
+                    "availabelBalance": 0.0,  # all cash used as margin
+                    "utilizedAmount": 200000.0,
+                    "sodLimit": 200000.0,
+                    "collateralAmount": 0.0,
+                }}
+
+        acct = DhanAccount(MockClient())
+        bal = acct.get_balance()
+
+        # NLV must be 200k (from sodLimit), NOT 0
+        assert bal.net_liquidating_value == pytest.approx(200000.0)
+        assert bal.cash_balance == pytest.approx(0.0)
+        assert bal.derivative_buying_power == pytest.approx(0.0)
 
     def test_balance_typo_resilience(self) -> None:
         """Both 'availabelBalance' (typo) and 'availableBalance' (correct) work."""
@@ -372,6 +436,34 @@ class TestDhanAccountBalance:
         acct = DhanAccount(MockClientCorrectSpelling())
         bal = acct.get_balance()
         assert bal.cash_balance == pytest.approx(200000.0)
+
+    def test_balance_dhan_client_id_preferred(self) -> None:
+        """dhanClientId (real API field) is preferred over clientId."""
+        from income_desk.broker.dhan.account import DhanAccount
+
+        class MockClient:
+            def get_fund_limits(self):
+                return {"data": {
+                    "dhanClientId": "REAL_ID",
+                    "clientId": "OLD_ID",
+                    "availabelBalance": 100000.0,
+                }}
+
+        acct = DhanAccount(MockClient())
+        bal = acct.get_balance()
+        assert bal.account_number == "REAL_ID"
+
+    def test_balance_sdk_failure_response(self) -> None:
+        """SDK failure response (data='') raises ConnectionError."""
+        from income_desk.broker.dhan.account import DhanAccount
+
+        class FailureClient:
+            def get_fund_limits(self):
+                return {"status": "failure", "remarks": "timeout", "data": ""}
+
+        acct = DhanAccount(FailureClient())
+        with pytest.raises(ConnectionError):
+            acct.get_balance()
 
     def test_balance_raises_on_empty_response(self) -> None:
         """ConnectionError raised when Dhan returns empty response."""
