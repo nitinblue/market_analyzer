@@ -366,6 +366,66 @@ async def fetch_option_chain_symbols(
     return symbol_info
 
 
+async def fetch_option_chain_rest(
+    sdk_session,
+    ticker: str,
+    expiration=None,
+) -> list[dict]:
+    """Get option chain via REST API (``Option.get_option_chain``).
+
+    BUG-012 fix: replaces the old approach of streaming 1000+ strikes via
+    DXLink WebSocket. This REST call returns the full chain in one HTTP
+    request (~1-2 seconds vs 3+ minutes).
+
+    Each returned dict contains chain structure data (strike, type, expiry,
+    streamer_symbol). No live bid/ask — those come from DXLink for the
+    near-ATM subset only.
+
+    Args:
+        sdk_session: Authenticated tastytrade Session (for REST calls).
+        ticker: Underlying ticker.
+        expiration: Optional date filter.
+
+    Returns:
+        List of ``{"sym": str, "strike": float, "option_type": str, "expiration": date}``
+    """
+    from tastytrade.instruments import get_option_chain as _tt_get_chain
+
+    chain = await _tt_get_chain(sdk_session, ticker)
+
+    if not chain:
+        return []
+
+    symbol_info: list[dict] = []
+    for exp_date, options in chain.items():
+        if expiration and exp_date != expiration:
+            continue
+        for opt in options:
+            streamer_sym = getattr(opt, "streamer_symbol", None)
+            if not streamer_sym:
+                continue
+            opt_type_raw = getattr(opt, "option_type", None)
+            if opt_type_raw is not None:
+                # OptionType enum: .value is "C" or "P"
+                opt_val = getattr(opt_type_raw, "value", str(opt_type_raw)).lower()
+                if opt_val in ("c", "call"):
+                    opt_type = "call"
+                elif opt_val in ("p", "put"):
+                    opt_type = "put"
+                else:
+                    continue
+            else:
+                continue
+            symbol_info.append({
+                "sym": streamer_sym,
+                "strike": float(opt.strike_price),
+                "option_type": opt_type,
+                "expiration": exp_date,
+            })
+
+    return symbol_info
+
+
 def _today_market_open() -> datetime:
     """Return today at 9:30 ET as a timezone-aware datetime (UTC)."""
     try:

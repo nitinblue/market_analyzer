@@ -25,6 +25,7 @@ from income_desk.broker.tastytrade._async import run_sync
 from income_desk.broker.tastytrade.dxlink import (
     fetch_candles,
     fetch_greeks,
+    fetch_option_chain_rest,
     fetch_option_chain_symbols,
     fetch_quotes,
     fetch_underlying_price,
@@ -57,13 +58,18 @@ class TastyTradeMarketData(MarketDataProvider):
     def get_option_chain(
         self, ticker: str, expiration: date | None = None,
     ) -> list[OptionQuote]:
-        """Fetch option chain via NestedOptionChain + DXLink quotes/Greeks.
+        """Fetch option chain via REST API + DXLink for near-ATM quotes/Greeks.
 
-        Uses NestedOptionChain.get() (SDK v12) to get strikes and streamer
-        symbols, then DXLink for live bid/ask and Greeks.
+        BUG-012 fix: uses ``Option.get_option_chain()`` REST API for the full
+        chain structure (one HTTP call, ~1-2s), then streams live quotes and
+        Greeks via DXLink only for strikes within ±15% of the current price.
+        Far-OTM strikes get bid=0, ask=0, no Greeks.
+
+        Previous approach subscribed to ALL 1000+ strikes via DXLink WebSocket,
+        taking 3+ minutes per ticker.
         """
         symbol_info = run_sync(
-            fetch_option_chain_symbols(
+            fetch_option_chain_rest(
                 self._session.sdk_session, ticker, expiration,
             ),
         )
@@ -71,15 +77,63 @@ class TastyTradeMarketData(MarketDataProvider):
         if not symbol_info:
             return []
 
-        all_symbols = [s["sym"] for s in symbol_info]
+        # Get current underlying price for ATM filtering
+        underlying_price = self.get_underlying_price(ticker)
 
-        # Fetch quotes and Greeks via DXLink
-        quotes_map = run_sync(
-            fetch_quotes(self._session.data_session, all_symbols),
-        )
-        greeks_map = run_sync(
-            fetch_greeks(self._session.data_session, all_symbols),
-        )
+        if underlying_price and underlying_price > 0:
+            # Filter to nearest expiry + ±5% of ATM to keep DXLink subscription small
+            # SPY has $1 strikes — ±15% = 190 strikes × 2 (C+P) = 380 subscriptions
+            # ±5% = 64 strikes × 2 = 128 subscriptions (manageable)
+            atm_low = underlying_price * 0.95
+            atm_high = underlying_price * 1.05
+
+            # Find nearest future expiry
+            all_expiries = sorted(set(s["expiration"] for s in symbol_info))
+            from datetime import date as _date
+            future_exp = [e for e in all_expiries if e >= _date.today()]
+            target_exp = future_exp[0] if future_exp else (all_expiries[0] if all_expiries else None)
+
+            # Filter: nearest expiry + near-ATM strikes only for DXLink
+            near_atm = [
+                s for s in symbol_info
+                if atm_low <= s["strike"] <= atm_high and s["expiration"] == target_exp
+            ]
+            far_otm = [
+                s for s in symbol_info
+                if not (atm_low <= s["strike"] <= atm_high and s["expiration"] == target_exp)
+            ]
+            logger.info(
+                "Chain %s: %d total strikes, %d near-ATM (±15%% of $%.0f), "
+                "%d far-OTM (skipping DXLink)",
+                ticker, len(symbol_info), len(near_atm),
+                underlying_price, len(far_otm),
+            )
+        else:
+            # No underlying price — fall back to streaming all (bounded)
+            logger.warning(
+                "No underlying price for %s — streaming all %d strikes",
+                ticker, len(symbol_info),
+            )
+            near_atm = symbol_info
+            far_otm = []
+
+        # Fetch live quotes and Greeks only for near-ATM strikes
+        quotes_map: dict[str, dict] = {}
+        greeks_map: dict[str, dict] = {}
+
+        if near_atm:
+            near_symbols = [s["sym"] for s in near_atm]
+            # Scale timeout with symbol count (0.3s per symbol, 3-15s range)
+            total_timeout = max(3.0, min(15.0, len(near_symbols) * 0.3))
+            quotes_map = run_sync(
+                fetch_quotes(
+                    self._session.data_session, near_symbols,
+                    total_timeout=total_timeout,
+                ),
+            )
+            greeks_map = run_sync(
+                fetch_greeks(self._session.data_session, near_symbols),
+            )
 
         return _build_option_quotes(ticker, symbol_info, quotes_map, greeks_map)
 
