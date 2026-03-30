@@ -36,6 +36,7 @@ class TradeProposal(BaseModel):
     max_risk: float | None = None
     max_profit: float | None = None
     entry_credit: float | None = None
+    credit_source: str = "unknown"  # "chain", "estimated", "blocked", "unknown"
     wing_width: float | None = None
     target_dte: int | None = None
     expiry: str | None = None  # Expiration date (ISO string from TradeSpec legs)
