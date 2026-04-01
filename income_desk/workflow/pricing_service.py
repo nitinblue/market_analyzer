@@ -180,7 +180,9 @@ def reprice_trade(
         leg_liq_ok = True
         if spread_pct > MAX_SPREAD_PCT:
             leg_liq_ok = False
-        if quote.open_interest < MIN_OI:
+        # Only check OI if broker actually provides it (non-zero).
+        # TastyTrade REST returns OI=0 — filtering on that blocks everything.
+        if quote.open_interest > 0 and quote.open_interest < MIN_OI:
             leg_liq_ok = False
         if not leg_liq_ok:
             liquidity_ok = False

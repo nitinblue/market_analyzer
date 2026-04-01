@@ -182,7 +182,10 @@ def rank_opportunities(
         ts = entry.trade_spec
 
         # Reject degenerate legs (same strike on both sides)
-        if ts.legs and len(ts.legs) >= 2:
+        # Exception: calendars and diagonals legitimately have same strike, different expiry
+        structure = str(ts.structure_type or "").lower()
+        is_calendar_type = any(t in structure for t in ("calendar", "diagonal"))
+        if ts.legs and len(ts.legs) >= 2 and not is_calendar_type:
             unique_strikes = set(leg.strike for leg in ts.legs)
             if len(unique_strikes) < 2:
                 blocked.append(BlockedTrade(
