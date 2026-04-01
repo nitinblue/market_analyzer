@@ -206,8 +206,6 @@ def assess_ratio_spread(
     gaps: list[DataGap] = []
     if vol_surface is None:
         gaps.append(DataGap(field="skew", reason="vol surface not computed", impact="high", affects="skew assessment and strike selection"))
-    if trade_spec is not None and trade_spec.max_entry_price is None:
-        gaps.append(DataGap(field="max_entry_price", reason="broker not connected", impact="high", affects="entry pricing and POP"))
 
     return RatioSpreadOpportunity(
         ticker=ticker,

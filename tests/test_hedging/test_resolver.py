@@ -14,7 +14,7 @@ def registry() -> MarketRegistry:
 
 class TestResolverIndiaStocks:
     def test_reliance_direct(self, registry: MarketRegistry):
-        """RELIANCE (medium liq) → DIRECT with large enough account."""
+        """RELIANCE (medium liq) → DIRECT."""
         approach = resolve_hedge_strategy(
             ticker="RELIANCE",
             position_value=1250000,
@@ -22,12 +22,12 @@ class TestResolverIndiaStocks:
             current_price=2500,
             regime_id=2,
             market="INDIA",
-            account_nlv=10000000,  # lot_value 1.25M needs >6.25M account for <20%
+            account_nlv=5000000,
             registry=registry,
         )
         assert approach.recommended_tier == HedgeTier.DIRECT
         assert approach.has_liquid_options
-        assert approach.lot_size == 500
+        assert approach.lot_size == 250
         assert "options" in approach.rationale.lower()
 
     def test_tatasteel_futures(self, registry: MarketRegistry):

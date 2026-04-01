@@ -114,8 +114,6 @@ def assess_zero_dte(
     gaps: list[DataGap] = []
     if orb is None:
         gaps.append(DataGap(field="orb", reason="no intraday data available", impact="medium", affects="ORB-based strategy selection and strike placement"))
-    if trade_spec is not None and trade_spec.max_entry_price is None:
-        gaps.append(DataGap(field="max_entry_price", reason="broker not connected", impact="high", affects="entry pricing and POP"))
 
     return ZeroDTEOpportunity(
         ticker=ticker,

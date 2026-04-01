@@ -167,8 +167,6 @@ def assess_iron_butterfly(
     gaps: list[DataGap] = []
     if vol_surface is None:
         gaps.append(DataGap(field="skew", reason="vol surface not computed", impact="medium", affects="strike selection and IV assessment"))
-    if trade_spec is not None and trade_spec.max_entry_price is None:
-        gaps.append(DataGap(field="max_entry_price", reason="broker not connected", impact="high", affects="entry pricing and POP"))
     if iv_rank is None:
         gaps.append(DataGap(field="iv_rank", reason="market metrics unavailable", impact="medium", affects="premium assessment"))
 

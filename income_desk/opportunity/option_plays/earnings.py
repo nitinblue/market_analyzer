@@ -239,8 +239,6 @@ def assess_earnings_play(
     gaps: list[DataGap] = []
     if days_to_earnings is None:
         gaps.append(DataGap(field="days_to_earnings", reason="no earnings date available", impact="high", affects="DTE selection and strategy timing"))
-    if trade_spec is not None and trade_spec.max_entry_price is None:
-        gaps.append(DataGap(field="max_entry_price", reason="broker not connected", impact="high", affects="entry pricing and POP"))
     if iv_rank is None:
         gaps.append(DataGap(field="iv_rank", reason="market metrics unavailable", impact="medium", affects="premium assessment"))
     if vol_surface is None:
