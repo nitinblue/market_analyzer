@@ -42,6 +42,11 @@ from income_desk.models.phase import PhaseID, PhaseResult
 from income_desk.models.data import DataType, ProviderType, DataRequest, DataResult
 from income_desk.models.features import FeatureConfig, FeatureInspection
 from income_desk.models.technicals import TechnicalSnapshot, TechnicalSignal
+from income_desk.models.technicals import (
+    CandlePattern,
+    CandlePatternSummary,
+    CandlePatternType,
+)
 
 # New workflow models
 from income_desk.models.context import InstrumentAvailability, IntermarketDashboard, IntermarketEntry, MarketContext

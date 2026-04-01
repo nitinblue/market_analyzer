@@ -434,3 +434,14 @@ class TestEdgeCases:
         df = _make_ohlcv(bars)
         summary = compute_candlestick_patterns(df, settings=settings)
         assert summary.patterns == []
+
+
+class TestIntegration:
+    def test_technical_snapshot_includes_candlestick(self) -> None:
+        from income_desk.models.technicals import TechnicalSnapshot
+        fields = TechnicalSnapshot.model_fields
+        assert "candlestick_patterns" in fields
+
+    def test_public_api_exports(self) -> None:
+        from income_desk import CandlePattern, CandlePatternSummary, CandlePatternType
+        assert CandlePatternType.HAMMER == "hammer"
