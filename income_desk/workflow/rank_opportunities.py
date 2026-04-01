@@ -237,11 +237,11 @@ def rank_opportunities(
             ))
             continue
 
-        # POP floor
-        if pop_pct < request.min_pop:
+        # EV gate: reject only if expected value is negative (trade loses money over time)
+        if ev is not None and ev < 0:
             blocked.append(BlockedTrade(
                 ticker=ticker, structure=st,
-                reason=f"POP {pop_pct:.0%} below {request.min_pop:.0%} floor",
+                reason=f"Negative EV: {ev:.0f} (POP {pop_pct:.0%}, trade loses money over time)",
                 score=entry.composite_score,
                 **_blocked_from_ts(ts),
             ))
@@ -281,9 +281,17 @@ def rank_opportunities(
                 )
                 contracts = sz.recommended_contracts
 
+                # Cap 1: max 4% of capital at risk per trade
                 max_risk_per_trade = request.capital * 0.04
-                max_contracts_by_margin = max(1, int(max_risk_per_trade / margin_per_lot)) if margin_per_lot > 0 else contracts
-                contracts = min(contracts, max_contracts_by_margin)
+                max_contracts_by_risk = max(1, int(max_risk_per_trade / margin_per_lot)) if margin_per_lot > 0 else contracts
+                contracts = min(contracts, max_contracts_by_risk)
+
+                # Cap 2: notional exposure cannot exceed capital
+                # (broker won't let you trade more than your account can cover)
+                notional_per_lot = repriced.current_price * lot_size
+                if notional_per_lot > 0:
+                    max_by_notional = max(1, int(request.capital / notional_per_lot))
+                    contracts = min(contracts, max_by_notional)
 
             max_risk = max_loss_per * contracts
             max_profit = max_profit_per * contracts
@@ -298,13 +306,8 @@ def rank_opportunities(
             continue
 
         if contracts == 0:
-            blocked.append(BlockedTrade(
-                ticker=ticker, structure=st,
-                reason="Kelly sizing = 0 contracts",
-                score=entry.composite_score,
-                **_blocked_from_ts(ts),
-            ))
-            continue
+            # Trade quality is fine, just insufficient capital — still show as GO
+            contracts = 1  # Show 1 lot so trader can evaluate the trade
 
         if len(trades) >= request.max_trades:
             break

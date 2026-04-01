@@ -238,21 +238,29 @@ def step_rank_and_show(
             parts.append(f"LC:{t.long_call:.0f}")
         legs_str = " ".join(parts) if parts else "-"
 
+        # Determine risk type and direction
+        _defined = t.structure in ("iron_condor", "iron_butterfly", "credit_spread",
+                                    "debit_spread", "calendar", "diagonal")
+        risk_type = "Defined" if _defined else "Undefined"
+        direction = getattr(t, 'direction', None) or (
+            "neutral" if t.structure in ("iron_condor", "iron_butterfly") else
+            "bearish" if "call" in (t.structure or "") else
+            "bullish" if "put" in (t.structure or "") else "neutral"
+        )
+
         go_rows.append([
-            t.rank, t.ticker, t.structure, t.expiry or "-",
+            t.rank, t.ticker, t.structure, direction, risk_type,
+            t.expiry or "-",
             f"{t.pop_pct * 100:.0f}%" if t.pop_pct else "-",
             f"{cur}{t.entry_credit:.2f}" if t.entry_credit else "-",
-            f"{cur}{t.max_profit:,.0f}" if t.max_profit else "-",
-            f"{cur}{t.max_risk:,.0f}" if t.max_risk else "-",
             t.lot_size or "-",
             t.contracts or "-",
             legs_str,
-            _trunc(t.rationale or t.verdict, 40),
         ])
     print_table(
         f"GO ({len(resp.trades)} trades)",
-        ["#", "Ticker", "Structure", "Expiry", "POP", "Credit",
-         "MaxProfit", "MaxLoss", "Lot", "Lots", "Legs", "Rationale"],
+        ["#", "Ticker", "Structure", "Direction", "Risk", "Expiry",
+         "POP", "Credit", "Lot", "Lots", "Legs"],
         go_rows,
     )
 
@@ -314,7 +322,7 @@ def step_rank_and_show(
         except Exception:
             pass
 
-        # Build one combined table: leg quotes + trade summary
+        # Build combined table: legs with OI
         if leg_quotes:
             quote_rows = [
                 [
@@ -330,85 +338,141 @@ def step_rank_and_show(
             ]
             print_table("Leg Quotes", ["Instrument", "Action", "Bid", "Ask", "Mid", "IV", "Delta"], quote_rows)
 
-        # Compute max profit / max risk from live leg quotes when not already set
-        max_profit_val = d['max_profit']
-        max_risk_val = d['max_loss']
+        # ALWAYS compute max profit / max risk from live bid/ask
+        # The ranking credit is stale — live quotes are the truth
         lot_size_val = d['lot_size']
-        credit_val = d['entry_credit']
+        credit_val = None
+        max_profit_val = None
+        max_risk_val = None
+        wing_put = None
+        wing_call = None
+        be_low = None
+        be_high = None
+        underlying_price = None
+        dte_val = None
 
-        if leg_quotes and (not max_profit_val or not max_risk_val):
-            # Derive from live bid/ask: sell at bid, buy at ask
-            live_credit = 0.0
-            sell_strikes = []
-            buy_strikes = []
+        # Get underlying price
+        try:
+            underlying_price = ma.market_data.get_underlying_price(d['ticker']) if ma.market_data else None
+        except Exception:
+            pass
+
+        # Compute DTE
+        if d['expiry']:
+            try:
+                from datetime import date as _d
+                exp = _d.fromisoformat(d['expiry'])
+                dte_val = (exp - _d.today()).days
+            except Exception:
+                pass
+
+        if leg_quotes:
+            # Net credit/debit from live bid/ask
+            live_net = 0.0
+            sell_puts = {}   # strike -> bid
+            buy_puts = {}    # strike -> ask
+            sell_calls = {}
+            buy_calls = {}
             for lq in leg_quotes:
-                if lq.action == "sell" and lq.bid is not None:
-                    live_credit += lq.bid
-                    sell_strikes.append(lq.strike)
-                elif lq.action == "buy" and lq.ask is not None:
-                    live_credit -= lq.ask
-                    buy_strikes.append(lq.strike)
+                if lq.action == "sell" and lq.bid is not None and lq.bid > 0:
+                    live_net += lq.bid
+                    if lq.option_type == "put":
+                        sell_puts[lq.strike] = lq
+                    else:
+                        sell_calls[lq.strike] = lq
+                elif lq.action == "buy" and lq.ask is not None and lq.ask > 0:
+                    live_net -= lq.ask
+                    if lq.option_type == "put":
+                        buy_puts[lq.strike] = lq
+                    else:
+                        buy_calls[lq.strike] = lq
 
-            # Get lot size from leg quotes
-            if not lot_size_val and leg_quotes:
+            credit_val = live_net
+
+            # Get lot size from broker chain
+            if not lot_size_val:
                 lot_size_val = getattr(leg_quotes[0], 'lot_size', None)
                 if not lot_size_val:
-                    # Try from broker chain
                     try:
                         from income_desk.registry import MarketRegistry
                         lot_size_val = MarketRegistry().get_instrument(d['ticker'], meta.market).lot_size
                     except Exception:
                         lot_size_val = 1
 
-            # Wing width from strikes
-            all_strikes = sorted(sell_strikes + buy_strikes)
-            if len(all_strikes) >= 2:
-                gaps = [all_strikes[i+1] - all_strikes[i] for i in range(len(all_strikes)-1)]
-                wing = min(gaps) if gaps else 0
-            else:
-                wing = 0
+            # Wing widths from actual strikes
+            if sell_puts and buy_puts:
+                wing_put = max(sell_puts.keys()) - min(buy_puts.keys())
+            if sell_calls and buy_calls:
+                wing_call = max(buy_calls.keys()) - min(sell_calls.keys())
 
-            if live_credit > 0 and wing > 0 and lot_size_val:
-                credit_val = credit_val or live_credit
-                max_profit_val = max_profit_val or (live_credit * lot_size_val)
-                max_risk_val = max_risk_val or ((wing - live_credit) * lot_size_val)
-            elif live_credit > 0 and lot_size_val:
-                # Credit spread (no wing calc possible with 1 spread)
-                credit_val = credit_val or live_credit
-                max_profit_val = max_profit_val or (live_credit * lot_size_val)
+            wing = min(w for w in [wing_put, wing_call] if w is not None and w > 0) if any(w and w > 0 for w in [wing_put, wing_call]) else None
 
-        # Trade summary as a compact table
+            if live_net > 0 and lot_size_val:
+                # Credit trade
+                max_profit_val = live_net * lot_size_val
+                if wing and wing > live_net:
+                    max_risk_val = (wing - live_net) * lot_size_val
+                # Breakevens
+                if sell_puts:
+                    be_low = max(sell_puts.keys()) - live_net
+                if sell_calls:
+                    be_high = min(sell_calls.keys()) + live_net
+            elif live_net < 0 and lot_size_val:
+                # Debit trade
+                debit = abs(live_net)
+                max_risk_val = debit * lot_size_val
+                if wing and wing > debit:
+                    max_profit_val = (wing - debit) * lot_size_val
+
+        # Trade summary table — all computed from live data
         summary_rows = []
+        if underlying_price:
+            summary_rows.append(["Underlying", f"{cur}{underlying_price:,.2f}"])
         summary_rows.append(["Expiry", d['expiry'] or "-"])
+        if dte_val is not None:
+            summary_rows.append(["DTE", str(dte_val)])
         summary_rows.append(["Lot Size", str(lot_size_val or "-")])
-        if d['wing_width']:
-            summary_rows.append(["Wing Width", str(d['wing_width'])])
-        if net_credit_live is not None:
-            if net_credit_live >= 0:
-                summary_rows.append(["Net Credit (live)", f"{cur}{net_credit_live:.2f}"])
-            else:
-                summary_rows.append(["Net Debit (live)", f"{cur}{abs(net_credit_live):.2f}"])
-        elif credit_val:
+        if wing_put is not None and wing_call is not None and wing_put != wing_call:
+            summary_rows.append(["Wing Width", f"Put: {wing_put:.0f} / Call: {wing_call:.0f}"])
+        elif wing_put or wing_call:
+            summary_rows.append(["Wing Width", f"{(wing_put or wing_call):.0f}"])
+        if credit_val is not None:
             if credit_val >= 0:
-                summary_rows.append(["Net Credit", f"{cur}{credit_val:.2f}"])
+                summary_rows.append(["Net Credit (live)", f"{cur}{credit_val:.2f}"])
             else:
-                summary_rows.append(["Net Debit", f"{cur}{abs(credit_val):.2f}"])
-        if max_profit_val:
+                summary_rows.append(["Net Debit (live)", f"{cur}{abs(credit_val):.2f}"])
+        if max_profit_val is not None:
             summary_rows.append(["Max Profit/lot", f"{cur}{max_profit_val:,.2f}"])
-        if max_risk_val:
+        if max_risk_val is not None:
             summary_rows.append(["Max Risk/lot", f"{cur}{max_risk_val:,.2f}"])
+        if max_profit_val and max_risk_val and max_risk_val > 0:
+            rr = max_profit_val / max_risk_val
+            summary_rows.append(["Risk:Reward", f"1:{rr:.2f}"])
+        if be_low or be_high:
+            be_str = f"{be_low:.2f}" if be_low else "?"
+            be_str += f" — {be_high:.2f}" if be_high else ""
+            summary_rows.append(["Breakevens", be_str])
         if d['pop']:
             summary_rows.append(["POP", f"{d['pop'] * 100:.1f}%"])
-        if d['ev']:
-            summary_rows.append(["Expected Value", f"{cur}{d['ev']:,.2f}"])
+        # Delta-derived POP cross-check
+        if leg_quotes:
+            sell_deltas = [abs(lq.delta) for lq in leg_quotes if lq.action == "sell" and lq.delta]
+            if len(sell_deltas) >= 2:
+                pop_delta = 1.0
+                for sd in sell_deltas:
+                    pop_delta *= (1.0 - sd)
+                summary_rows.append(["POP (delta xcheck)", f"{pop_delta * 100:.1f}%"])
+            elif len(sell_deltas) == 1:
+                summary_rows.append(["POP (delta xcheck)", f"{(1.0 - sell_deltas[0]) * 100:.1f}%"])
+        if max_profit_val and max_risk_val and d['pop']:
+            ev = d['pop'] * max_profit_val - (1 - d['pop']) * max_risk_val
+            summary_rows.append(["EV (live)", f"{cur}{ev:,.0f}"])
         if d['contracts']:
             summary_rows.append(["Contracts", str(d['contracts'])])
         if fill_quality:
             summary_rows.append(["Fill Quality", fill_quality])
         summary_rows.append(["Verdict", d['verdict']])
         summary_rows.append(["Rationale", _trunc(d['rationale'] or "-", 60)])
-        if d.get('data_gaps'):
-            summary_rows.append(["Data Gaps", ", ".join(d['data_gaps'][:3])])
 
         print_table("Trade Summary", ["Field", "Value"], summary_rows)
 
