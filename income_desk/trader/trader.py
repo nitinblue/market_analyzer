@@ -285,47 +285,18 @@ def step_rank_and_show(
                 "data_gaps": None, "rank": None,
             })
 
+    from income_desk.workflow import price_trade
+    from income_desk.workflow.price_trade import PriceRequest
+
     for d in all_details:
         label = f"#{d['rank']} " if d['rank'] else ""
         print(f"\n  --- {label}{d['ticker']} {d['structure']} [{d['verdict']}] ---")
 
-        # Strikes + expiry
-        print(f"  Expiry       : {d['expiry'] or '-'}")
-        if d['sp']:
-            print(f"  Short Put    : {d['sp']:.0f}")
-        if d['lp']:
-            print(f"  Long Put     : {d['lp']:.0f}")
-        if d['sc']:
-            print(f"  Short Call   : {d['sc']:.0f}")
-        if d['lc']:
-            print(f"  Long Call    : {d['lc']:.0f}")
-
-        # P&L (GO trades only)
-        if d['verdict'] == "GO":
-            print(f"  Lot size     : {d['lot_size'] or '-'}")
-            print(f"  Wing width   : {d['wing_width'] or '-'}")
-            if d['entry_credit']:
-                print(f"  Credit/share : {cur}{d['entry_credit']:.2f}")
-            if d['max_profit']:
-                print(f"  Max profit   : {cur}{d['max_profit']:,.2f}")
-            if d['max_loss']:
-                print(f"  Max loss     : {cur}{d['max_loss']:,.2f}")
-            if d['pop']:
-                print(f"  POP          : {d['pop'] * 100:.1f}%")
-            if d['ev']:
-                print(f"  EV           : {cur}{d['ev']:,.2f}")
-            if d['contracts']:
-                print(f"  Contracts    : {d['contracts']}")
-        if d['rationale']:
-            print(f"  Rationale    : {_trunc(d['rationale'], 70)}")
-        if d.get('data_gaps'):
-            print(f"  Data gaps    : {', '.join(d['data_gaps'][:3])}")
-
-        # ── Price from broker (live leg quotes) ──
+        # Fetch live leg quotes from broker
+        leg_quotes = []
+        net_credit_live = None
+        fill_quality = None
         try:
-            from income_desk.workflow import price_trade
-            from income_desk.workflow.price_trade import PriceRequest
-
             legs = []
             if d['sp']:
                 legs.append({"strike": d['sp'], "option_type": "put", "action": "sell"})
@@ -335,37 +306,105 @@ def step_rank_and_show(
                 legs.append({"strike": d['sc'], "option_type": "call", "action": "sell"})
             if d['lc']:
                 legs.append({"strike": d['lc'], "option_type": "call", "action": "buy"})
-
             if legs:
-                preq = PriceRequest(ticker=d['ticker'], legs=legs, market=meta.market)
-                presp = price_trade(preq, ma)
+                presp = price_trade(PriceRequest(ticker=d['ticker'], legs=legs, market=meta.market), ma)
+                leg_quotes = presp.leg_quotes or []
+                net_credit_live = presp.net_credit
+                fill_quality = presp.fill_quality
+        except Exception:
+            pass
 
-                if presp.leg_quotes:
-                    quote_rows = [
-                        [
-                            f"{d['ticker']} {lq.strike:.0f} {'CE' if lq.option_type == 'call' else 'PE'}",
-                            lq.action,
-                            f"{cur}{lq.bid:.2f}" if lq.bid is not None else "-",
-                            f"{cur}{lq.ask:.2f}" if lq.ask is not None else "-",
-                            f"{cur}{lq.mid:.2f}" if lq.mid is not None else "-",
-                            f"{lq.iv * 100:.1f}%" if lq.iv is not None else "-",
-                            f"{lq.delta:.3f}" if lq.delta is not None else "-",
-                        ]
-                        for lq in presp.leg_quotes
-                    ]
-                    print_table(
-                        "Leg Quotes",
-                        ["Instrument", "Action", "Bid", "Ask", "Mid", "IV", "Delta"],
-                        quote_rows,
-                    )
+        # Build one combined table: leg quotes + trade summary
+        if leg_quotes:
+            quote_rows = [
+                [
+                    f"{d['ticker']} {lq.strike:.0f} {'CE' if lq.option_type == 'call' else 'PE'}",
+                    lq.action,
+                    f"{cur}{lq.bid:.2f}" if lq.bid is not None else "-",
+                    f"{cur}{lq.ask:.2f}" if lq.ask is not None else "-",
+                    f"{cur}{lq.mid:.2f}" if lq.mid is not None else "-",
+                    f"{lq.iv * 100:.1f}%" if lq.iv is not None else "-",
+                    f"{lq.delta:.3f}" if lq.delta is not None else "-",
+                ]
+                for lq in leg_quotes
+            ]
+            print_table("Leg Quotes", ["Instrument", "Action", "Bid", "Ask", "Mid", "IV", "Delta"], quote_rows)
 
-                    if presp.net_credit is not None:
-                        print(f"  Live credit  : {cur}{presp.net_credit:.2f}")
-                    if presp.fill_quality is not None:
-                        print(f"  Fill quality : {presp.fill_quality}")
-        except Exception as exc:
-            if verbose:
-                print(f"  [pricing error: {exc}]")
+        # Compute max profit / max risk from live leg quotes when not already set
+        max_profit_val = d['max_profit']
+        max_risk_val = d['max_loss']
+        lot_size_val = d['lot_size']
+        credit_val = d['entry_credit']
+
+        if leg_quotes and (not max_profit_val or not max_risk_val):
+            # Derive from live bid/ask: sell at bid, buy at ask
+            live_credit = 0.0
+            sell_strikes = []
+            buy_strikes = []
+            for lq in leg_quotes:
+                if lq.action == "sell" and lq.bid is not None:
+                    live_credit += lq.bid
+                    sell_strikes.append(lq.strike)
+                elif lq.action == "buy" and lq.ask is not None:
+                    live_credit -= lq.ask
+                    buy_strikes.append(lq.strike)
+
+            # Get lot size from leg quotes
+            if not lot_size_val and leg_quotes:
+                lot_size_val = getattr(leg_quotes[0], 'lot_size', None)
+                if not lot_size_val:
+                    # Try from broker chain
+                    try:
+                        from income_desk.registry import MarketRegistry
+                        lot_size_val = MarketRegistry().get_instrument(d['ticker'], meta.market).lot_size
+                    except Exception:
+                        lot_size_val = 1
+
+            # Wing width from strikes
+            all_strikes = sorted(sell_strikes + buy_strikes)
+            if len(all_strikes) >= 2:
+                gaps = [all_strikes[i+1] - all_strikes[i] for i in range(len(all_strikes)-1)]
+                wing = min(gaps) if gaps else 0
+            else:
+                wing = 0
+
+            if live_credit > 0 and wing > 0 and lot_size_val:
+                credit_val = credit_val or live_credit
+                max_profit_val = max_profit_val or (live_credit * lot_size_val)
+                max_risk_val = max_risk_val or ((wing - live_credit) * lot_size_val)
+            elif live_credit > 0 and lot_size_val:
+                # Credit spread (no wing calc possible with 1 spread)
+                credit_val = credit_val or live_credit
+                max_profit_val = max_profit_val or (live_credit * lot_size_val)
+
+        # Trade summary as a compact table
+        summary_rows = []
+        summary_rows.append(["Expiry", d['expiry'] or "-"])
+        summary_rows.append(["Lot Size", str(lot_size_val or "-")])
+        if d['wing_width']:
+            summary_rows.append(["Wing Width", str(d['wing_width'])])
+        if net_credit_live is not None:
+            summary_rows.append(["Net Credit (live)", f"{cur}{net_credit_live:.2f}"])
+        elif credit_val:
+            summary_rows.append(["Net Credit", f"{cur}{credit_val:.2f}"])
+        if max_profit_val:
+            summary_rows.append(["Max Profit/lot", f"{cur}{max_profit_val:,.2f}"])
+        if max_risk_val:
+            summary_rows.append(["Max Risk/lot", f"{cur}{max_risk_val:,.2f}"])
+        if d['pop']:
+            summary_rows.append(["POP", f"{d['pop'] * 100:.1f}%"])
+        if d['ev']:
+            summary_rows.append(["Expected Value", f"{cur}{d['ev']:,.2f}"])
+        if d['contracts']:
+            summary_rows.append(["Contracts", str(d['contracts'])])
+        if fill_quality:
+            summary_rows.append(["Fill Quality", fill_quality])
+        summary_rows.append(["Verdict", d['verdict']])
+        summary_rows.append(["Rationale", _trunc(d['rationale'] or "-", 60)])
+        if d.get('data_gaps'):
+            summary_rows.append(["Data Gaps", ", ".join(d['data_gaps'][:3])])
+
+        print_table("Trade Summary", ["Field", "Value"], summary_rows)
 
 
 # ---------------------------------------------------------------------------

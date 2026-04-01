@@ -152,6 +152,15 @@ def reprice_trade(
         key = (leg.strike, leg.option_type)
         quote = chain_lookup.get(key)
 
+        # If exact strike not in chain, snap to nearest available strike
+        if quote is None:
+            same_type = [(s, ot) for (s, ot) in chain_lookup if ot == leg.option_type]
+            if same_type:
+                nearest_key = min(same_type, key=lambda k: abs(k[0] - leg.strike))
+                quote = chain_lookup[nearest_key]
+                # Update leg strike to what actually exists
+                leg.strike = nearest_key[0]
+
         if quote is None:
             all_found = False
             continue
