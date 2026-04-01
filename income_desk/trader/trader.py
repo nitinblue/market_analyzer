@@ -109,8 +109,6 @@ def step_scan(ma: Any, tickers: list[str], meta: Any, verbose: bool = False) -> 
         req = ScanRequest(tickers=tickers, market=meta.market)
         resp = scan_universe(req, ma)
 
-        print(f"\n  Scanned: {resp.total_scanned}  |  Passed: {resp.total_passed}")
-
         if resp.candidates:
             # Dedupe by ticker, keep highest score
             best: dict[str, Any] = {}
@@ -119,6 +117,8 @@ def step_scan(ma: Any, tickers: list[str], meta: Any, verbose: bool = False) -> 
                     best[c.ticker] = c
             candidates = sorted(best.values(), key=lambda c: c.score, reverse=True)
 
+            print(f"\n  Scanned: {resp.total_scanned}  |  Passed: {len(candidates)} tickers")
+
             rows = [
                 [c.ticker, f"{c.score:.2f}", c.regime_label or "?", _trunc(c.rationale, 50)]
                 for c in candidates
@@ -126,6 +126,8 @@ def step_scan(ma: Any, tickers: list[str], meta: Any, verbose: bool = False) -> 
             print_table("Candidates", ["Ticker", "Score", "Regime", "Rationale"], rows)
 
             return [c.ticker for c in candidates]
+        else:
+            print(f"\n  Scanned: {resp.total_scanned}  |  Passed: 0")
 
         print("  No candidates passed scan.")
         return tickers  # Fallback to full list
@@ -177,7 +179,9 @@ def step_rank_and_show(
             traceback.print_exc()
         return
 
-    print(f"\n  Tradeable: {resp.tradeable_count}  |  Assessed: {resp.total_assessed}")
+    n_go = len(resp.trades)
+    n_blocked = len(resp.blocked)
+    print(f"\n  Tradeable: {resp.tradeable_count}  |  Assessed: {resp.total_assessed}  |  GO: {n_go}  |  NO GO: {n_blocked}")
 
     # ── 3b. Regime summary ──
     if resp.regime_summary:
@@ -187,76 +191,135 @@ def step_rank_and_show(
         ]
         print_table("Regime Map", ["Ticker", "ID", "Label", "Confidence", "Tradeable"], rows)
 
-    # ── 3c. Blocked trades ──
+    # ── 3c. NO GO trades — why each was rejected ──
     if resp.blocked:
-        rows = [
-            [b.ticker, b.structure, f"{b.score:.2f}" if b.score else "-", _trunc(b.reason, 50)]
-            for b in resp.blocked
-        ]
-        print_table("Blocked", ["Ticker", "Structure", "Score", "Reason"], rows)
+        nogo_rows = []
+        for b in resp.blocked:
+            # Build legs string from strikes if available
+            parts = []
+            if b.short_put:
+                parts.append(f"SP:{b.short_put:.0f}")
+            if b.long_put:
+                parts.append(f"LP:{b.long_put:.0f}")
+            if b.short_call:
+                parts.append(f"SC:{b.short_call:.0f}")
+            if b.long_call:
+                parts.append(f"LC:{b.long_call:.0f}")
+            legs_str = " ".join(parts) if parts else "-"
+
+            nogo_rows.append([
+                b.ticker, b.structure,
+                b.expiry or "-",
+                legs_str,
+                f"{b.score:.2f}" if b.score else "-",
+                _trunc(b.reason, 60),
+            ])
+        print_table(
+            f"NO GO ({len(resp.blocked)} trades)",
+            ["Ticker", "Strategy", "Expiry", "Legs", "Score", "Reason"],
+            nogo_rows,
+        )
 
     if not resp.trades:
         print("\n  No actionable trades found.")
         return
 
-    # ── 3d. Trade ideas summary ──
-    rows = [
-        [
+    # ── 3d. GO trades — full details ──
+    go_rows = []
+    for t in resp.trades:
+        parts = []
+        if t.short_put:
+            parts.append(f"SP:{t.short_put:.0f}")
+        if t.long_put:
+            parts.append(f"LP:{t.long_put:.0f}")
+        if t.short_call:
+            parts.append(f"SC:{t.short_call:.0f}")
+        if t.long_call:
+            parts.append(f"LC:{t.long_call:.0f}")
+        legs_str = " ".join(parts) if parts else "-"
+
+        go_rows.append([
             t.rank, t.ticker, t.structure, t.expiry or "-",
-            f"{t.composite_score:.2f}", t.verdict,
             f"{t.pop_pct * 100:.0f}%" if t.pop_pct else "-",
             f"{cur}{t.entry_credit:.2f}" if t.entry_credit else "-",
             f"{cur}{t.max_profit:,.0f}" if t.max_profit else "-",
             f"{cur}{t.max_risk:,.0f}" if t.max_risk else "-",
+            t.lot_size or "-",
             t.contracts or "-",
-            t.credit_source or "?",
-        ]
-        for t in resp.trades
-    ]
+            legs_str,
+            _trunc(t.rationale or t.verdict, 40),
+        ])
     print_table(
-        "Trade Ideas",
-        ["#", "Ticker", "Structure", "Expiry", "Score", "Verdict",
-         "POP", "Credit", "MaxProfit", "MaxLoss", "Lots", "Source"],
-        rows,
+        f"GO ({len(resp.trades)} trades)",
+        ["#", "Ticker", "Structure", "Expiry", "POP", "Credit",
+         "MaxProfit", "MaxLoss", "Lot", "Lots", "Legs", "Rationale"],
+        go_rows,
     )
 
-    # ── 3e. Full leg details for each trade ──
+    # ── 3e. Full leg details for ALL trades (GO + NO GO with strikes) ──
     print(f"\n{'=' * 70}")
-    print("  TRADE DETAILS (leg-level pricing)")
+    print("  TRADE DETAILS (leg-level)")
     print(f"{'=' * 70}")
 
-    for trade in resp.trades:
-        print(f"\n  --- #{trade.rank} {trade.ticker} {trade.structure} ---")
+    # Build unified list: GO trades first, then NO GO trades that have strikes
+    all_details = []
+    for t in resp.trades:
+        all_details.append({
+            "ticker": t.ticker, "structure": t.structure, "verdict": "GO",
+            "sp": t.short_put, "lp": t.long_put, "sc": t.short_call, "lc": t.long_call,
+            "expiry": t.expiry, "lot_size": t.lot_size, "wing_width": t.wing_width,
+            "entry_credit": t.entry_credit, "max_profit": t.max_profit,
+            "max_loss": t.max_risk, "pop": t.pop_pct, "ev": t.expected_value,
+            "contracts": t.contracts, "rationale": t.rationale,
+            "data_gaps": t.data_gaps, "rank": t.rank,
+        })
+    for b in resp.blocked:
+        if b.short_put or b.short_call or b.long_put or b.long_call:
+            all_details.append({
+                "ticker": b.ticker, "structure": b.structure, "verdict": f"NO GO",
+                "sp": b.short_put, "lp": b.long_put, "sc": b.short_call, "lc": b.long_call,
+                "expiry": b.expiry, "lot_size": None, "wing_width": None,
+                "entry_credit": None, "max_profit": None,
+                "max_loss": None, "pop": None, "ev": None,
+                "contracts": None, "rationale": b.reason,
+                "data_gaps": None, "rank": None,
+            })
 
-        # Strike table
-        strike_rows = []
-        if trade.short_put:
-            strike_rows.append([f"{trade.ticker} {trade.short_put:.0f} PE", "sell", trade.short_put])
-        if trade.long_put:
-            strike_rows.append([f"{trade.ticker} {trade.long_put:.0f} PE", "buy", trade.long_put])
-        if trade.short_call:
-            strike_rows.append([f"{trade.ticker} {trade.short_call:.0f} CE", "sell", trade.short_call])
-        if trade.long_call:
-            strike_rows.append([f"{trade.ticker} {trade.long_call:.0f} CE", "buy", trade.long_call])
+    for d in all_details:
+        label = f"#{d['rank']} " if d['rank'] else ""
+        print(f"\n  --- {label}{d['ticker']} {d['structure']} [{d['verdict']}] ---")
 
-        if strike_rows:
-            print_table("Legs", ["Instrument", "Action", "Strike"], strike_rows)
+        # Strikes + expiry
+        print(f"  Expiry       : {d['expiry'] or '-'}")
+        if d['sp']:
+            print(f"  Short Put    : {d['sp']:.0f}")
+        if d['lp']:
+            print(f"  Long Put     : {d['lp']:.0f}")
+        if d['sc']:
+            print(f"  Short Call   : {d['sc']:.0f}")
+        if d['lc']:
+            print(f"  Long Call    : {d['lc']:.0f}")
 
-        # P&L summary
-        lot_size = trade.lot_size or "-"
-        wing = trade.wing_width or "-"
-        print(f"  Lot size     : {lot_size}")
-        print(f"  Wing width   : {wing}")
-        print(f"  Credit/share : {cur}{trade.entry_credit:.2f}" if trade.entry_credit else "")
-        print(f"  Max profit   : {cur}{trade.max_profit:,.2f}" if trade.max_profit else "")
-        print(f"  Max loss     : {cur}{trade.max_risk:,.2f}" if trade.max_risk else "")
-        print(f"  POP          : {trade.pop_pct * 100:.1f}%" if trade.pop_pct else "")
-        print(f"  EV           : {cur}{trade.expected_value:,.2f}" if trade.expected_value else "")
-        print(f"  Contracts    : {trade.contracts}")
-        if trade.rationale:
-            print(f"  Rationale    : {_trunc(trade.rationale, 70)}")
-        if trade.data_gaps:
-            print(f"  Data gaps    : {', '.join(trade.data_gaps[:3])}")
+        # P&L (GO trades only)
+        if d['verdict'] == "GO":
+            print(f"  Lot size     : {d['lot_size'] or '-'}")
+            print(f"  Wing width   : {d['wing_width'] or '-'}")
+            if d['entry_credit']:
+                print(f"  Credit/share : {cur}{d['entry_credit']:.2f}")
+            if d['max_profit']:
+                print(f"  Max profit   : {cur}{d['max_profit']:,.2f}")
+            if d['max_loss']:
+                print(f"  Max loss     : {cur}{d['max_loss']:,.2f}")
+            if d['pop']:
+                print(f"  POP          : {d['pop'] * 100:.1f}%")
+            if d['ev']:
+                print(f"  EV           : {cur}{d['ev']:,.2f}")
+            if d['contracts']:
+                print(f"  Contracts    : {d['contracts']}")
+        if d['rationale']:
+            print(f"  Rationale    : {_trunc(d['rationale'], 70)}")
+        if d.get('data_gaps'):
+            print(f"  Data gaps    : {', '.join(d['data_gaps'][:3])}")
 
         # ── Price from broker (live leg quotes) ──
         try:
@@ -264,21 +327,23 @@ def step_rank_and_show(
             from income_desk.workflow.price_trade import PriceRequest
 
             legs = []
-            if trade.short_put and trade.long_put:
-                legs.append({"strike": trade.short_put, "option_type": "put", "action": "sell"})
-                legs.append({"strike": trade.long_put, "option_type": "put", "action": "buy"})
-            if trade.short_call and trade.long_call:
-                legs.append({"strike": trade.short_call, "option_type": "call", "action": "sell"})
-                legs.append({"strike": trade.long_call, "option_type": "call", "action": "buy"})
+            if d['sp']:
+                legs.append({"strike": d['sp'], "option_type": "put", "action": "sell"})
+            if d['lp']:
+                legs.append({"strike": d['lp'], "option_type": "put", "action": "buy"})
+            if d['sc']:
+                legs.append({"strike": d['sc'], "option_type": "call", "action": "sell"})
+            if d['lc']:
+                legs.append({"strike": d['lc'], "option_type": "call", "action": "buy"})
 
             if legs:
-                preq = PriceRequest(ticker=trade.ticker, legs=legs, market=meta.market)
+                preq = PriceRequest(ticker=d['ticker'], legs=legs, market=meta.market)
                 presp = price_trade(preq, ma)
 
                 if presp.leg_quotes:
                     quote_rows = [
                         [
-                            f"{trade.ticker} {lq.strike:.0f} {'CE' if lq.option_type == 'call' else 'PE'}",
+                            f"{d['ticker']} {lq.strike:.0f} {'CE' if lq.option_type == 'call' else 'PE'}",
                             lq.action,
                             f"{cur}{lq.bid:.2f}" if lq.bid is not None else "-",
                             f"{cur}{lq.ask:.2f}" if lq.ask is not None else "-",
@@ -295,9 +360,9 @@ def step_rank_and_show(
                     )
 
                     if presp.net_credit is not None:
-                        print(f"  Live net credit : {cur}{presp.net_credit:.2f}")
+                        print(f"  Live credit  : {cur}{presp.net_credit:.2f}")
                     if presp.fill_quality is not None:
-                        print(f"  Fill quality    : {presp.fill_quality}")
+                        print(f"  Fill quality : {presp.fill_quality}")
         except Exception as exc:
             if verbose:
                 print(f"  [pricing error: {exc}]")

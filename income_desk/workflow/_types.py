@@ -63,6 +63,11 @@ class BlockedTrade(BaseModel):
     structure: str = ""
     reason: str
     score: float = 0.0
+    expiry: str | None = None
+    short_put: float | None = None
+    long_put: float | None = None
+    short_call: float | None = None
+    long_call: float | None = None
 
 
 class OpenPosition(BaseModel):

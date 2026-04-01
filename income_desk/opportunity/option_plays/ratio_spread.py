@@ -106,6 +106,11 @@ def assess_ratio_spread(
     hard_stops = _check_hard_stops(regime, vol_surface, days_to_earnings, put_skew, call_skew, cfg, ticker=ticker)
 
     if hard_stops:
+        # Still try to build trade_spec so rejected trades show strikes/expiry
+        try:
+            _hs_spec = _compute_trade_spec(ticker, technicals, regime, vol_surface, direction)
+        except Exception:
+            _hs_spec = None
         return RatioSpreadOpportunity(
             ticker=ticker,
             as_of_date=today,
@@ -124,6 +129,7 @@ def assess_ratio_spread(
             put_skew=put_skew,
             call_skew=call_skew,
             days_to_earnings=days_to_earnings,
+            trade_spec=_hs_spec,
             summary=f"NO_GO: {hard_stops[0].description}",
         )
 
@@ -160,6 +166,11 @@ def assess_ratio_spread(
                 "Not suitable for accounts under $500K or without defined-risk approval."
             ),
         ))
+        # Still try to build trade_spec so rejected trades show strikes/expiry
+        try:
+            _naked_spec = _compute_trade_spec(ticker, technicals, regime, vol_surface, direction)
+        except Exception:
+            _naked_spec = None
         return RatioSpreadOpportunity(
             ticker=ticker,
             as_of_date=today,
@@ -178,11 +189,16 @@ def assess_ratio_spread(
             put_skew=put_skew,
             call_skew=call_skew,
             days_to_earnings=days_to_earnings,
+            trade_spec=_naked_spec,
             summary="NO_GO: naked leg undefined risk — not suitable for this account",
         )
 
     # --- Trade spec ---
-    trade_spec = _compute_trade_spec(ticker, technicals, regime, vol_surface, direction) if verdict != Verdict.NO_GO else None
+    # Always build trade_spec so rejected trades show strikes/expiry
+    try:
+        trade_spec = _compute_trade_spec(ticker, technicals, regime, vol_surface, direction)
+    except Exception:
+        trade_spec = None
 
     summary = _build_summary(ticker, verdict, confidence, ratio_strat, direction, has_naked)
 

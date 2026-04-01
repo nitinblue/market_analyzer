@@ -105,6 +105,11 @@ def assess_diagonal(
     term_slope = vol_surface.term_slope if vol_surface else 0.0
 
     if hard_stops:
+        # Still try to build trade_spec so rejected trades show strikes/expiry
+        try:
+            _hs_spec = _compute_trade_spec(ticker, technicals, vol_surface, DiagonalStrategy.NO_TRADE, trend_dir)
+        except Exception:
+            _hs_spec = None
         return DiagonalOpportunity(
             ticker=ticker,
             as_of_date=today,
@@ -123,6 +128,7 @@ def assess_diagonal(
             back_iv=back_iv,
             term_slope=term_slope,
             days_to_earnings=days_to_earnings,
+            trade_spec=_hs_spec,
             summary=f"NO_GO: {hard_stops[0].description}",
         )
 
@@ -194,7 +200,11 @@ def assess_diagonal(
     diag_strat, strat_rec = _select_strategy(regime, technicals, trend_dir, confidence)
 
     # --- Trade spec ---
-    trade_spec = _compute_trade_spec(ticker, technicals, vol_surface, diag_strat, trend_dir) if verdict != Verdict.NO_GO else None
+    # Always build trade_spec so rejected trades show strikes/expiry
+    try:
+        trade_spec = _compute_trade_spec(ticker, technicals, vol_surface, diag_strat, trend_dir)
+    except Exception:
+        trade_spec = None
 
     summary = _build_summary(ticker, verdict, confidence, diag_strat, trend_dir, front_iv, back_iv)
 

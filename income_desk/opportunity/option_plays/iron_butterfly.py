@@ -100,6 +100,11 @@ def assess_iron_butterfly(
         ))
 
     if hard_stops:
+        # Still try to build trade_spec so rejected trades show strikes/expiry
+        try:
+            _hs_spec = _compute_trade_spec(ticker, technicals, regime, vol_surface)
+        except Exception:
+            _hs_spec = None
         return IronButterflyOpportunity(
             ticker=ticker,
             as_of_date=today,
@@ -114,6 +119,7 @@ def assess_iron_butterfly(
             atm_iv=atm_iv,
             front_iv=front_iv,
             days_to_earnings=days_to_earnings,
+            trade_spec=_hs_spec,
             summary=f"NO_GO: {hard_stops[0].description}",
         )
 
@@ -149,7 +155,11 @@ def assess_iron_butterfly(
     ifly_strat, strat_rec = _select_strategy(regime, technicals, confidence)
 
     # --- Trade spec ---
-    trade_spec = _compute_trade_spec(ticker, technicals, regime, vol_surface) if verdict != Verdict.NO_GO else None
+    # Always build trade_spec so rejected trades show strikes/expiry
+    try:
+        trade_spec = _compute_trade_spec(ticker, technicals, regime, vol_surface)
+    except Exception:
+        trade_spec = None
 
     summary = _build_summary(ticker, verdict, confidence, ifly_strat, atm_iv)
 

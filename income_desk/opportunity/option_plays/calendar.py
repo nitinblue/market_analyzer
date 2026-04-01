@@ -102,6 +102,11 @@ def assess_calendar(
     cal_edge = vol_surface.calendar_edge_score if vol_surface else 0.0
 
     if hard_stops:
+        # Still try to build trade_spec so rejected trades show strikes/expiry
+        try:
+            _hs_spec = _compute_trade_spec(ticker, technicals, vol_surface, CalendarStrategy.NO_TRADE)
+        except Exception:
+            _hs_spec = None
         return CalendarOpportunity(
             ticker=ticker,
             as_of_date=today,
@@ -118,6 +123,7 @@ def assess_calendar(
             term_slope=term_slope,
             calendar_edge_score=cal_edge,
             days_to_earnings=days_to_earnings,
+            trade_spec=_hs_spec,
             summary=f"NO_GO: {hard_stops[0].description}",
         )
 
@@ -216,7 +222,11 @@ def assess_calendar(
     cal_strat, strat_rec = _select_strategy(regime, technicals, vol_surface, confidence)
 
     # --- Trade spec ---
-    trade_spec = _compute_trade_spec(ticker, technicals, vol_surface, cal_strat) if verdict != Verdict.NO_GO else None
+    # Always build trade_spec so rejected trades show strikes/expiry
+    try:
+        trade_spec = _compute_trade_spec(ticker, technicals, vol_surface, cal_strat)
+    except Exception:
+        trade_spec = None
 
     summary = _build_summary(ticker, verdict, confidence, cal_strat, front_iv, back_iv, term_slope)
 

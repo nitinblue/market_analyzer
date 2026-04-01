@@ -24,6 +24,25 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _blocked_from_ts(ts) -> dict:
+    """Extract strike/expiry fields from a TradeSpec for BlockedTrade."""
+    if ts is None or not ts.legs:
+        return {}
+    result: dict = {}
+    sp = _extract_strike(ts, "short_put", "put", "STO")
+    lp = _extract_strike(ts, "long_put", "put", "BTO")
+    sc = _extract_strike(ts, "short_call", "call", "STO")
+    lc = _extract_strike(ts, "long_call", "call", "BTO")
+    if sp: result["short_put"] = sp
+    if lp: result["long_put"] = lp
+    if sc: result["short_call"] = sc
+    if lc: result["long_call"] = lc
+    exps = [l.expiration for l in ts.legs if l.expiration]
+    if exps:
+        result["expiry"] = str(min(exps))
+    return result
+
+
 def _extract_strike(ts, role: str, opt_type: str, action_prefix: str) -> float | None:
     """Extract a strike from trade spec legs by role or type+action."""
     if not ts or not ts.legs:
@@ -128,6 +147,14 @@ def rank_opportunities(
 
     for entry in ranking.top_trades:
         if entry.trade_spec is None:
+            # Assessor returned NO_GO — no trade spec generated
+            verdict_str = entry.verdict.value if hasattr(entry.verdict, 'value') else str(entry.verdict)
+            blocked.append(BlockedTrade(
+                ticker=entry.ticker,
+                structure=entry.strategy_name or str(entry.strategy_type or ""),
+                reason=entry.rationale or f"Assessor verdict: {verdict_str}",
+                score=entry.composite_score,
+            ))
             continue
         ts = entry.trade_spec
 
@@ -139,6 +166,7 @@ def rank_opportunities(
                     ticker=entry.ticker, structure=str(ts.structure_type or ""),
                     reason=f"Degenerate trade: all legs at same strike ({unique_strikes})",
                     score=entry.composite_score,
+                    **_blocked_from_ts(ts),
                 ))
                 continue
 
@@ -172,6 +200,7 @@ def rank_opportunities(
             blocked.append(BlockedTrade(
                 ticker=ticker, structure=st,
                 reason=repriced.block_reason, score=entry.composite_score,
+                **_blocked_from_ts(ts),
             ))
             continue
 
@@ -180,6 +209,7 @@ def rank_opportunities(
             blocked.append(BlockedTrade(
                 ticker=ticker, structure=st,
                 reason="Illiquid strikes (wide spread or low OI)", score=entry.composite_score,
+                **_blocked_from_ts(ts),
             ))
             continue
 
@@ -203,6 +233,7 @@ def rank_opportunities(
                 ticker=ticker, structure=st,
                 reason="POP estimation failed — cannot assess profitability",
                 score=entry.composite_score,
+                **_blocked_from_ts(ts),
             ))
             continue
 
@@ -212,6 +243,7 @@ def rank_opportunities(
                 ticker=ticker, structure=st,
                 reason=f"POP {pop_pct:.0%} below {request.min_pop:.0%} floor",
                 score=entry.composite_score,
+                **_blocked_from_ts(ts),
             ))
             continue
 
@@ -261,6 +293,7 @@ def rank_opportunities(
                 ticker=ticker, structure=st,
                 reason=f"Position sizing failed: {e}",
                 score=entry.composite_score,
+                **_blocked_from_ts(ts),
             ))
             continue
 
@@ -269,6 +302,7 @@ def rank_opportunities(
                 ticker=ticker, structure=st,
                 reason="Kelly sizing = 0 contracts",
                 score=entry.composite_score,
+                **_blocked_from_ts(ts),
             ))
             continue
 

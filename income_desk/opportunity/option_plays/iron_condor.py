@@ -111,6 +111,11 @@ def assess_iron_condor(
         ))
 
     if hard_stops:
+        # Still try to build trade_spec so rejected trades show strikes/expiry
+        try:
+            _hs_spec = _compute_trade_spec(ticker, technicals, regime, vol_surface)
+        except Exception:
+            _hs_spec = None
         return IronCondorOpportunity(
             ticker=ticker,
             as_of_date=today,
@@ -127,6 +132,7 @@ def assess_iron_condor(
             call_skew=call_skew,
             wing_width_suggestion="N/A",
             days_to_earnings=days_to_earnings,
+            trade_spec=_hs_spec,
             summary=f"NO_GO: {hard_stops[0].description}",
         )
 
@@ -163,7 +169,11 @@ def assess_iron_condor(
     wing_width = _suggest_wing_width(regime, technicals, front_iv, cfg)
 
     # --- Trade spec (actionable parameters) ---
-    trade_spec = _compute_trade_spec(ticker, technicals, regime, vol_surface) if verdict != Verdict.NO_GO else None
+    # Always build trade_spec so rejected trades show strikes/expiry
+    try:
+        trade_spec = _compute_trade_spec(ticker, technicals, regime, vol_surface)
+    except Exception:
+        trade_spec = None
 
     summary = _build_summary(ticker, verdict, confidence, ic_strat, front_iv, wing_width)
 
