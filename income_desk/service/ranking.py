@@ -207,6 +207,7 @@ class TradeRankingService:
         data_service: DataService | None = None,
         weight_provider: WeightProvider | None = None,
         market_metrics: MarketMetricsProvider | None = None,
+        market_data: Any | None = None,
     ) -> None:
         self.opportunity = opportunity_service
         self.levels = levels_service
@@ -214,6 +215,7 @@ class TradeRankingService:
         self.data_service = data_service
         self.weight_provider = weight_provider or ConfigWeightProvider()
         self._market_metrics = market_metrics
+        self.market_data = market_data
 
     def rank(
         self,
@@ -306,6 +308,18 @@ class TradeRankingService:
             except Exception:
                 pass
 
+            # Fetch broker chain once per ticker (for chain-first strike selection)
+            chain_ctx = None
+            if self.market_data is not None:
+                try:
+                    raw_chain = self.market_data.get_option_chain(ticker)
+                    price = self.market_data.get_underlying_price(ticker)
+                    if raw_chain and price:
+                        from income_desk.opportunity.option_plays._chain_context import build_chain_context
+                        chain_ctx = build_chain_context(ticker, raw_chain, price)
+                except Exception:
+                    pass
+
             for strategy in strategies:
                 total_assessed += 1
                 method_name = _ASSESS_METHODS.get(strategy)
@@ -318,6 +332,13 @@ class TradeRankingService:
                 try:
                     # Build kwargs for the assessor call
                     kwargs: dict[str, Any] = {"as_of": as_of}
+
+                    # Pass broker chain to assessors that support it
+                    if chain_ctx is not None:
+                        import inspect
+                        _params = inspect.signature(assess_fn).parameters
+                        if "chain" in _params:
+                            kwargs["chain"] = chain_ctx
 
                     # Skip intraday (ORB/DXLink) for 0DTE during plan generation
                     if skip_intraday and strategy == StrategyType.ZERO_DTE:

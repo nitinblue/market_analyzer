@@ -447,10 +447,17 @@ def _no_trade_rec() -> StrategyRecommendation:
     )
 
 
-def _compute_trade_spec(ticker, technicals, regime, vol_surface) -> TradeSpec | None:
+def _compute_trade_spec(ticker, technicals, regime, vol_surface, chain=None) -> TradeSpec | None:
     """Compute actionable trade parameters for iron butterfly."""
-    from income_desk.opportunity.option_plays._trade_spec_helpers import build_single_expiry_trade_spec
+    if chain is not None:
+        from income_desk.opportunity.option_plays._trade_spec_helpers import (
+            pick_ifly_strikes_from_chain, build_trade_spec_from_chain,
+        )
+        strikes = pick_ifly_strikes_from_chain(chain, technicals.atr, int(regime.regime))
+        if strikes:
+            return build_trade_spec_from_chain(chain, "iron_butterfly", strikes, int(regime.regime))
 
+    from income_desk.opportunity.option_plays._trade_spec_helpers import build_single_expiry_trade_spec
     return build_single_expiry_trade_spec(
         ticker=ticker,
         price=technicals.current_price,
