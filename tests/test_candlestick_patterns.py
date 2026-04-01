@@ -397,3 +397,40 @@ class TestSignalGeneration:
         signals = generate_candlestick_signals(summary)
         for s in signals:
             assert s.strength in (SignalStrength.STRONG, SignalStrength.MODERATE, SignalStrength.WEAK)
+
+
+class TestEdgeCases:
+    def test_insufficient_data(self) -> None:
+        df = _make_ohlcv([(100, 101, 99, 100, 1000)])
+        patterns = detect_candlestick_patterns(df)
+        assert isinstance(patterns, list)
+
+    def test_empty_dataframe(self) -> None:
+        df = pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
+        patterns = detect_candlestick_patterns(df)
+        assert patterns == []
+
+    def test_zero_range_bar_skipped(self) -> None:
+        bars = _flat_prefix() + [(100.0, 100.0, 100.0, 100.0, 100000)]
+        df = _make_ohlcv(bars)
+        patterns = detect_candlestick_patterns(df, lookback_bars=2)
+        zero_bar_patterns = [p for p in patterns if p.bar_index == len(df) - 1]
+        assert zero_bar_patterns == []
+
+    def test_hammer_not_detected_without_downtrend(self) -> None:
+        bars = _uptrend_prefix() + [
+            (102.0, 102.5, 96.0, 102.2, 120000),
+        ]
+        df = _make_ohlcv(bars)
+        patterns = detect_candlestick_patterns(df, lookback_bars=3)
+        names = [p.pattern for p in patterns]
+        assert CandlePatternType.HAMMER not in names
+        assert CandlePatternType.HANGING_MAN in names
+
+    def test_compute_with_disabled_returns_empty(self) -> None:
+        from income_desk.config import TechnicalsSettings
+        settings = TechnicalsSettings(candle_enabled=False)
+        bars = _downtrend_prefix() + [(98.0, 98.5, 92.0, 98.2, 200000)]
+        df = _make_ohlcv(bars)
+        summary = compute_candlestick_patterns(df, settings=settings)
+        assert summary.patterns == []
