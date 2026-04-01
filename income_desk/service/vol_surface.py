@@ -80,14 +80,12 @@ class VolSurfaceService:
     # --- Broker helpers ------------------------------------------------
 
     def _chain_from_broker(self, ticker: str) -> pd.DataFrame | None:
-        """Convert broker option chain to the DataFrame format compute_vol_surface expects."""
-        import time as _time
+        """Convert broker option chain to the DataFrame format compute_vol_surface expects.
 
-        # Dhan rate limit: 1 option_chain call per 3 seconds
-        elapsed = _time.monotonic() - self._last_broker_call
-        if elapsed < 3.5:
-            _time.sleep(3.5 - elapsed)
-        self._last_broker_call = _time.monotonic()
+        Note: This is only called as a fallback when no ChainBundle is available.
+        In the normal pipeline, ChainFetcher provides the vol_surface directly
+        via the bundle, so this method is never reached.
+        """
 
         raw = self.market_data.get_option_chain(ticker)  # type: ignore[union-attr]
         if raw is None or len(raw) == 0:

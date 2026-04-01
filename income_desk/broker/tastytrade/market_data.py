@@ -34,6 +34,7 @@ from income_desk.broker.tastytrade.symbols import (
     build_streamer_symbol,
     leg_to_streamer_symbol_from_label,
 )
+from income_desk.models.dxlink_result import GreeksResult, QuoteResult
 from income_desk.models.quotes import OptionQuote
 
 if TYPE_CHECKING:
@@ -56,17 +57,27 @@ class TastyTradeMarketData(MarketDataProvider):
     # -- MarketDataProvider ABC --
 
     def get_option_chain(
-        self, ticker: str, expiration: date | None = None,
+        self,
+        ticker: str,
+        expiration: date | None = None,
+        *,
+        strikes_each_side: int = 15,
+        num_expiries: int = 6,
     ) -> list[OptionQuote]:
         """Fetch option chain via REST API + DXLink for near-ATM quotes/Greeks.
 
-        BUG-012 fix: uses ``Option.get_option_chain()`` REST API for the full
-        chain structure (one HTTP call, ~1-2s), then streams live quotes and
-        Greeks via DXLink only for strikes within ±15% of the current price.
-        Far-OTM strikes get bid=0, ask=0, no Greeks.
+        Starts from ATM and selects the N closest strikes on each side (puts
+        below, calls above), across the M nearest expiries. Only these
+        near-ATM strikes get live DXLink quotes and Greeks — far-OTM strikes
+        are included in the result with bid=0/ask=0 for chain structure only.
 
-        Previous approach subscribed to ALL 1000+ strikes via DXLink WebSocket,
-        taking 3+ minutes per ticker.
+        Args:
+            ticker: Underlying symbol.
+            expiration: Optional: fetch only this expiry.
+            strikes_each_side: Number of strikes above and below ATM to fetch
+                live quotes for (default 30 → 60 strikes per expiry).
+            num_expiries: Number of nearest future expiries to stream
+                (default 2 — supports calendar spreads).
         """
         symbol_info = run_sync(
             fetch_option_chain_rest(
@@ -77,45 +88,38 @@ class TastyTradeMarketData(MarketDataProvider):
         if not symbol_info:
             return []
 
-        # Get current underlying price for ATM filtering
+        # Get current underlying price as the center point
         underlying_price = self.get_underlying_price(ticker)
 
         if underlying_price and underlying_price > 0:
-            # Filter to nearest expiry + ±5% of ATM to keep DXLink subscription small
-            # SPY has $1 strikes — ±15% = 190 strikes × 2 (C+P) = 380 subscriptions
-            # ±5% = 64 strikes × 2 = 128 subscriptions (manageable)
-            atm_low = underlying_price * 0.95
-            atm_high = underlying_price * 1.05
-
-            # Find nearest future expiry
+            # Select N nearest expiries
             all_expiries = sorted(set(s["expiration"] for s in symbol_info))
             from datetime import date as _date
             future_exp = [e for e in all_expiries if e >= _date.today()]
-            target_exp = future_exp[0] if future_exp else (all_expiries[0] if all_expiries else None)
+            target_exps = set(future_exp[:num_expiries]) if future_exp else (
+                set(all_expiries[:num_expiries]) if all_expiries else set()
+            )
 
-            # Filter: nearest expiry + near-ATM strikes only for DXLink
-            near_atm = [
-                s for s in symbol_info
-                if atm_low <= s["strike"] <= atm_high and s["expiration"] == target_exp
-            ]
-            far_otm = [
-                s for s in symbol_info
-                if not (atm_low <= s["strike"] <= atm_high and s["expiration"] == target_exp)
-            ]
+            # For each target expiry, pick strikes_each_side closest to ATM
+            near_atm = _select_near_atm(
+                symbol_info, underlying_price, target_exps, strikes_each_side,
+            )
+            far_otm = [s for s in symbol_info if s not in near_atm]
+
             logger.info(
-                "Chain %s: %d total strikes, %d near-ATM (±15%% of $%.0f), "
-                "%d far-OTM (skipping DXLink)",
-                ticker, len(symbol_info), len(near_atm),
-                underlying_price, len(far_otm),
+                "Chain %s: %d near-ATM (%d each side × %d expiries) of %d total, "
+                "ATM=$%.0f, skipping %d far-OTM",
+                ticker, len(near_atm), strikes_each_side, len(target_exps),
+                len(symbol_info), underlying_price, len(far_otm),
             )
         else:
-            # No underlying price — fall back to streaming all (bounded)
             logger.warning(
-                "No underlying price for %s — streaming all %d strikes",
-                ticker, len(symbol_info),
+                "No underlying price for %s — cannot center strikes, "
+                "streaming first %d symbols",
+                ticker, min(200, len(symbol_info)),
             )
-            near_atm = symbol_info
-            far_otm = []
+            near_atm = symbol_info[:200]
+            far_otm = symbol_info[200:]
 
         # Fetch live quotes and Greeks only for near-ATM strikes
         quotes_map: dict[str, dict] = {}
@@ -123,16 +127,23 @@ class TastyTradeMarketData(MarketDataProvider):
 
         if near_atm:
             near_symbols = [s["sym"] for s in near_atm]
-            # Scale timeout with symbol count (0.3s per symbol, 3-15s range)
             total_timeout = max(3.0, min(15.0, len(near_symbols) * 0.3))
-            quotes_map = run_sync(
+            quote_result: QuoteResult = run_sync(
                 fetch_quotes(
                     self._session.data_session, near_symbols,
                     total_timeout=total_timeout,
                 ),
             )
-            greeks_map = run_sync(
+            greeks_result: GreeksResult = run_sync(
                 fetch_greeks(self._session.data_session, near_symbols),
+            )
+            quotes_map = quote_result.data
+            greeks_map = greeks_result.data
+
+            logger.info(
+                "%s: %d/%d quotes, %d/%d greeks",
+                ticker, quote_result.received_count, len(near_symbols),
+                greeks_result.received_count, len(near_symbols),
             )
 
         return _build_option_quotes(ticker, symbol_info, quotes_map, greeks_map)
@@ -169,13 +180,13 @@ class TastyTradeMarketData(MarketDataProvider):
 
         quotes_map = run_sync(
             fetch_quotes(self._session.data_session, symbols),
-        )
+        ).data
 
         greeks_map: dict[str, dict] = {}
         if include_greeks:
             greeks_map = run_sync(
                 fetch_greeks(self._session.data_session, symbols),
-            )
+            ).data
 
         return self._assemble_quotes(legs, symbols, quotes_map, greeks_map, ticker)
 
@@ -223,13 +234,13 @@ class TastyTradeMarketData(MarketDataProvider):
                 self._session.data_session, all_symbols,
                 total_timeout=total_timeout,
             ),
-        )
+        ).data
 
         greeks_map: dict[str, dict] = {}
         if include_greeks:
             greeks_map = run_sync(
                 fetch_greeks(self._session.data_session, all_symbols),
-            )
+            ).data
 
         # Distribute results back to per-ticker lists
         result: dict[str, list[OptionQuote]] = {}
@@ -286,7 +297,7 @@ class TastyTradeMarketData(MarketDataProvider):
 
         greeks_map = run_sync(
             fetch_greeks(self._session.data_session, symbols_clean),
-        )
+        ).data
 
         result: dict[str, dict] = {}
         for key, sym in zip(symbol_keys, symbols):
@@ -347,6 +358,43 @@ class TastyTradeMarketData(MarketDataProvider):
             option_type=leg.option_type,
             strike=leg.strike,
         )
+
+
+def _select_near_atm(
+    symbol_info: list[dict],
+    underlying_price: float,
+    target_exps: set,
+    strikes_each_side: int,
+) -> list[dict]:
+    """Select the N closest strikes above and below ATM for each target expiry.
+
+    Starts from ATM and expands outward — never fetches more than needed.
+    Returns a flat list of symbol dicts that should get DXLink quotes.
+    """
+    near_atm: list[dict] = []
+
+    for exp in target_exps:
+        # Get unique strikes for this expiry, sorted by distance from ATM
+        exp_symbols = [s for s in symbol_info if s["expiration"] == exp]
+        strikes = sorted(set(s["strike"] for s in exp_symbols))
+
+        if not strikes:
+            continue
+
+        # Find ATM index
+        atm_idx = min(range(len(strikes)), key=lambda i: abs(strikes[i] - underlying_price))
+
+        # Select N below + N above (clamped to available range)
+        low_idx = max(0, atm_idx - strikes_each_side)
+        high_idx = min(len(strikes), atm_idx + strikes_each_side + 1)
+        selected_strikes = set(strikes[low_idx:high_idx])
+
+        # Collect both puts and calls for selected strikes
+        for s in exp_symbols:
+            if s["strike"] in selected_strikes:
+                near_atm.append(s)
+
+    return near_atm
 
 
 def _build_option_quotes(

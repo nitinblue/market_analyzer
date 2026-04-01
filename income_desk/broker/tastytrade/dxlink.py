@@ -17,8 +17,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone
 from enum import StrEnum
+
+from income_desk.models.dxlink_result import GreeksResult, QuoteResult
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +54,7 @@ async def fetch_quotes(
     *,
     total_timeout: float = 3.0,
     per_event_timeout: float = 0.5,
-) -> dict[str, dict]:
+) -> QuoteResult:
     """Fetch bid/ask quotes via DXLink streaming.
 
     Opens a single DXLinkStreamer connection, subscribes to all symbols,
@@ -64,15 +67,17 @@ async def fetch_quotes(
         per_event_timeout: Max seconds to wait for each event (default 0.5s).
 
     Returns:
-        ``{symbol: {"bid": float, "ask": float}}``
+        QuoteResult with data ``{symbol: {"bid": float, "ask": float}}``,
+        plus missing_symbols, is_partial, and fetch_duration_s.
     """
     from tastytrade.dxfeed import Quote as DXQuote
     from tastytrade.streamer import DXLinkStreamer
 
     quotes: dict[str, dict] = {}
     if not streamer_symbols:
-        return quotes
+        return QuoteResult(data={}, requested=[], missing_symbols=[], is_partial=False, fetch_duration_s=0.0)
 
+    t0 = time.monotonic()
     try:
         async with DXLinkStreamer(data_session) as streamer:
             await streamer.subscribe(DXQuote, streamer_symbols)
@@ -97,8 +102,13 @@ async def fetch_quotes(
     except Exception as e:
         err = classify_error(e)
         logger.warning("DXLink quote fetch error (%s): %s", err, e)
+        elapsed = time.monotonic() - t0
+        missing = [s for s in streamer_symbols if s not in quotes]
+        return QuoteResult(data=quotes, requested=streamer_symbols, missing_symbols=missing, is_partial=True, fetch_duration_s=elapsed)
 
-    return quotes
+    elapsed = time.monotonic() - t0
+    missing = [s for s in streamer_symbols if s not in quotes]
+    return QuoteResult(data=quotes, requested=streamer_symbols, missing_symbols=missing, is_partial=len(missing) > 0, fetch_duration_s=elapsed)
 
 
 async def fetch_greeks(
@@ -107,54 +117,72 @@ async def fetch_greeks(
     *,
     total_timeout: float = 15.0,
     per_event_timeout: float = 2.0,
-    chunk_size: int = 12,
-) -> dict[str, dict]:
-    """Fetch Greeks via DXLink streaming, chunked for large symbol lists.
+    chunk_size: int = 50,
+    max_parallel: int = 3,
+) -> GreeksResult:
+    """Fetch Greeks via DXLink streaming, chunked and parallelized.
 
     For <= chunk_size symbols, opens one connection. For larger lists, splits
-    into chunks and fetches sequentially (each chunk gets its own connection
-    and full timeout). This avoids the problem of 30+ symbols timing out in
-    a single 15s window.
+    into chunks and fetches in parallel (up to max_parallel concurrent
+    connections). Each chunk gets its own DXLink connection and timeout.
 
     Args:
         data_session: Authenticated tastytrade Session for DXLink.
         streamer_symbols: List of DXLink streamer symbols.
         total_timeout: Max seconds per chunk (default 15s).
         per_event_timeout: Max seconds to wait for each event (default 2s).
-        chunk_size: Max symbols per DXLink connection (default 12).
+        chunk_size: Max symbols per DXLink connection (default 50).
+        max_parallel: Max concurrent DXLink connections (default 3).
 
     Returns:
-        ``{symbol: {"delta": float, "gamma": float, "theta": float, "vega": float, "iv": float|None}}``
+        GreeksResult with data ``{symbol: {"delta": float, "gamma": float,
+        "theta": float, "vega": float, "iv": float|None}}``,
+        plus missing_symbols, is_partial, and fetch_duration_s.
     """
     if not streamer_symbols:
-        return {}
+        return GreeksResult(data={}, requested=[], missing_symbols=[], is_partial=False, fetch_duration_s=0.0)
 
-    # Chunk large lists to avoid single-connection timeout
-    if len(streamer_symbols) > chunk_size:
+    t0 = time.monotonic()
+
+    if len(streamer_symbols) <= chunk_size:
+        all_greeks = await _fetch_greeks_single(
+            data_session, streamer_symbols,
+            total_timeout=total_timeout,
+            per_event_timeout=per_event_timeout,
+        )
+    else:
+        # Chunk large lists and fetch in parallel
         chunks = [
             streamer_symbols[i:i + chunk_size]
             for i in range(0, len(streamer_symbols), chunk_size)
         ]
         logger.info(
-            "Chunking %d symbols into %d batches of ≤%d",
-            len(streamer_symbols), len(chunks), chunk_size,
+            "Chunking %d symbols into %d batches of ≤%d (parallel=%d)",
+            len(streamer_symbols), len(chunks), chunk_size, max_parallel,
         )
-        all_greeks: dict[str, dict] = {}
-        for i, chunk in enumerate(chunks):
-            logger.info("Greeks batch %d/%d (%d symbols)", i + 1, len(chunks), len(chunk))
-            chunk_result = await _fetch_greeks_single(
-                data_session, chunk,
-                total_timeout=total_timeout,
-                per_event_timeout=per_event_timeout,
-            )
-            all_greeks.update(chunk_result)
-        return all_greeks
 
-    return await _fetch_greeks_single(
-        data_session, streamer_symbols,
-        total_timeout=total_timeout,
-        per_event_timeout=per_event_timeout,
-    )
+        all_greeks: dict[str, dict] = {}
+        # Process in waves of max_parallel
+        for wave_start in range(0, len(chunks), max_parallel):
+            wave = chunks[wave_start:wave_start + max_parallel]
+            tasks = [
+                _fetch_greeks_single(
+                    data_session, chunk,
+                    total_timeout=total_timeout,
+                    per_event_timeout=per_event_timeout,
+                )
+                for chunk in wave
+            ]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for j, result in enumerate(results):
+                if isinstance(result, Exception):
+                    logger.warning("Greeks batch %d failed: %s", wave_start + j + 1, result)
+                else:
+                    all_greeks.update(result)
+
+    elapsed = time.monotonic() - t0
+    missing = [s for s in streamer_symbols if s not in all_greeks]
+    return GreeksResult(data=all_greeks, requested=streamer_symbols, missing_symbols=missing, is_partial=len(missing) > 0, fetch_duration_s=elapsed)
 
 
 async def _fetch_greeks_single(
@@ -210,6 +238,72 @@ async def _fetch_greeks_single(
         logger.error("DXLink Greeks streaming error (%s): %s", err, e)
 
     return greeks
+
+
+async def fetch_summary(
+    data_session,
+    streamer_symbols: list[str],
+    *,
+    total_timeout: float = 15.0,
+    per_event_timeout: float = 2.0,
+) -> dict[str, int]:
+    """Fetch open interest via DXLink Summary event.
+
+    Opens a single DXLinkStreamer connection, subscribes to Summary events
+    for the given option streamer symbols, and collects open_interest values
+    until all symbols are received or timeout.
+
+    Args:
+        data_session: Authenticated tastytrade Session for DXLink.
+        streamer_symbols: List of DXLink streamer symbols.
+        total_timeout: Max seconds to wait for all summaries (default 15s).
+        per_event_timeout: Max seconds to wait for each event (default 2s).
+
+    Returns:
+        ``{symbol: open_interest}`` for each symbol that returned data.
+    """
+    from tastytrade.dxfeed import Summary
+    from tastytrade.streamer import DXLinkStreamer
+
+    result: dict[str, int] = {}
+    if not streamer_symbols:
+        return result
+
+    symbols_needed = set(streamer_symbols)
+
+    try:
+        async with DXLinkStreamer(data_session) as streamer:
+            await streamer.subscribe(Summary, streamer_symbols)
+
+            start_time = asyncio.get_event_loop().time()
+
+            while symbols_needed and (asyncio.get_event_loop().time() - start_time) < total_timeout:
+                try:
+                    event = await asyncio.wait_for(
+                        streamer.get_event(Summary), timeout=per_event_timeout,
+                    )
+                    sym = event.event_symbol
+                    if sym in symbols_needed:
+                        result[sym] = int(event.open_interest or 0)
+                        symbols_needed.remove(sym)
+
+                except asyncio.TimeoutError:
+                    continue
+                except Exception as e:
+                    logger.warning("Error getting Summary event: %s", e)
+                    continue
+
+            if symbols_needed:
+                logger.warning(
+                    "Timeout: missing Summary for %d/%d symbols",
+                    len(symbols_needed), len(streamer_symbols),
+                )
+
+    except Exception as e:
+        err = classify_error(e)
+        logger.error("DXLink Summary streaming error (%s): %s", err, e)
+
+    return result
 
 
 async def fetch_underlying_price(

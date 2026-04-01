@@ -325,16 +325,35 @@ def _avg_bid_ask_spread_pct(df: pd.DataFrame, underlying_price: float) -> float:
 
 
 def _assess_data_quality(df: pd.DataFrame, avg_spread_pct: float) -> str:
-    """Assess overall options chain data quality."""
+    """Assess overall options chain data quality.
+
+    Uses bid/ask spread as primary signal. OI is secondary — some brokers
+    (TastyTrade REST) return OI=0 for all strikes, which doesn't mean
+    the strikes are illiquid.
+    """
     if df.empty:
         return "poor"
 
-    # Check OI coverage
-    avg_oi = df["open_interest"].mean()
-    contracts_with_oi = (df["open_interest"] > 0).mean()
+    has_quotes = (df["bid"] > 0).sum()
+    if has_quotes == 0:
+        return "poor"
 
-    if contracts_with_oi >= 0.5 and avg_oi >= 100 and avg_spread_pct < 1.0:
+    # OI check — only if broker actually provides OI data
+    avg_oi = df["open_interest"].mean()
+    oi_available = avg_oi > 0  # True if broker provides OI
+
+    if oi_available:
+        # Broker provides OI — use it
+        contracts_with_oi = (df["open_interest"] > 0).mean()
+        if contracts_with_oi >= 0.5 and avg_oi >= 100 and avg_spread_pct < 1.0:
+            return "good"
+        elif contracts_with_oi >= 0.3 and avg_oi >= 50:
+            return "fair"
+        return "poor"
+
+    # No OI data — assess quality from bid/ask spread only
+    if avg_spread_pct < 2.0 and has_quotes >= 10:
         return "good"
-    elif contracts_with_oi >= 0.3 and avg_oi >= 50:
+    elif avg_spread_pct < 5.0 and has_quotes >= 5:
         return "fair"
     return "poor"

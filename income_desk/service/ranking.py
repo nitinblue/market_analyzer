@@ -33,6 +33,7 @@ from income_desk.opportunity.option_plays.diagonal import DiagonalOpportunity
 from income_desk.opportunity.option_plays.ratio_spread import RatioSpreadOpportunity
 from income_desk.opportunity.option_plays.earnings import EarningsOpportunity
 from income_desk.opportunity.setups.mean_reversion import MeanReversionOpportunity
+from income_desk.models.chain import ChainBundle
 from income_desk.models.ranking import (
     RankedEntry,
     RankingFeedback,
@@ -225,6 +226,7 @@ class TradeRankingService:
         skip_intraday: bool = False,
         debug: bool = False,
         iv_rank_map: dict[str, float | None] | None = None,
+        chains: dict[str, ChainBundle] | None = None,
     ) -> TradeRankingResult:
         """Run all assessments, score, and rank.
 
@@ -308,9 +310,13 @@ class TradeRankingService:
             except Exception:
                 pass
 
-            # Fetch broker chain once per ticker (for chain-first strike selection)
-            chain_ctx = None
-            if self.market_data is not None:
+            # Use pre-fetched bundle if available, else fall back to fetching
+            bundle = chains.get(ticker) if chains else None
+            chain_ctx = bundle.chain_context if bundle else None
+            vol_surf = bundle.vol_surface if bundle else None
+
+            # Fallback: fetch broker chain if no bundle provided (backward compat)
+            if bundle is None and self.market_data is not None:
                 try:
                     raw_chain = self.market_data.get_option_chain(ticker)
                     price = self.market_data.get_underlying_price(ticker)
@@ -333,12 +339,11 @@ class TradeRankingService:
                     # Build kwargs for the assessor call
                     kwargs: dict[str, Any] = {"as_of": as_of}
 
-                    # Pass broker chain to assessors that support it
+                    # Pass chain and vol_surface from bundle to assessors
                     if chain_ctx is not None:
-                        import inspect
-                        _params = inspect.signature(assess_fn).parameters
-                        if "chain" in _params:
-                            kwargs["chain"] = chain_ctx
+                        kwargs["chain"] = chain_ctx
+                    if vol_surf is not None:
+                        kwargs["vol_surface"] = vol_surf
 
                     # Skip intraday (ORB/DXLink) for 0DTE during plan generation
                     if skip_intraday and strategy == StrategyType.ZERO_DTE:

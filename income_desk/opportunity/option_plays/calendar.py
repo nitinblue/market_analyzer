@@ -314,11 +314,8 @@ def _check_hard_stops(regime, vol_surface, days_to_earnings, cfg, ticker: str | 
         return stops
 
     # Term structure flat with no edge
-    if vol_surface.data_quality == "poor":
-        stops.append(HardStop(
-            name="Poor data quality",
-            description="Options chain data quality too poor for calendar assessment",
-        ))
+    # data_quality == "poor" is NOT a hard stop — trade idea still generated.
+    # Ranking layer flags poor-quality trades as unrankable.
 
     # Bid-ask too wide
     if vol_surface.avg_bid_ask_spread_pct > cfg.max_bid_ask_spread_pct:

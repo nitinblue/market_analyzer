@@ -60,6 +60,8 @@ _REGIME_LABELS = {1: "R1 Low-Vol MR", 2: "R2 High-Vol MR", 3: "R3 Low-Vol Trend"
 
 
 class RankRequest(BaseModel):
+    model_config = {"arbitrary_types_allowed": True}
+
     tickers: list[str]
     capital: float = 5_000_000
     market: str = "India"
@@ -68,6 +70,7 @@ class RankRequest(BaseModel):
     skip_intraday: bool = True
     max_trades: int = 10
     min_pop: float = 0.40
+    snapshot: object | None = None  # MarketSnapshot — skips REST discovery in ChainFetcher
 
 
 class RankResponse(BaseModel):
@@ -121,13 +124,33 @@ def rank_opportunities(
             tradeable_count=0, total_assessed=0,
         )
 
-    # ── 2. Ranking from assessors (unchanged) ──
+    # ── 1b. Fetch all chains upfront (single fetch per ticker) ──
+    chains = None
+    if ma.market_data is not None:
+        try:
+            from income_desk.service.chain_fetcher import ChainFetcher
+            fetcher = ChainFetcher(market_data=ma.market_data, data_service=ma.data)
+            chains = fetcher.fetch_batch(tradeable, snapshot=request.snapshot)
+            for ticker, bundle in chains.items():
+                if bundle.fetch_meta.is_partial:
+                    warnings.append(
+                        f"{ticker}: partial chain ({bundle.missing_count} symbols missing)"
+                    )
+                if bundle.fetch_meta.error:
+                    warnings.append(
+                        f"{ticker}: chain fetch error — {bundle.fetch_meta.error}"
+                    )
+        except Exception as e:
+            warnings.append(f"ChainFetcher failed: {e}")
+
+    # ── 2. Ranking from assessors ──
     ranking = None
     try:
         ranking = ma.ranking.rank(
             tradeable,
             skip_intraday=request.skip_intraday,
             iv_rank_map=request.iv_rank_map or {},
+            chains=chains,
         )
     except Exception as e:
         warnings.append(f"Ranking failed: {e}")
@@ -182,7 +205,7 @@ def rank_opportunities(
         })
         valid_ranking_entries.append(entry)
 
-    repriced_list = batch_reprice(entries, ma.market_data, ma.technicals)
+    repriced_list = batch_reprice(entries, ma.market_data, ma.technicals, chains=chains)
 
     # ── 4. Single pass: POP -> size -> output ──
     from income_desk.trade_lifecycle import estimate_pop

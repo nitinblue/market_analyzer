@@ -307,6 +307,7 @@ def batch_reprice(
     entries: list[dict],
     market_data=None,
     technicals_service=None,
+    chains: dict | None = None,
 ) -> list[RepricedTrade]:
     """Reprice multiple trades, fetching chain once per ticker.
 
@@ -342,7 +343,12 @@ def batch_reprice(
         price = 0.0
         atr_pct = 1.0
 
-        if technicals_service is not None:
+        # Use pre-fetched bundle if available
+        bundle = chains.get(ticker) if chains else None
+
+        if bundle is not None:
+            price = bundle.underlying_price
+        elif technicals_service is not None:
             try:
                 snap = technicals_service.snapshot(ticker)
                 if snap is not None:
@@ -359,9 +365,11 @@ def batch_reprice(
             except Exception:
                 logger.debug("market_data.get_underlying_price(%s) failed", ticker)
 
-        # Chain fetch (rate-limited for Dhan only — TastyTrade/DXLink has no rate limit)
+        # Use bundle's raw_chain if available; otherwise fetch (rate-limited for Dhan)
         chain: list = []
-        if market_data is not None:
+        if bundle is not None:
+            chain = bundle.raw_chain
+        elif market_data is not None:
             provider = getattr(market_data, "provider_name", "")
             if idx > 0 and provider == "dhan":
                 time.sleep(4)  # Dhan: 1 req / 3 sec

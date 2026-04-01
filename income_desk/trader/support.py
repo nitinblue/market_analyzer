@@ -874,4 +874,10 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enable verbose output",
     )
+    parser.add_argument(
+        "--build-snapshot",
+        action="store_true",
+        dest="build_snapshot",
+        help="Build instrument snapshot, save to disk, and exit",
+    )
     return parser.parse_args()

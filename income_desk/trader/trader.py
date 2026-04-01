@@ -149,6 +149,7 @@ def step_rank_and_show(
     tickers: list[str],
     meta: Any,
     verbose: bool = False,
+    snapshot: Any = None,
 ) -> None:
     """Rank opportunities and show full trade details with leg pricing."""
     from income_desk.trader.support import print_table
@@ -171,6 +172,7 @@ def step_rank_and_show(
             capital=capital,
             market=meta.market,
             iv_rank_map=iv_map or None,
+            snapshot=snapshot,
         )
         resp = rank_opportunities(req, ma)
     except Exception as exc:
@@ -497,6 +499,135 @@ def step_rank_and_show(
 
 
 # ---------------------------------------------------------------------------
+# Step 4: Monitor Positions
+# ---------------------------------------------------------------------------
+
+
+def step_monitor_positions(
+    ma: Any,
+    meta: Any,
+    verbose: bool = False,
+) -> None:
+    """Fetch open positions from broker and show monitoring status."""
+    from income_desk.trader.support import (
+        broker_positions_to_open,
+        load_positions,
+        print_table,
+    )
+
+    print(f"\n{'=' * 70}")
+    print("  STEP 4: MONITOR POSITIONS")
+    print(f"{'=' * 70}")
+
+    cur = _cur(meta.market)
+
+    # Fetch broker positions
+    broker_pos = load_positions(meta, interactive=False)
+    if not broker_pos:
+        print("\n  No open positions found.")
+        return
+
+    # Convert to OpenPosition for workflow
+    open_positions = broker_positions_to_open(broker_pos, meta.market)
+    if not open_positions:
+        print(f"\n  {len(broker_pos)} equity-only positions (no option positions to monitor).")
+        return
+
+    # Detect regime for each position ticker
+    for pos in open_positions:
+        try:
+            r = ma.regime.detect(pos.ticker)
+            pos.regime_id = r.regime if isinstance(r.regime, int) else r.regime.value
+        except Exception:
+            pass
+
+    # Run monitor workflow
+    try:
+        from income_desk.workflow.monitor_positions import MonitorRequest, monitor_positions
+        req = MonitorRequest(positions=open_positions, market=meta.market)
+        resp = monitor_positions(req, ma)
+    except Exception as exc:
+        print(f"\n  [ERROR] monitoring: {exc}")
+        if verbose:
+            traceback.print_exc()
+        return
+
+    # Display position status table
+    rows = []
+    for s in resp.statuses:
+        pnl_str = f"{cur}{s.pnl:,.0f}" if s.pnl else "-"
+        pnl_pct_str = f"{s.pnl_pct:+.1%}" if s.pnl_pct else "-"
+        rows.append([
+            s.ticker,
+            s.trade_id,
+            s.action.upper(),
+            s.urgency.upper(),
+            pnl_str,
+            pnl_pct_str,
+            _trunc(s.rationale, 50),
+        ])
+
+    print_table(
+        f"Position Monitor ({len(resp.statuses)} positions | {resp.actions_needed} actions | {resp.critical_count} critical)",
+        ["Ticker", "Trade ID", "Action", "Urgency", "P&L", "P&L%", "Rationale"],
+        rows,
+    )
+
+    # Show adjustment recommendations for non-hold positions
+    action_positions = [s for s in resp.statuses if s.action != "hold"]
+    if action_positions:
+        print(f"\n  ADJUSTMENT RECOMMENDATIONS:")
+        try:
+            from income_desk.workflow.adjust_position import AdjustRequest, adjust_position
+            for s in action_positions:
+                # Find matching OpenPosition
+                pos = next((p for p in open_positions if p.trade_id == s.trade_id), None)
+                if pos is None:
+                    continue
+                adj_req = AdjustRequest(
+                    trade_id=pos.trade_id,
+                    ticker=pos.ticker,
+                    structure_type=pos.structure_type,
+                    entry_price=pos.entry_price,
+                    current_mid_price=pos.current_mid_price or pos.entry_price,
+                    dte_remaining=pos.dte_remaining,
+                    pnl_pct=s.pnl_pct,
+                )
+                adj_resp = adjust_position(adj_req, ma)
+                rec = adj_resp.recommendation
+                print(f"  {pos.ticker} ({pos.structure_type}): "
+                      f"{rec.action.upper()} [{rec.urgency}] — {rec.rationale}")
+        except Exception as exc:
+            print(f"  [ERROR] adjustment analysis: {exc}")
+            if verbose:
+                traceback.print_exc()
+
+    # Show raw broker positions for snapshot
+    print(f"\n  RAW POSITIONS (open market snapshot):")
+    snap_rows = []
+    for p in broker_pos:
+        qty = p.quantity
+        mark = p.close_price if p.close_price is not None else "-"
+        avg = p.average_open_price if p.average_open_price is not None else "-"
+        exp = str(p.expiration) if p.expiration else "-"
+        snap_rows.append([
+            p.ticker,
+            p.symbol or "-",
+            p.option_type or "equity",
+            f"{p.strike:.1f}" if p.strike else "-",
+            exp,
+            str(qty),
+            f"{cur}{avg}" if isinstance(avg, (int, float)) else avg,
+            f"{cur}{mark}" if isinstance(mark, (int, float)) else mark,
+        ])
+    print_table(
+        "Broker Positions Snapshot",
+        ["Ticker", "Symbol", "Type", "Strike", "Expiry", "Qty", "Avg Open", "Mark"],
+        snap_rows,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -525,6 +656,42 @@ def main() -> None:
     # Tickers
     tickers = pick_tickers(market, meta)
 
+    # --build-snapshot: build snapshot, save, print summary, exit
+    if args.build_snapshot:
+        from income_desk.service.snapshot import SnapshotService
+
+        registry = None
+        try:
+            from income_desk.registry import MarketRegistry
+            registry = MarketRegistry()
+        except Exception:
+            pass
+
+        snap_svc = SnapshotService(market_data=ma.market_data, registry=registry)
+        print(f"\n  Building snapshot for {len(tickers)} tickers...")
+        snapshot = snap_svc.build(tickers, market)
+        path = snap_svc.save(snapshot)
+        print(f"\n  Snapshot saved: {path}")
+        print(f"  Instruments: {len(snapshot.instruments)}")
+        for t, inst in snapshot.instruments.items():
+            n_exp = len(inst.expiries)
+            n_tradeable = sum(
+                1 for e in inst.expiries for s in e.strikes if s.is_tradeable
+            )
+            print(f"    {t}: {n_exp} expiries, {n_tradeable} tradeable strikes")
+        return
+
+    # Try loading today's snapshot for faster chain fetching
+    snapshot = None
+    try:
+        from income_desk.service.snapshot import SnapshotService
+        snapshot = SnapshotService.load(market)
+        if snapshot:
+            print(f"  Loaded snapshot: {len(snapshot.instruments)} instruments, "
+                  f"created {snapshot.created_at:%H:%M UTC}")
+    except Exception:
+        pass
+
     # Banner
     print_banner(meta)
 
@@ -537,7 +704,11 @@ def main() -> None:
     scan_tickers = step_scan(ma, tickers, meta, args.verbose)
 
     # Step 3: Rank + full trade details
-    step_rank_and_show(ma, scan_tickers, meta, args.verbose)
+    step_rank_and_show(ma, scan_tickers, meta, args.verbose, snapshot=snapshot)
+
+    # Step 4: Monitor open positions
+    if meta.account_provider is not None:
+        step_monitor_positions(ma, meta, args.verbose)
 
     print(f"\n  {'=' * 70}")
     print("  Done.")

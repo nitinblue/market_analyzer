@@ -233,11 +233,8 @@ def _check_hard_stops(regime, vol_surface, days_to_earnings, front_iv, cfg, tick
             description=f"ATM IV {front_iv:.1%} below minimum {cfg.min_atm_iv:.1%} — not enough premium",
         ))
 
-    if vol_surface.data_quality == "poor":
-        stops.append(HardStop(
-            name="Poor data quality",
-            description="Options chain data quality too poor for iron butterfly assessment",
-        ))
+    # data_quality == "poor" is NOT a hard stop — trade idea still generated.
+    # Ranking layer flags poor-quality trades as unrankable.
 
     # Earnings imminent
     if days_to_earnings is not None and 0 < days_to_earnings <= cfg.earnings_blackout_days:

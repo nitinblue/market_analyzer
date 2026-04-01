@@ -282,11 +282,8 @@ def _check_hard_stops(regime, vol_surface, days_to_earnings, put_skew, call_skew
         ))
         return stops
 
-    if vol_surface.data_quality == "poor":
-        stops.append(HardStop(
-            name="Poor data quality",
-            description="Options chain data too poor for ratio spread assessment",
-        ))
+    # data_quality == "poor" is NOT a hard stop — trade idea still generated.
+    # Ranking layer flags poor-quality trades as unrankable.
 
     # Earnings imminent
     if days_to_earnings is not None and 0 < days_to_earnings <= cfg.earnings_blackout_days:

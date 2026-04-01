@@ -16,6 +16,8 @@ from income_desk.models.opportunity import (
 
 if TYPE_CHECKING:
     from income_desk.data.service import DataService
+    from income_desk.models.chain import ChainContext
+    from income_desk.models.vol_surface import VolatilitySurface
     from income_desk.service.fundamental import FundamentalService
     from income_desk.service.macro import MacroService
     from income_desk.service.phase import PhaseService
@@ -69,6 +71,8 @@ class OpportunityService:
         ohlcv: pd.DataFrame | None = None,
         intraday: pd.DataFrame | None = None,
         as_of: date | None = None,
+        vol_surface: VolatilitySurface | None = None,
+        chain: ChainContext | None = None,
     ) -> ZeroDTEOpportunity:
         """Assess 0DTE opportunity for a single instrument."""
         from income_desk.opportunity.option_plays.zero_dte import assess_zero_dte as _assess
@@ -93,7 +97,7 @@ class OpportunityService:
                 pass  # ORB is optional; don't fail 0DTE assessment over it
 
         fundamentals = self._get_fundamentals(ticker)
-        vol_surface = self._get_vol_surface(ticker)
+        vol_surface = self._get_vol_surface(ticker, provided=vol_surface)
 
         return _assess(
             ticker=ticker,
@@ -112,6 +116,8 @@ class OpportunityService:
         ohlcv: pd.DataFrame | None = None,
         as_of: date | None = None,
         iv_rank: float | None = None,
+        vol_surface: VolatilitySurface | None = None,
+        chain: ChainContext | None = None,
     ) -> LEAPOpportunity:
         """Assess LEAP opportunity for a single instrument."""
         from income_desk.opportunity.option_plays.leap import assess_leap as _assess
@@ -127,7 +133,7 @@ class OpportunityService:
         phase = self.phase_service.detect(ticker, df)
         macro = self.macro_service.calendar(as_of=as_of)
         fundamentals = self._get_fundamentals(ticker)
-        vol_surface = self._get_vol_surface(ticker)
+        vol_surface = self._get_vol_surface(ticker, provided=vol_surface)
 
         return _assess(
             ticker=ticker,
@@ -146,6 +152,8 @@ class OpportunityService:
         ticker: str,
         ohlcv: pd.DataFrame | None = None,
         as_of: date | None = None,
+        vol_surface: VolatilitySurface | None = None,
+        chain: ChainContext | None = None,
     ) -> BreakoutOpportunity:
         """Assess breakout opportunity for a single instrument."""
         from income_desk.opportunity.setups.breakout import assess_breakout as _assess
@@ -161,7 +169,7 @@ class OpportunityService:
         phase = self.phase_service.detect(ticker, df)
         macro = self.macro_service.calendar(as_of=as_of)
         fundamentals = self._get_fundamentals(ticker)
-        vol_surface = self._get_vol_surface(ticker)
+        vol_surface = self._get_vol_surface(ticker, provided=vol_surface)
 
         return _assess(
             ticker=ticker,
@@ -179,6 +187,8 @@ class OpportunityService:
         ticker: str,
         ohlcv: pd.DataFrame | None = None,
         as_of: date | None = None,
+        vol_surface: VolatilitySurface | None = None,
+        chain: ChainContext | None = None,
     ) -> MomentumOpportunity:
         """Assess momentum opportunity for a single instrument."""
         from income_desk.opportunity.setups.momentum import assess_momentum as _assess
@@ -194,7 +204,7 @@ class OpportunityService:
         phase = self.phase_service.detect(ticker, df)
         macro = self.macro_service.calendar(as_of=as_of)
         fundamentals = self._get_fundamentals(ticker)
-        vol_surface = self._get_vol_surface(ticker)
+        vol_surface = self._get_vol_surface(ticker, provided=vol_surface)
 
         return _assess(
             ticker=ticker,
@@ -213,6 +223,8 @@ class OpportunityService:
         intraday: pd.DataFrame,
         ohlcv: pd.DataFrame | None = None,
         as_of: date | None = None,
+        vol_surface: VolatilitySurface | None = None,
+        chain: ChainContext | None = None,
     ):
         """Assess ORB setup opportunity (requires intraday data)."""
         from income_desk.opportunity.setups.orb import assess_orb as _assess
@@ -237,7 +249,7 @@ class OpportunityService:
             macro = self.macro_service.calendar(as_of=as_of)
 
         fundamentals = self._get_fundamentals(ticker)
-        vol_surface = self._get_vol_surface(ticker)
+        vol_surface = self._get_vol_surface(ticker, provided=vol_surface)
 
         return _assess(
             ticker=ticker,
@@ -257,6 +269,8 @@ class OpportunityService:
         ohlcv: pd.DataFrame | None = None,
         as_of: date | None = None,
         iv_rank: float | None = None,
+        vol_surface: VolatilitySurface | None = None,
+        chain: ChainContext | None = None,
     ):
         """Assess earnings play opportunity."""
         from income_desk.opportunity.option_plays.earnings import assess_earnings_play as _assess
@@ -268,7 +282,7 @@ class OpportunityService:
         regime = self.regime_service.detect(ticker, df)
         technicals = self.technical_service.snapshot(ticker, df)
         fundamentals = self._get_fundamentals(ticker)
-        vol_surface = self._get_vol_surface(ticker)
+        vol_surface = self._get_vol_surface(ticker, provided=vol_surface)
 
         return _assess(
             ticker=ticker, regime=regime, technicals=technicals,
@@ -281,6 +295,8 @@ class OpportunityService:
         ticker: str,
         ohlcv: pd.DataFrame | None = None,
         as_of: date | None = None,
+        vol_surface: VolatilitySurface | None = None,
+        chain: ChainContext | None = None,
     ):
         """Assess mean reversion opportunity."""
         from income_desk.opportunity.setups.mean_reversion import assess_mean_reversion as _assess
@@ -294,7 +310,7 @@ class OpportunityService:
         phase = self.phase_service.detect(ticker, df) if self.phase_service else None
         macro = self.macro_service.calendar(as_of=as_of) if self.macro_service else None
         fundamentals = self._get_fundamentals(ticker)
-        vol_surface = self._get_vol_surface(ticker)
+        vol_surface = self._get_vol_surface(ticker, provided=vol_surface)
 
         return _assess(
             ticker=ticker, regime=regime, technicals=technicals,
@@ -304,8 +320,14 @@ class OpportunityService:
 
     # --- Vol-surface-dependent option plays ---
 
-    def _get_vol_surface(self, ticker: str):
-        """Best-effort vol surface fetch (None on failure)."""
+    def _get_vol_surface(self, ticker: str, provided: VolatilitySurface | None = None):
+        """Best-effort vol surface fetch (None on failure).
+
+        If *provided* is not None it is returned immediately, skipping
+        the network call.
+        """
+        if provided is not None:
+            return provided
         if self.vol_surface_service is None:
             return None
         try:
@@ -319,6 +341,8 @@ class OpportunityService:
         ohlcv: pd.DataFrame | None = None,
         as_of: date | None = None,
         iv_rank: float | None = None,
+        vol_surface: VolatilitySurface | None = None,
+        chain: ChainContext | None = None,
     ):
         """Assess calendar spread opportunity."""
         from income_desk.opportunity.option_plays.calendar import assess_calendar as _assess
@@ -330,7 +354,7 @@ class OpportunityService:
         regime = self.regime_service.detect(ticker, df)
         technicals = self.technical_service.snapshot(ticker, df)
         fundamentals = self._get_fundamentals(ticker)
-        vol_surface = self._get_vol_surface(ticker)
+        vol_surface = self._get_vol_surface(ticker, provided=vol_surface)
 
         return _assess(
             ticker=ticker, regime=regime, technicals=technicals,
@@ -343,6 +367,8 @@ class OpportunityService:
         ticker: str,
         ohlcv: pd.DataFrame | None = None,
         as_of: date | None = None,
+        vol_surface: VolatilitySurface | None = None,
+        chain: ChainContext | None = None,
     ):
         """Assess diagonal spread opportunity."""
         from income_desk.opportunity.option_plays.diagonal import assess_diagonal as _assess
@@ -355,7 +381,7 @@ class OpportunityService:
         technicals = self.technical_service.snapshot(ticker, df)
         phase = self.phase_service.detect(ticker, df) if self.phase_service else None
         fundamentals = self._get_fundamentals(ticker)
-        vol_surface = self._get_vol_surface(ticker)
+        vol_surface = self._get_vol_surface(ticker, provided=vol_surface)
 
         return _assess(
             ticker=ticker, regime=regime, technicals=technicals,
@@ -368,6 +394,8 @@ class OpportunityService:
         ohlcv: pd.DataFrame | None = None,
         as_of: date | None = None,
         iv_rank: float | None = None,
+        vol_surface: VolatilitySurface | None = None,
+        chain: ChainContext | None = None,
     ):
         """Assess iron condor opportunity — the #1 income strategy."""
         from income_desk.opportunity.option_plays.iron_condor import assess_iron_condor as _assess
@@ -379,7 +407,7 @@ class OpportunityService:
         regime = self.regime_service.detect(ticker, df)
         technicals = self.technical_service.snapshot(ticker, df)
         fundamentals = self._get_fundamentals(ticker)
-        vol_surface = self._get_vol_surface(ticker)
+        vol_surface = self._get_vol_surface(ticker, provided=vol_surface)
 
         return _assess(
             ticker=ticker, regime=regime, technicals=technicals,
@@ -393,6 +421,8 @@ class OpportunityService:
         ohlcv: pd.DataFrame | None = None,
         as_of: date | None = None,
         iv_rank: float | None = None,
+        vol_surface: VolatilitySurface | None = None,
+        chain: ChainContext | None = None,
     ):
         """Assess iron butterfly opportunity."""
         from income_desk.opportunity.option_plays.iron_butterfly import assess_iron_butterfly as _assess
@@ -404,7 +434,7 @@ class OpportunityService:
         regime = self.regime_service.detect(ticker, df)
         technicals = self.technical_service.snapshot(ticker, df)
         fundamentals = self._get_fundamentals(ticker)
-        vol_surface = self._get_vol_surface(ticker)
+        vol_surface = self._get_vol_surface(ticker, provided=vol_surface)
 
         return _assess(
             ticker=ticker, regime=regime, technicals=technicals,
@@ -417,6 +447,8 @@ class OpportunityService:
         ticker: str,
         ohlcv: pd.DataFrame | None = None,
         as_of: date | None = None,
+        vol_surface: VolatilitySurface | None = None,
+        chain: ChainContext | None = None,
     ):
         """Assess ratio spread opportunity."""
         from income_desk.opportunity.option_plays.ratio_spread import assess_ratio_spread as _assess
@@ -429,7 +461,7 @@ class OpportunityService:
         technicals = self.technical_service.snapshot(ticker, df)
         phase = self.phase_service.detect(ticker, df) if self.phase_service else None
         fundamentals = self._get_fundamentals(ticker)
-        vol_surface = self._get_vol_surface(ticker)
+        vol_surface = self._get_vol_surface(ticker, provided=vol_surface)
 
         return _assess(
             ticker=ticker, regime=regime, technicals=technicals,
