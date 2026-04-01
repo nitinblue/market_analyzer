@@ -434,7 +434,7 @@ def _build_instruments() -> dict[str, InstrumentInfo]:
     # (ticker, lot_size, strike_interval, sector, scan_groups, options_liquidity)
     india_stocks = [
         # Large-cap, relatively liquid options
-        ("RELIANCE", 250, 20, "energy", ["india_fno", "nifty50", "directional"], "medium"),
+        ("RELIANCE", 500, 20, "energy", ["india_fno", "nifty50", "directional"], "medium"),
         ("TCS", 150, 25, "tech", ["india_fno", "nifty50", "directional"], "medium"),
         ("INFY", 300, 25, "tech", ["india_fno", "nifty50", "directional"], "medium"),
         ("HDFCBANK", 550, 10, "finance", ["india_fno", "nifty50", "directional"], "medium"),

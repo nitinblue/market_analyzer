@@ -9,6 +9,7 @@ import pytest
 from income_desk.adapters.csv_trades import (
     ImportedPosition,
     ImportResult,
+    _extract_account_from_filename,
     _parse_fidelity_symbol,
     _parse_symbol,
     detect_broker_format,
@@ -537,3 +538,77 @@ class TestRealFidelityImport:
         assert gbtc[0].quantity == 108
         assert gbtc[0].structure_type == "equity_long"
         assert gbtc[0].entry_price == pytest.approx(87.0)
+
+
+# ---------------------------------------------------------------------------
+# Account number extraction
+# ---------------------------------------------------------------------------
+
+
+class TestAccountNumberExtraction:
+    def test_fidelity_positions_from_column(self, tmp_path: Path) -> None:
+        csv_file = tmp_path / "fidelity_pos.csv"
+        csv_file.write_text(
+            _FIDELITY_HDR
+            + "259510977,IRA,AAPL,APPLE INC,50,$210.00,+$2.00,$10500.00,+$100.00,"
+            "+0.96%,+$500.00,+5.00%,10.00%,$10000.00,$200.00,Cash,\n"
+        )
+        result = import_trades_csv(csv_file)
+        assert result.account_number == "259510977"
+
+    def test_fidelity_from_filename(self, tmp_path: Path) -> None:
+        csv_file = tmp_path / "Portfolio_Positions_259-510977.csv"
+        csv_file.write_text(
+            _FIDELITY_HDR
+            + ",IRA,AAPL,APPLE INC,50,$210.00,+$2.00,$10500.00,+$100.00,"
+            "+0.96%,+$500.00,+5.00%,10.00%,$10000.00,$200.00,Cash,\n"
+        )
+        result = import_trades_csv(csv_file)
+        assert result.account_number == "259510977"
+
+    def test_tastytrade_account_column(self, tmp_path: Path) -> None:
+        csv_file = tmp_path / "tt.csv"
+        csv_file.write_text(
+            "Date,Action,Symbol,Instrument Type,Value,Quantity,Average Price,Account Number\n"
+            "2026-01-15T10:30:00,SELL_TO_OPEN,SPY 04/24/26 C 580,Equity Option,-350,-1,3.50,5WT12345\n"
+        )
+        result = import_trades_csv(csv_file)
+        assert result.account_number == "5WT12345"
+
+    def test_ibkr_account_column(self, tmp_path: Path) -> None:
+        csv_file = tmp_path / "ibkr.csv"
+        csv_file.write_text(
+            "TradeDate,Symbol,Put/Call,Strike,Expiry,Quantity,Price,Buy/Sell,Account\n"
+            "20260115,SPY,C,580,20260424,1,3.50,BUY,U1234567\n"
+        )
+        result = import_trades_csv(csv_file)
+        assert result.account_number == "U1234567"
+
+    def test_no_account_returns_none(self, tmp_path: Path) -> None:
+        csv_file = tmp_path / "generic.csv"
+        csv_file.write_text(
+            "symbol,date,quantity,price\n"
+            "SPY,2026-01-15,100,580.00\n"
+        )
+        result = import_trades_csv(csv_file)
+        assert result.account_number is None
+
+    def test_filename_extraction_helper(self, tmp_path: Path) -> None:
+        p = tmp_path / "Portfolio_Positions_259-510977.csv"
+        p.touch()
+        assert _extract_account_from_filename(p) == "259510977"
+
+    def test_filename_no_match(self, tmp_path: Path) -> None:
+        p = tmp_path / "trades.csv"
+        p.touch()
+        assert _extract_account_from_filename(p) is None
+
+    def test_missing_file_no_account(self) -> None:
+        result = import_trades_csv("/nonexistent/path/trades.csv")
+        assert result.account_number is None
+
+    def test_unknown_format_no_account(self, tmp_path: Path) -> None:
+        csv_file = tmp_path / "unknown.csv"
+        csv_file.write_text("foo,bar,baz\n1,2,3\n")
+        result = import_trades_csv(csv_file)
+        assert result.account_number is None

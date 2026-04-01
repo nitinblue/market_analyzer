@@ -108,12 +108,12 @@ def high_vol_surface() -> VolatilitySurface:
 
 @pytest.fixture
 def standard_ic_spec():
-    """Standard SPY iron condor: 5-wide wings, 30 DTE, target $3.00 credit."""
+    """Standard SPY iron condor: 5-wide wings, 20 OTM, 30 DTE."""
     exp = date(2026, 4, 17)
     return build_iron_condor(
         ticker="SPY", underlying_price=580.0,
-        short_put=570.0, long_put=565.0,
-        short_call=590.0, long_call=595.0,
+        short_put=560.0, long_put=555.0,
+        short_call=600.0, long_call=605.0,
         expiration=exp.isoformat(),
     )
 

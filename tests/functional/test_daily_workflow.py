@@ -77,7 +77,7 @@ class TestAssessorVerdicts:
         report = run_daily_checks(
             ticker="SPY",
             trade_spec=standard_ic_spec,
-            entry_credit=3.00,
+            entry_credit=2.00,
             regime_id=1,
             atr_pct=1.0,
             current_price=580.0,

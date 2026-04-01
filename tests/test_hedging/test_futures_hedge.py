@@ -63,8 +63,8 @@ class TestBuildFuturesHedge:
         # Commentary should mention basis
         assert any("basis" in c.lower() for c in result.commentary)
 
-    def test_reliance_futures_2_lots(self, registry: MarketRegistry):
-        """RELIANCE 500 shares / 250 lot = 2 lots."""
+    def test_reliance_futures_1_lot(self, registry: MarketRegistry):
+        """RELIANCE 500 shares / 500 lot = 1 lot."""
         result = build_futures_hedge(
             ticker="RELIANCE",
             shares=500,
@@ -74,7 +74,7 @@ class TestBuildFuturesHedge:
             market="INDIA",
             registry=registry,
         )
-        assert result.trade_spec.legs[0].quantity == 2
+        assert result.trade_spec.legs[0].quantity == 1
 
     def test_no_futures_price_estimates(self, registry: MarketRegistry):
         """If futures_price is None, estimates from spot."""

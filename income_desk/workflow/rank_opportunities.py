@@ -257,7 +257,7 @@ def rank_opportunities(
                 max_contracts_by_margin = max(1, int(max_risk_per_trade / margin_per_lot)) if margin_per_lot > 0 else contracts
                 contracts = min(contracts, max_contracts_by_margin)
 
-            max_risk = margin_per_lot * contracts
+            max_risk = max_loss_per * contracts
             max_profit = max_profit_per * contracts
         except Exception as e:
             warnings.append(f"{ticker}: position sizing failed: {e}")

@@ -9,6 +9,7 @@ from income_desk.validation.models import Severity
 
 
 def _ic():
+    """Narrow SPY IC: 10 OTM, 5-wide wings, ~35% POP in R1."""
     exp = date.today() + timedelta(days=30)
     return build_iron_condor(
         ticker="SPY", underlying_price=580.0,
@@ -18,16 +19,27 @@ def _ic():
     )
 
 
+def _wide_otm_ic():
+    """SPY IC: 25 OTM, 10-wide wings — balanced POP and EV."""
+    exp = date.today() + timedelta(days=30)
+    return build_iron_condor(
+        ticker="SPY", underlying_price=580.0,
+        short_put=555.0, long_put=545.0,
+        short_call=605.0, long_call=615.0,
+        expiration=exp.isoformat(),
+    )
+
+
 class TestPOPGate:
     @pytest.mark.daily
-    def test_r1_ic_pop_above_65pct_minimum(self) -> None:
-        """R1 IC with 1% ATR should yield POP >= 65%."""
+    def test_wide_otm_r1_ic_pop_above_65pct(self) -> None:
+        """Wide OTM R1 IC (25 OTM, 10-wide wings) should yield POP >= 65%."""
         pop = estimate_pop(
-            trade_spec=_ic(), entry_price=1.50,
+            trade_spec=_wide_otm_ic(), entry_price=3.00,
             regime_id=1, atr_pct=1.0, current_price=580.0,
         )
         assert pop is not None
-        assert pop.pop_pct * 100 >= 65.0, f"R1 IC POP {pop.pop_pct * 100:.1f}% is below 65% minimum"
+        assert pop.pop_pct * 100 >= 65.0, f"Wide OTM R1 IC POP {pop.pop_pct * 100:.1f}% below 65%"
 
     def test_r4_conditions_lower_pop(self) -> None:
         """R4 inflates ATR sigma, reducing POP estimate."""
@@ -37,9 +49,9 @@ class TestPOPGate:
         assert pop_r4.pop_pct < pop_r1.pop_pct, "R4 should have lower POP than R1"
 
     @pytest.mark.daily
-    def test_ev_positive_for_r1_ic(self) -> None:
-        """R1 IC with decent credit should have positive expected value."""
-        pop = estimate_pop(_ic(), 1.50, regime_id=1, atr_pct=1.0, current_price=580.0)
+    def test_ev_positive_for_wide_otm_r1_ic(self) -> None:
+        """Wide OTM R1 IC with decent credit should have positive expected value."""
+        pop = estimate_pop(_wide_otm_ic(), 3.00, regime_id=1, atr_pct=1.0, current_price=580.0)
         assert pop is not None
         assert pop.expected_value > 0, f"EV {pop.expected_value:.0f} should be positive"
 

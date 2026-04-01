@@ -27,7 +27,7 @@ class TestResolverIndiaStocks:
         )
         assert approach.recommended_tier == HedgeTier.DIRECT
         assert approach.has_liquid_options
-        assert approach.lot_size == 250
+        assert approach.lot_size == 500
         assert "options" in approach.rationale.lower()
 
     def test_tatasteel_futures(self, registry: MarketRegistry):

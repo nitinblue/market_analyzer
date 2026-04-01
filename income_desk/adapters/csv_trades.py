@@ -47,6 +47,7 @@ class ImportResult(BaseModel):
     errors: list[str]
     broker_detected: str
     file_path: str
+    account_number: str | None = None
 
 
 # Column name mappings for each broker format.
@@ -116,6 +117,62 @@ _BROKER_FORMATS: dict[str, dict] = {
         "date_format": "%m/%d/%Y %H:%M:%S",
     },
 }
+
+
+def _extract_account_from_filename(path: Path) -> str | None:
+    """Try to extract an account number from the filename.
+
+    Patterns handled:
+    - Fidelity: ``Portfolio_Positions_259-510977.csv`` → ``259510977``
+    - Generic: any 6-12 digit sequence (with optional dashes) in the filename
+    """
+    stem = path.stem
+    # Fidelity pattern: digits-digits at end of stem
+    m = re.search(r"(\d{3,6})-?(\d{3,6})", stem)
+    if m:
+        return m.group(1) + m.group(2)
+    return None
+
+
+def _extract_account_from_rows(
+    path: Path, column: str,
+) -> str | None:
+    """Read first data row and return the value in *column*, if present."""
+    try:
+        with open(path, newline="", encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                val = (row.get(column) or "").strip()
+                if val:
+                    return val
+    except OSError:
+        pass
+    return None
+
+
+def _extract_account_number(path: Path, broker: str) -> str | None:
+    """Best-effort account number extraction per broker."""
+    if broker == "fidelity_positions":
+        # Column "Account Number" is in every row
+        return (
+            _extract_account_from_rows(path, "Account Number")
+            or _extract_account_from_filename(path)
+        )
+    if broker == "fidelity":
+        return _extract_account_from_filename(path)
+    if broker == "tastytrade":
+        return _extract_account_from_rows(path, "Account Number")
+    if broker == "ibkr":
+        return _extract_account_from_rows(path, "Account")
+    if broker == "schwab":
+        # Schwab sometimes has account in header metadata rows
+        return _extract_account_from_rows(path, "Account Number")
+    if broker == "webull":
+        return (
+            _extract_account_from_rows(path, "Account")
+            or _extract_account_from_filename(path)
+        )
+    return None
 
 
 def detect_broker_format(file_path: str | Path) -> str:
@@ -196,16 +253,24 @@ def import_trades_csv(
             file_path=str(path),
         )
 
+    account_number = _extract_account_number(path, broker)
+
     if broker == "fidelity_positions":
-        return _import_fidelity_positions(path)
+        result = _import_fidelity_positions(path)
+        result.account_number = account_number
+        return result
 
     fmt = _BROKER_FORMATS.get(broker)
     if fmt is None:
         # Unknown named broker — fall back to generic parser
-        return _import_generic(path, broker)
+        result = _import_generic(path, broker)
+        result.account_number = account_number
+        return result
 
     if broker == "generic":
-        return _import_generic(path, broker)
+        result = _import_generic(path, broker)
+        result.account_number = account_number
+        return result
 
     positions: list[ImportedPosition] = []
     errors: list[str] = []
@@ -231,6 +296,7 @@ def import_trades_csv(
         errors=errors,
         broker_detected=broker,
         file_path=str(path),
+        account_number=account_number,
     )
 
 

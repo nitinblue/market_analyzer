@@ -380,6 +380,66 @@ Rank surviving candidates by composite score: regime alignment, phase, IV rank, 
 
 ---
 
+### Candlestick Pattern Detection
+
+Read raw price bars like a day trader. 19 classical candlestick patterns detected from OHLCV data, scored by context (trend, volume, support/resistance proximity). Timeframe-agnostic — works on daily bars or intraday.
+
+```bash
+> candles SPY                    # Scored patterns (daily, last 10 bars)
+> candles SPY --lookback 20      # Scan last 20 bars
+> candles SPY --raw              # All detections, no conviction filter
+```
+
+```
+CANDLESTICK PATTERNS: SPY (daily, last 10 bars)
+──────────────────────────────────────────────────
+  2026-03-28  BULLISH_ENGULFING  bullish  conviction: 78
+              bullish_engulfing: after bearish trend, volume 1.8x avg, near key level
+
+  Strongest: BULLISH_ENGULFING (78) — bullish
+  Summary: 1 bullish, 0 bearish
+```
+
+**Composable API — use at any level:**
+
+```python
+from income_desk.features.patterns.candles import (
+    detect_candlestick_patterns,    # Layer 1: raw geometric detection
+    score_candlestick_patterns,     # Layer 2: context scoring (0-100)
+    compute_candlestick_patterns,   # Convenience: detect + score + summarize
+)
+
+# Raw detection (for backtesting)
+patterns = detect_candlestick_patterns(ohlcv_df, lookback_bars=10)
+
+# Scored (for live decisions)
+scored = score_candlestick_patterns(ohlcv_df, patterns)
+
+# All-in-one
+summary = compute_candlestick_patterns(ohlcv_df)
+summary.strongest   # highest conviction pattern
+summary.bullish_count, summary.bearish_count
+```
+
+Auto-included in `TechnicalSnapshot` — patterns appear alongside RSI, MACD, VCP, Smart Money:
+
+```python
+snap = ma.technicals.snapshot("SPY")
+snap.candlestick_patterns.strongest.pattern   # CandlePatternType.BULLISH_ENGULFING
+snap.candlestick_patterns.strongest.conviction  # 78
+```
+
+| Category | Patterns |
+|----------|----------|
+| Single-bar (7) | Hammer, Inverted Hammer, Hanging Man, Shooting Star, Doji, Dragonfly Doji, Spinning Top |
+| Double-bar (4) | Bullish/Bearish Engulfing, Tweezer Top/Bottom |
+| Triple-bar (6) | Morning/Evening Star, Morning/Evening Doji Star, Three White Soldiers, Three Black Crows |
+| Five-bar (2) | Rising Three, Falling Three |
+
+**Conviction scoring (0-100):** Trend alignment (30), body conviction (20), volume confirmation (20), S/R proximity (20), pattern complexity (10). All thresholds configurable via `candle_*` settings.
+
+---
+
 ### Step 8: Build Scenario Trades (No Checks)
 
 Generate trade structures for top candidates. These are proposals — not yet validated against your portfolio.
@@ -720,7 +780,7 @@ Trading:    validate, rank, screen, opportunity, entry_analysis, kelly, audit, s
 Monitoring: health, monitor, exit_intelligence, adjust, assignment_risk
 Portfolio:  desk, portfolio, trade, close_trade, rebalance
 Sizing:     kelly, size, margin, margin_buffer, csp, covered_call
-Research:   regime, technicals, vol, levels, research, stress, rate_risk
+Research:   regime, technicals, candles, vol, levels, research, stress, rate_risk
 Account:    balance, quotes, watchlist, wizard
 ```
 

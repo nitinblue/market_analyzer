@@ -740,8 +740,12 @@ def estimate_pop(
             daily_sigma = daily_sigma * iv_factor
         expected_move = daily_sigma * math.sqrt(dte) * current_price
 
-        # Regime adjustments: MR regimes compress effective vol, trending expands it
-        regime_factor = {1: 0.40, 2: 0.70, 3: 1.10, 4: 1.50}.get(regime_id, 1.0)
+        # Regime adjustments: MR regimes compress endpoint moves slightly,
+        # trending expands them.  Previous factors (0.40–1.50) were far too
+        # extreme — R1=0.40 inflated POP from ~25% to ~55% for ATM iron
+        # butterflies.  Recalibrated to mild adjustments that don't dominate
+        # the ATR-based expected-move calculation.
+        regime_factor = {1: 0.92, 2: 0.96, 3: 1.08, 4: 1.20}.get(regime_id, 1.0)
         adjusted_move = expected_move * regime_factor
 
         if adjusted_move <= 0:

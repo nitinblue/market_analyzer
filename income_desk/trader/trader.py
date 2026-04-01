@@ -155,7 +155,7 @@ def run_premarket(
 
     phase = "1-PreMarket"
     cur = _cur(meta.market)
-    capital = meta.account_nlv or 50_000.0
+    capital = meta.account_nlv or (500_000.0 if meta.market == "India" else 50_000.0)
 
     # --- 1. Market Context (macro overview) ---
     try:
@@ -375,7 +375,7 @@ def run_scanning(
 
     phase = "2-Scanning"
     cur = _cur(meta.market)
-    capital = meta.account_nlv or 50_000.0
+    capital = meta.account_nlv or (500_000.0 if meta.market == "India" else 50_000.0)
     proposals: list[Any] | None = None
 
     # --- 1. Scan Universe ---
@@ -526,6 +526,7 @@ def run_entry(
             "max_loss": top.max_risk,
             "capital": top.max_risk,
             "wing_width": getattr(top, "wing_width", 5.0),
+            "lot_size": getattr(top, "lot_size", None),
             "dte": getattr(top, "target_dte", 30),
             "short_put": getattr(top, "short_put", None),
             "long_put": getattr(top, "long_put", None),
@@ -543,6 +544,50 @@ def run_entry(
         from income_desk.workflow import validate_trade
         from income_desk.workflow.validate_trade import ValidateRequest
 
+        # Reconstruct TradeSpec from proposal strikes so validate gets real legs
+        _trade_spec = None
+        sp = prop.get("short_put")
+        lp = prop.get("long_put")
+        sc = prop.get("short_call")
+        lc = prop.get("long_call")
+        if sp or sc:
+            try:
+                from income_desk.models.opportunity import TradeSpec, LegSpec, LegAction
+                from datetime import date as _date, timedelta as _td
+                _dte = prop.get("dte", 30)
+                _expiry = _date.today() + _td(days=_dte)
+                _legs = []
+                if sp:
+                    _legs.append(LegSpec(role="short_put", action=LegAction.SELL_TO_OPEN, option_type="put",
+                                         strike=sp, strike_label="SP", expiration=_expiry, days_to_expiry=_dte, atm_iv_at_expiry=0.0))
+                if lp:
+                    _legs.append(LegSpec(role="long_put", action=LegAction.BUY_TO_OPEN, option_type="put",
+                                         strike=lp, strike_label="LP", expiration=_expiry, days_to_expiry=_dte, atm_iv_at_expiry=0.0))
+                if sc:
+                    _legs.append(LegSpec(role="short_call", action=LegAction.SELL_TO_OPEN, option_type="call",
+                                         strike=sc, strike_label="SC", expiration=_expiry, days_to_expiry=_dte, atm_iv_at_expiry=0.0))
+                if lc:
+                    _legs.append(LegSpec(role="long_call", action=LegAction.BUY_TO_OPEN, option_type="call",
+                                         strike=lc, strike_label="LC", expiration=_expiry, days_to_expiry=_dte, atm_iv_at_expiry=0.0))
+                if _legs:
+                    _mkt_fields = {}
+                    try:
+                        from income_desk.opportunity.option_plays._trade_spec_helpers import _populate_market_fields
+                        _mkt_fields = _populate_market_fields(ticker)
+                    except Exception:
+                        pass
+                    _trade_spec = TradeSpec(
+                        ticker=ticker, legs=_legs,
+                        underlying_price=prop["current_price"],
+                        target_dte=_dte, target_expiration=_expiry,
+                        spec_rationale="reconstructed from proposal strikes",
+                        structure_type=prop.get("structure", "iron_condor"),
+                        order_side="credit",
+                        **_mkt_fields,
+                    )
+            except Exception:
+                pass  # Fall back to auto-generated in validate_trade
+
         req = ValidateRequest(
             ticker=ticker,
             entry_credit=prop["entry_credit"],
@@ -550,6 +595,7 @@ def run_entry(
             atr_pct=prop["atr_pct"],
             current_price=prop["current_price"],
             dte=prop.get("dte", 30),
+            trade_spec=_trade_spec,
         )
         print_signature("validate_trade", req, cli_command=f"analyzer-cli> validate {ticker}")
         resp = validate_trade(req, ma)
@@ -589,9 +635,16 @@ def run_entry(
         from income_desk.workflow import size_position
         from income_desk.workflow.size_position import SizeRequest
 
-        capital = meta.account_nlv or 50_000.0
-        # BUG-007: wing_width default of $5 is US-centric; for India, derive
-        # from ATR if no explicit wing_width on the proposal.
+        capital = meta.account_nlv or (500_000.0 if meta.market == "India" else 50_000.0)
+        # Use instrument lot_size from proposal (set by registry during ranking)
+        lot_size = prop.get("lot_size")
+        if not lot_size:
+            try:
+                from income_desk.registry import MarketRegistry
+                _inst = MarketRegistry().get_instrument(ticker, meta.market)
+                lot_size = _inst.lot_size
+            except Exception:
+                lot_size = 25 if meta.market == "India" else 100
         wing = prop.get("wing_width")
         if not wing:
             price = prop.get("current_price", 0)
@@ -600,7 +653,6 @@ def run_entry(
                 wing = round(price * atr_pct * 1.5, 1)  # ~1.5 ATR
             else:
                 wing = 5.0
-        lot_size = 25 if meta.market == "India" else 100
         risk_per_contract = wing * lot_size
         pop = prop.get("pop_pct") or 65.0
         mx_profit = prop.get("max_profit") or (prop.get("entry_credit", 1.0) * lot_size)
@@ -937,7 +989,7 @@ def run_portfolio_risk(
 
     phase = "5-PortfolioRisk"
     cur = _cur(meta.market)
-    capital = meta.account_nlv or 50_000.0
+    capital = meta.account_nlv or (500_000.0 if meta.market == "India" else 50_000.0)
 
     # Use real broker positions if available, else demo
     if broker_positions:
@@ -1158,7 +1210,7 @@ def run_reporting(
 
     phase = "7-Reporting"
     cur = _cur(meta.market)
-    capital = meta.account_nlv or 50_000.0
+    capital = meta.account_nlv or (500_000.0 if meta.market == "India" else 50_000.0)
 
     # --- 1. Daily Report ---
     try:

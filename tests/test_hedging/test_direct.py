@@ -35,8 +35,8 @@ class TestProtectivePut:
         # Strike should be ~2600 (2680 - 80*1.0 = 2600, snapped to 20-interval)
         assert leg.strike <= 2680
         assert leg.strike >= 2500
-        # Lots: 500 shares / 250 lot_size = 2
-        assert leg.quantity == 2
+        # Lots: 500 shares / 500 lot_size = 1
+        assert leg.quantity == 1
 
     def test_spy_r4_near_atm(self, registry: MarketRegistry):
         """SPY in R4 — near ATM put (0.25 ATR OTM)."""
