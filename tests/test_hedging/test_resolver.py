@@ -14,7 +14,7 @@ def registry() -> MarketRegistry:
 
 class TestResolverIndiaStocks:
     def test_reliance_direct(self, registry: MarketRegistry):
-        """RELIANCE (medium liq) → DIRECT."""
+        """RELIANCE (medium liq) → DIRECT with large enough account."""
         approach = resolve_hedge_strategy(
             ticker="RELIANCE",
             position_value=1250000,
@@ -22,7 +22,7 @@ class TestResolverIndiaStocks:
             current_price=2500,
             regime_id=2,
             market="INDIA",
-            account_nlv=5000000,
+            account_nlv=10000000,  # lot_value 1.25M needs >6.25M account for <20%
             registry=registry,
         )
         assert approach.recommended_tier == HedgeTier.DIRECT

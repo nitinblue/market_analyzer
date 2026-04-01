@@ -730,23 +730,26 @@ def estimate_pop(
     _atr_sigma_factor = _ATR_SIGMA_FACTORS.get(regime_id, 1.25)
 
     if st in ("iron_condor", "iron_butterfly", "credit_spread", "strangle", "straddle"):
-        # Credit trade: profit if price stays between breakevens
-        # ATR% is daily. Convert to 1-sigma via regime-adjusted factor.
-        daily_sigma = (atr_pct / 100.0) / _atr_sigma_factor
-        # IV rank adjustment: elevated IV (rank > 50) widens expected moves,
-        # compressed IV (rank < 50) narrows them
-        if iv_rank is not None:
-            iv_factor = 0.7 + (iv_rank / 100) * 0.6  # Range: 0.7 to 1.3
-            daily_sigma = daily_sigma * iv_factor
-        expected_move = daily_sigma * math.sqrt(dte) * current_price
+        # Credit trade: profit if price stays between breakevens.
+        # Prefer broker IV from legs when available — it's the market's
+        # own estimate of future volatility and beats ATR-derived sigma.
+        leg_ivs = [l.atm_iv_at_expiry for l in trade_spec.legs if l.atm_iv_at_expiry and l.atm_iv_at_expiry > 0]
+        if leg_ivs:
+            # Use average leg IV (annualized) → expected move at expiry
+            avg_iv = sum(leg_ivs) / len(leg_ivs)
+            expected_move = current_price * avg_iv * math.sqrt(dte / 365)
+        else:
+            # Fallback: ATR-based sigma with regime adjustment
+            daily_sigma = (atr_pct / 100.0) / _atr_sigma_factor
+            if iv_rank is not None:
+                iv_factor = 0.7 + (iv_rank / 100) * 0.6
+                daily_sigma = daily_sigma * iv_factor
+            expected_move = daily_sigma * math.sqrt(dte) * current_price
+            # Regime adjustments only apply to ATR path (IV already incorporates regime)
+            regime_factor = {1: 0.92, 2: 0.96, 3: 1.08, 4: 1.20}.get(regime_id, 1.0)
+            expected_move = expected_move * regime_factor
 
-        # Regime adjustments: MR regimes compress endpoint moves slightly,
-        # trending expands them.  Previous factors (0.40–1.50) were far too
-        # extreme — R1=0.40 inflated POP from ~25% to ~55% for ATM iron
-        # butterflies.  Recalibrated to mild adjustments that don't dominate
-        # the ATR-based expected-move calculation.
-        regime_factor = {1: 0.92, 2: 0.96, 3: 1.08, 4: 1.20}.get(regime_id, 1.0)
-        adjusted_move = expected_move * regime_factor
+        adjusted_move = expected_move
 
         if adjusted_move <= 0:
             return None
@@ -774,8 +777,18 @@ def estimate_pop(
         # Expected value
         wing = trade_spec.wing_width_points
         if not wing or wing <= 0:
-            # Cannot compute EV without wing width — return current pop/ev without EV
-            wing = 0.0  # Will produce max_loss=0, EV=0 — safe default
+            # Derive wing width from leg strikes (short - long on same side)
+            from income_desk.models.opportunity import LegAction
+            short_puts = [l.strike for l in trade_spec.legs if l.option_type == "put" and l.action == LegAction.SELL_TO_OPEN]
+            long_puts = [l.strike for l in trade_spec.legs if l.option_type == "put" and l.action == LegAction.BUY_TO_OPEN]
+            short_calls = [l.strike for l in trade_spec.legs if l.option_type == "call" and l.action == LegAction.SELL_TO_OPEN]
+            long_calls = [l.strike for l in trade_spec.legs if l.option_type == "call" and l.action == LegAction.BUY_TO_OPEN]
+            widths = []
+            if short_puts and long_puts:
+                widths.append(max(short_puts) - min(long_puts))
+            if short_calls and long_calls:
+                widths.append(max(long_calls) - min(short_calls))
+            wing = min(widths) if widths else 0.0
         lot_size = trade_spec.lot_size
         if trade_spec.order_side == "credit":
             max_profit = entry_price * lot_size * contracts
@@ -806,6 +819,7 @@ def estimate_pop(
                 ))
             regime_names = {1: "R1 Low-Vol MR", 2: "R2 High-Vol MR", 3: "R3 Low-Vol Trend", 4: "R4 High-Vol Trend"}
             iv_note = f", IV rank {iv_rank:.0f}" if iv_rank is not None else ""
+            _vol_src = f"leg IV avg {sum(leg_ivs)/len(leg_ivs):.1%}" if leg_ivs else f"ATR {atr_pct:.1f}%"
             return POPEstimate(
                 pop_pct=round(pop, 4),
                 expected_value=0.0,
@@ -818,8 +832,8 @@ def estimate_pop(
                 regime_id=regime_id,
                 notes=(
                     f"Regime {regime_names.get(regime_id, f'R{regime_id}')}: "
-                    f"expected {dte}d move ±${adjusted_move:.1f} "
-                    f"(ATR {atr_pct:.1f}%, regime factor {regime_factor:.2f}{iv_note}) — "
+                    f"expected {dte}d move ±{adjusted_move:.1f} "
+                    f"({_vol_src}{iv_note}) — "
                     "EV unavailable: credit estimate exceeds wing width"
                 ),
                 data_gaps=gaps,
@@ -829,10 +843,14 @@ def estimate_pop(
 
         regime_names = {1: "R1 Low-Vol MR", 2: "R2 High-Vol MR", 3: "R3 Low-Vol Trend", 4: "R4 High-Vol Trend"}
         iv_note = f", IV rank {iv_rank:.0f}" if iv_rank is not None else ""
+        if leg_ivs:
+            vol_source = f"leg IV avg {sum(leg_ivs)/len(leg_ivs):.1%}"
+        else:
+            vol_source = f"ATR {atr_pct:.1f}%"
         notes = (
             f"Regime {regime_names.get(regime_id, f'R{regime_id}')}: "
-            f"expected {dte}d move ±${adjusted_move:.1f} "
-            f"(ATR {atr_pct:.1f}%, regime factor {regime_factor:.2f}{iv_note})"
+            f"expected {dte}d move ±{adjusted_move:.1f} "
+            f"({vol_source}{iv_note})"
         )
 
         gaps: list[DataGap] = []

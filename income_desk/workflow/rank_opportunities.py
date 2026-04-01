@@ -233,13 +233,9 @@ def rank_opportunities(
                 max_profit_per = repriced.entry_credit * lot_size
                 max_loss_per = (wing_width * lot_size) - max_profit_per
 
-            # India margin (SPAN)
-            if request.market == "India":
-                is_defined = st in ("iron_condor", "iron_butterfly", "credit_spread", "debit_spread")
-                margin_pct = 0.10 if is_defined else 0.18
-                margin_per_lot = repriced.current_price * lot_size * margin_pct
-            else:
-                margin_per_lot = max_loss_per
+            # Use actual max loss as margin proxy for defined-risk trades.
+            # SPAN margin is broker-specific — don't hardcode percentages.
+            margin_per_lot = max_loss_per
 
             risk_per = max(max_loss_per, 1.0)
 
