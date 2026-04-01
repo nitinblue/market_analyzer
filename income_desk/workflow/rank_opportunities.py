@@ -210,10 +210,12 @@ def rank_opportunities(
 
     repriced_list = batch_reprice(entries, ma.market_data, ma.technicals, chains=chains)
 
-    # ── 4. Single pass: POP -> size -> output ──
+    # ── 4. Validate + POP + Size → TradeProposal ──
     from income_desk.trade_lifecycle import estimate_pop
     from income_desk.features.position_sizing import compute_position_size
+    from income_desk.service.trade_validator import TradeValidator
 
+    validator = TradeValidator()
     trades: list[TradeProposal] = []
 
     for entry, repriced in zip(valid_ranking_entries, repriced_list):
@@ -239,9 +241,10 @@ def rank_opportunities(
             ))
             continue
 
-        # 4c. POP estimation — uses repriced.entry_credit (FINAL, immutable)
+        # 4c. POP estimation
         pop_pct = None
         ev = None
+        pop_result = None
         try:
             pop_result = estimate_pop(
                 trade_spec=ts, entry_price=max(repriced.entry_credit, 0.01),
@@ -252,91 +255,56 @@ def rank_opportunities(
                 pop_pct = pop_result.pop_pct
                 ev = pop_result.expected_value
         except Exception as e:
-            warnings.append(f"{ticker}: POP estimation failed: {e} (entry={repriced.entry_credit:.4f}, regime={repriced.regime_id}, atr={repriced.atr_pct:.2f}, price={repriced.current_price:.2f}, st={st})")
+            warnings.append(f"{ticker}: POP failed: {e}")
 
-        if pop_pct is None:
+        # 4d. Validate trade through structure-aware rules engine
+        vr = validator.validate(ts, repriced_trade=repriced, pop_estimate=pop_result)
+
+        if vr.status == "rejected":
+            reasons = "; ".join(r.root_cause for r in vr.rejections)
             blocked.append(BlockedTrade(
                 ticker=ticker, structure=st,
-                reason="POP estimation failed — cannot assess profitability",
+                reason=f"Validation rejected: {reasons}",
                 score=entry.composite_score,
                 **_blocked_from_ts(ts),
             ))
             continue
 
-        # EV gate: reject only if expected value is negative (trade loses money over time)
+        # Use validated economics (guaranteed non-null for valid/flagged trades)
+        econ = vr.economics
+        if econ is None:
+            blocked.append(BlockedTrade(
+                ticker=ticker, structure=st,
+                reason="Validator produced no economics",
+                score=entry.composite_score,
+                **_blocked_from_ts(ts),
+            ))
+            continue
+
+        # Override pop/ev with validated values
+        pop_pct = econ.pop_pct
+        ev = econ.expected_value
+        max_profit_total = econ.max_profit * econ.contracts
+        max_loss_total = (econ.max_loss or 0.0) * econ.contracts
+        contracts = max(1, int(econ.contracts)) if econ.contracts >= 1 else econ.contracts
+
+        # EV gate
         if ev is not None and ev < 0:
             blocked.append(BlockedTrade(
                 ticker=ticker, structure=st,
-                reason=f"Negative EV: {ev:.0f} (POP {pop_pct:.0%}, trade loses money over time)",
+                reason=f"Negative EV: {ev:.0f} (POP {pop_pct:.0%})",
                 score=entry.composite_score,
                 **_blocked_from_ts(ts),
             ))
             continue
-
-        # 4d. Position sizing — uses repriced values
-        contracts = 1
-        max_risk = 0.0
-        max_profit = 0.0
-        try:
-            lot_size = repriced.lot_size
-            wing_width = repriced.wing_width or (50.0 if request.market == "India" else 5.0)
-            currency = ts.currency or ("INR" if request.market == "India" else "USD")
-            order_side = getattr(ts, "order_side", "credit")
-            order_side_str = getattr(order_side, "value", str(order_side)) if order_side else "credit"
-
-            if order_side_str == "debit":
-                max_loss_per = repriced.entry_credit * lot_size
-                max_profit_per = max((wing_width * lot_size) - max_loss_per, 0)
-            else:
-                max_profit_per = repriced.entry_credit * lot_size
-                max_loss_per = (wing_width * lot_size) - max_profit_per
-
-            # Use actual max loss as margin proxy for defined-risk trades.
-            # SPAN margin is broker-specific — don't hardcode percentages.
-            margin_per_lot = max_loss_per
-
-            risk_per = max(max_loss_per, 1.0)
-
-            if st not in ("equity_long", "equity_short"):
-                sz = compute_position_size(
-                    pop_pct=pop_pct or 0.60,
-                    max_profit=max_profit_per, max_loss=max_loss_per,
-                    capital=request.capital, risk_per_contract=risk_per,
-                    regime_id=repriced.regime_id, wing_width=wing_width,
-                    safety_factor=0.5, max_contracts=20,
-                )
-                contracts = sz.recommended_contracts
-
-                # Cap 1: max 4% of capital at risk per trade
-                max_risk_per_trade = request.capital * 0.04
-                max_contracts_by_risk = max(1, int(max_risk_per_trade / margin_per_lot)) if margin_per_lot > 0 else contracts
-                contracts = min(contracts, max_contracts_by_risk)
-
-                # Cap 2: notional exposure cannot exceed capital
-                # (broker won't let you trade more than your account can cover)
-                notional_per_lot = repriced.current_price * lot_size
-                if notional_per_lot > 0:
-                    max_by_notional = max(1, int(request.capital / notional_per_lot))
-                    contracts = min(contracts, max_by_notional)
-
-            max_risk = max_loss_per * contracts
-            max_profit = max_profit_per * contracts
-        except Exception as e:
-            warnings.append(f"{ticker}: position sizing failed: {e}")
-            blocked.append(BlockedTrade(
-                ticker=ticker, structure=st,
-                reason=f"Position sizing failed: {e}",
-                score=entry.composite_score,
-                **_blocked_from_ts(ts),
-            ))
-            continue
-
-        if contracts == 0:
-            # Trade quality is fine, just insufficient capital — still show as GO
-            contracts = 1  # Show 1 lot so trader can evaluate the trade
 
         if len(trades) >= request.max_trades:
             break
+
+        # Build data_gaps from validation flags + assessor gaps
+        data_gaps = [g.reason for g in entry.data_gaps] if entry.data_gaps else []
+        for flag in vr.flags:
+            data_gaps.append(f"{flag.field}: {flag.message}")
 
         # 4e. Build TradeProposal
         badge = ts.strategy_badge if ts.strategy_badge else str(st)
@@ -347,29 +315,29 @@ def rank_opportunities(
             direction=entry.direction or "neutral",
             strategy_badge=badge,
             composite_score=entry.composite_score,
-            verdict=entry.verdict or "go",
+            verdict="caution" if vr.status == "flagged" else (entry.verdict or "go"),
             pop_pct=pop_pct,
             expected_value=ev,
-            contracts=contracts,
-            max_risk=max_risk,
-            max_profit=max_profit,
-            entry_credit=repriced.entry_credit,
+            contracts=int(contracts) if contracts >= 1 else 1,
+            max_risk=max_loss_total,
+            max_profit=max_profit_total,
+            entry_credit=econ.entry_credit,
             credit_source=repriced.credit_source,
-            wing_width=repriced.wing_width,
+            wing_width=econ.wing_width,
             target_dte=ts.target_dte,
             expiry=repriced.expiry,
             current_price=repriced.current_price,
             regime_id=repriced.regime_id,
             atr_pct=repriced.atr_pct,
-            lot_size=repriced.lot_size,
+            lot_size=econ.lot_size,
             currency=ts.currency or ("INR" if request.market == "India" else "USD"),
             rationale=entry.rationale or "",
-            data_gaps=[g.reason for g in entry.data_gaps] if entry.data_gaps else [],
+            data_gaps=data_gaps,
             short_put=_extract_strike(ts, "short_put", "put", "STO"),
             long_put=_extract_strike(ts, "long_put", "put", "BTO"),
             short_call=_extract_strike(ts, "short_call", "call", "STO"),
             long_call=_extract_strike(ts, "long_call", "call", "BTO"),
-            net_credit_per_unit=repriced.entry_credit,
+            net_credit_per_unit=econ.entry_credit,
         ))
 
     return RankResponse(
