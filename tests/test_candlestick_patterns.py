@@ -156,3 +156,158 @@ class TestSingleBarDetection:
         patterns = detect_candlestick_patterns(df, lookback_bars=3)
         names = [p.pattern for p in patterns]
         assert CandlePatternType.SPINNING_TOP in names
+
+
+class TestDoubleBarDetection:
+    def test_bullish_engulfing(self) -> None:
+        bars = _downtrend_prefix() + [
+            (97.0, 97.5, 96.0, 96.5, 100000),  # red bar
+            (96.0, 98.0, 95.5, 98.0, 150000),   # green engulfs
+        ]
+        df = _make_ohlcv(bars)
+        patterns = detect_candlestick_patterns(df, lookback_bars=3)
+        names = [p.pattern for p in patterns]
+        assert CandlePatternType.BULLISH_ENGULFING in names
+
+    def test_bearish_engulfing(self) -> None:
+        bars = _uptrend_prefix() + [
+            (103.0, 104.0, 102.5, 103.5, 100000),  # green bar
+            (104.0, 104.5, 102.0, 102.0, 150000),   # red engulfs
+        ]
+        df = _make_ohlcv(bars)
+        patterns = detect_candlestick_patterns(df, lookback_bars=3)
+        names = [p.pattern for p in patterns]
+        assert CandlePatternType.BEARISH_ENGULFING in names
+
+    def test_tweezer_bottom(self) -> None:
+        bars = _downtrend_prefix() + [
+            (97.0, 98.0, 95.00, 97.5, 100000),
+            (97.5, 98.5, 95.00, 98.0, 120000),
+        ]
+        df = _make_ohlcv(bars)
+        patterns = detect_candlestick_patterns(df, lookback_bars=3)
+        names = [p.pattern for p in patterns]
+        assert CandlePatternType.TWEEZER_BOTTOM in names
+
+    def test_tweezer_top(self) -> None:
+        bars = _uptrend_prefix() + [
+            (103.0, 105.00, 102.5, 104.5, 100000),
+            (104.5, 105.00, 103.0, 103.5, 120000),
+        ]
+        df = _make_ohlcv(bars)
+        patterns = detect_candlestick_patterns(df, lookback_bars=3)
+        names = [p.pattern for p in patterns]
+        assert CandlePatternType.TWEEZER_TOP in names
+
+
+class TestTripleBarDetection:
+    def test_morning_star(self) -> None:
+        bars = _downtrend_prefix() + [
+            (97.0, 97.5, 95.0, 95.5, 100000),
+            (95.5, 96.0, 95.0, 95.8, 80000),
+            (96.0, 98.0, 95.5, 97.5, 130000),
+        ]
+        df = _make_ohlcv(bars)
+        patterns = detect_candlestick_patterns(df, lookback_bars=4)
+        names = [p.pattern for p in patterns]
+        assert CandlePatternType.MORNING_STAR in names
+
+    def test_evening_star(self) -> None:
+        bars = _uptrend_prefix() + [
+            (103.0, 105.0, 102.5, 104.5, 100000),
+            (104.5, 105.0, 104.0, 104.3, 80000),
+            (104.0, 104.5, 102.0, 102.5, 130000),
+        ]
+        df = _make_ohlcv(bars)
+        patterns = detect_candlestick_patterns(df, lookback_bars=4)
+        names = [p.pattern for p in patterns]
+        assert CandlePatternType.EVENING_STAR in names
+
+    def test_morning_doji_star(self) -> None:
+        bars = _downtrend_prefix() + [
+            (97.0, 97.5, 95.0, 95.5, 100000),
+            (95.5, 96.0, 95.0, 95.52, 80000),
+            (96.0, 98.0, 95.5, 97.5, 130000),
+        ]
+        df = _make_ohlcv(bars)
+        patterns = detect_candlestick_patterns(df, lookback_bars=4)
+        names = [p.pattern for p in patterns]
+        assert CandlePatternType.MORNING_DOJI_STAR in names
+
+    def test_evening_doji_star(self) -> None:
+        bars = _uptrend_prefix() + [
+            (103.0, 105.0, 102.5, 104.5, 100000),
+            (104.5, 105.0, 104.0, 104.52, 80000),
+            (104.0, 104.5, 102.0, 102.5, 130000),
+        ]
+        df = _make_ohlcv(bars)
+        patterns = detect_candlestick_patterns(df, lookback_bars=4)
+        names = [p.pattern for p in patterns]
+        assert CandlePatternType.EVENING_DOJI_STAR in names
+
+    def test_three_white_soldiers(self) -> None:
+        bars = _flat_prefix() + [
+            (100.0, 102.0, 99.8, 101.8, 100000),
+            (101.0, 103.5, 100.8, 103.3, 110000),
+            (102.0, 105.0, 101.8, 104.8, 120000),
+        ]
+        df = _make_ohlcv(bars)
+        patterns = detect_candlestick_patterns(df, lookback_bars=4)
+        names = [p.pattern for p in patterns]
+        assert CandlePatternType.THREE_WHITE_SOLDIERS in names
+
+    def test_three_black_crows(self) -> None:
+        bars = _flat_prefix() + [
+            (102.0, 102.2, 100.0, 100.2, 100000),
+            (101.0, 101.2, 99.0, 99.2, 110000),
+            (100.0, 100.2, 98.0, 98.2, 120000),
+        ]
+        df = _make_ohlcv(bars)
+        patterns = detect_candlestick_patterns(df, lookback_bars=4)
+        names = [p.pattern for p in patterns]
+        assert CandlePatternType.THREE_BLACK_CROWS in names
+
+
+class TestFiveBarDetection:
+    def test_rising_three(self) -> None:
+        # Bar0: strong bullish (body_pct ~0.78). Middle bars: small body (bp<0.33),
+        # contained within bar0's range. Bar4: bullish close above bar0's close.
+        bars = _flat_prefix() + [
+            (100.0, 104.0, 99.5, 103.5, 150000),   # bar0: strong bull
+            (103.0, 103.5, 101.0, 102.5, 80000),   # body=0.5, range=2.5, bp=0.20
+            (102.5, 103.2, 100.5, 102.0, 70000),   # body=0.5, range=2.7, bp=0.19
+            (102.0, 103.5, 100.0, 102.8, 75000),   # body=0.8, range=3.5, bp=0.23
+            (103.0, 106.0, 102.5, 105.5, 160000),  # bar4: strong bull, c4 > c0
+        ]
+        df = _make_ohlcv(bars)
+        patterns = detect_candlestick_patterns(df, lookback_bars=6)
+        names = [p.pattern for p in patterns]
+        assert CandlePatternType.RISING_THREE in names
+
+    def test_falling_three(self) -> None:
+        # Bar0: strong bearish (body_pct ~0.78). Middle bars: small body (bp<0.33),
+        # contained within bar0's range. Bar4: bearish close below bar0's close.
+        bars = _flat_prefix() + [
+            (104.0, 104.5, 100.0, 100.5, 150000),  # bar0: strong bear
+            (101.0, 103.0, 100.5, 101.5, 80000),   # body=0.5, range=2.5, bp=0.20
+            (101.5, 103.0, 100.5, 102.0, 70000),   # body=0.5, range=2.5, bp=0.20
+            (102.0, 103.5, 100.5, 101.5, 75000),   # body=0.5, range=3.0, bp=0.17
+            (101.0, 101.5, 98.0, 98.5, 160000),    # bar4: strong bear, c4 < c0
+        ]
+        df = _make_ohlcv(bars)
+        patterns = detect_candlestick_patterns(df, lookback_bars=6)
+        names = [p.pattern for p in patterns]
+        assert CandlePatternType.FALLING_THREE in names
+
+    def test_rising_three_fails_if_middle_breaks_range(self) -> None:
+        bars = _flat_prefix() + [
+            (100.0, 104.0, 99.5, 103.5, 150000),
+            (103.0, 105.0, 102.0, 102.5, 80000),  # breaks above h0=104
+            (102.5, 103.0, 101.5, 102.0, 70000),
+            (102.0, 103.3, 101.0, 102.8, 75000),
+            (103.0, 106.0, 102.5, 105.5, 160000),
+        ]
+        df = _make_ohlcv(bars)
+        patterns = detect_candlestick_patterns(df, lookback_bars=6)
+        names = [p.pattern for p in patterns]
+        assert CandlePatternType.RISING_THREE not in names
