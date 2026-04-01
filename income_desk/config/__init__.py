@@ -127,6 +127,18 @@ class TechnicalsSettings(BaseModel):
     fvg_min_gap_pct: float = 0.3
     fvg_max_gaps: int = 5
 
+    # Candlestick pattern settings
+    candle_enabled: bool = True
+    candle_lookback_bars: int = 10
+    candle_body_doji_pct: float = 0.10
+    candle_body_small_pct: float = 0.33
+    candle_wick_multiplier: float = 2.0
+    candle_trend_lookback: int = 5
+    candle_volume_avg_period: int = 20
+    candle_min_conviction: int = 30
+    candle_tweezer_tolerance_pct: float = 0.001
+    candle_timeframe: str = "daily"
+
 
 class PhaseSettings(BaseModel):
     swing_lookback: int = 5
