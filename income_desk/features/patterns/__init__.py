@@ -11,6 +11,12 @@ from income_desk.features.patterns.smart_money import (
     compute_smart_money,
 )
 from income_desk.features.patterns.orb import compute_orb
+from income_desk.features.patterns.candles import (
+    compute_candlestick_patterns,
+    detect_candlestick_patterns,
+    score_candlestick_patterns,
+    generate_candlestick_signals,
+)
 
 __all__ = [
     "compute_vcp",
@@ -18,4 +24,8 @@ __all__ = [
     "compute_fair_value_gaps",
     "compute_smart_money",
     "compute_orb",
+    "compute_candlestick_patterns",
+    "detect_candlestick_patterns",
+    "score_candlestick_patterns",
+    "generate_candlestick_signals",
 ]

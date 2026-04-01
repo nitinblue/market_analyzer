@@ -16,6 +16,10 @@ from income_desk.features.patterns.vcp import (  # noqa: F401
     compute_vcp,
     generate_vcp_signals as _generate_vcp_signals,
 )
+from income_desk.features.patterns.candles import (  # noqa: F401
+    compute_candlestick_patterns,
+    generate_candlestick_signals as _generate_candlestick_signals,
+)
 from income_desk.models.technicals import (
     ADXData,
     BollingerBands,
@@ -871,6 +875,10 @@ def compute_technicals(
     smart_money = compute_smart_money(ohlcv, price, atr_series, settings)
     signals.extend(_generate_smart_money_signals(smart_money))
 
+    # Candlestick patterns (from features.patterns.candles)
+    candle_summary = compute_candlestick_patterns(ohlcv, settings)
+    signals.extend(_generate_candlestick_signals(candle_summary))
+
     # Fibonacci retracement levels
     fibonacci = compute_fibonacci(high, low, close)
 
@@ -908,6 +916,7 @@ def compute_technicals(
         phase=phase_indicator,
         vcp=vcp,
         smart_money=smart_money,
+        candlestick_patterns=candle_summary,
         fibonacci=fibonacci,
         adx=adx_data,
         donchian=donchian,
