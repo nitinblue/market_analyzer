@@ -282,6 +282,53 @@ class VWAPData(BaseModel):
     is_above_vwap: bool   # Price > VWAP
 
 
+class CandlePatternType(StrEnum):
+    """Classical candlestick pattern types."""
+    # Single-bar (7)
+    HAMMER = "hammer"
+    INVERTED_HAMMER = "inverted_hammer"
+    HANGING_MAN = "hanging_man"
+    SHOOTING_STAR = "shooting_star"
+    DOJI = "doji"
+    DRAGONFLY_DOJI = "dragonfly_doji"
+    SPINNING_TOP = "spinning_top"
+    # Double-bar (4)
+    BULLISH_ENGULFING = "bullish_engulfing"
+    BEARISH_ENGULFING = "bearish_engulfing"
+    TWEEZER_BOTTOM = "tweezer_bottom"
+    TWEEZER_TOP = "tweezer_top"
+    # Triple-bar (6)
+    MORNING_STAR = "morning_star"
+    EVENING_STAR = "evening_star"
+    MORNING_DOJI_STAR = "morning_doji_star"
+    EVENING_DOJI_STAR = "evening_doji_star"
+    THREE_WHITE_SOLDIERS = "three_white_soldiers"
+    THREE_BLACK_CROWS = "three_black_crows"
+    # Five-bar (2)
+    RISING_THREE = "rising_three"
+    FALLING_THREE = "falling_three"
+
+
+class CandlePattern(BaseModel):
+    """A single detected candlestick pattern."""
+    pattern: CandlePatternType
+    direction: SignalDirection
+    bar_index: int
+    bar_date: date
+    conviction: int = 0
+    context: str = ""
+    bars_involved: int
+
+
+class CandlePatternSummary(BaseModel):
+    """Aggregated candlestick pattern result for TechnicalSnapshot."""
+    patterns: list[CandlePattern] = []
+    bullish_count: int = 0
+    bearish_count: int = 0
+    strongest: CandlePattern | None = None
+    timeframe: str = "daily"
+
+
 class TechnicalSnapshot(BaseModel):
     ticker: str
     as_of_date: date
@@ -304,6 +351,7 @@ class TechnicalSnapshot(BaseModel):
     keltner: KeltnerChannels | None = None
     pivot_points: PivotPoints | None = None
     daily_vwap: VWAPData | None = None
+    candlestick_patterns: CandlePatternSummary | None = None
     signals: list[TechnicalSignal]
     commentary: list[str] = []      # Step-by-step calculation trace (populated when debug=True)
     data_gaps: list[DataGap] = []   # Known gaps in this analysis
