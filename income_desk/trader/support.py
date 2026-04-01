@@ -369,7 +369,21 @@ def pick_tickers(
 
 
 def _default_tickers(market: str) -> list[str]:
-    """Return default ticker list for a market."""
+    """Return all F&O tickers from registry that have options."""
+    try:
+        from income_desk.registry import MarketRegistry
+        reg = MarketRegistry()
+        all_instruments = reg._instruments
+        tickers = [
+            t for t, inst in all_instruments.items()
+            if inst.market.upper() == market.upper()
+            and inst.options_liquidity in ("high", "medium")
+        ]
+        if tickers:
+            return sorted(tickers)
+    except Exception:
+        pass
+    # Fallback if registry fails
     if market == "India":
         return [
             "NIFTY", "BANKNIFTY", "RELIANCE", "TCS",

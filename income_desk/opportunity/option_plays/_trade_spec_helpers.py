@@ -1555,3 +1555,276 @@ def build_closing_trade_spec(
         wing_width_points=open_trade_spec.wing_width_points,
         **mkt,
     )
+
+
+# ---------------------------------------------------------------------------
+# Chain-aware strike selection  (Task 3 — additive, no existing code touched)
+# ---------------------------------------------------------------------------
+
+from income_desk.models.chain import AvailableStrike, ChainContext  # noqa: E402
+
+
+def _atr_mult_for_regime(regime_id: int) -> float:
+    """ATR multiplier for short-strike distance by regime."""
+    return 1.0 if regime_id == 1 else 0.8
+
+
+def pick_ic_strikes_from_chain(
+    chain: ChainContext,
+    atr: float,
+    regime_id: int,
+) -> dict[str, AvailableStrike] | None:
+    """Pick iron condor strikes from broker chain.
+
+    Returns dict with keys short_put, long_put, short_call, long_call
+    (each an AvailableStrike), or None if not enough liquid strikes.
+    """
+    price = chain.underlying_price
+    mult = _atr_mult_for_regime(regime_id)
+
+    target_short_put = price - (mult * atr)
+    target_short_call = price + (mult * atr)
+
+    short_put = chain.nearest_put(target_short_put)
+    short_call = chain.nearest_call(target_short_call)
+    if short_put is None or short_call is None:
+        return None
+
+    # Long strikes: next available beyond the short strike
+    long_puts = chain.put_below(short_put.strike, n=1)
+    long_calls = chain.call_above(short_call.strike, n=1)
+    if not long_puts or not long_calls:
+        return None
+
+    return {
+        "short_put": short_put,
+        "long_put": long_puts[0],
+        "short_call": short_call,
+        "long_call": long_calls[0],
+    }
+
+
+def pick_ifly_strikes_from_chain(
+    chain: ChainContext,
+    atr: float,
+    regime_id: int,
+) -> dict[str, AvailableStrike] | None:
+    """Pick iron butterfly strikes from broker chain.
+
+    ATM short put + call at same strike, long put below, long call above.
+    Returns dict with keys short_put, short_call, long_put, long_call
+    (each an AvailableStrike), or None if not enough liquid strikes.
+    """
+    price = chain.underlying_price
+
+    # ATM short strikes — find nearest put and call to current price
+    short_put = chain.nearest_put(price)
+    short_call = chain.nearest_call(price)
+    if short_put is None or short_call is None:
+        return None
+
+    # Use same ATM strike for both (pick the one nearest to price)
+    atm_strike = short_put.strike
+    if abs(short_call.strike - price) < abs(short_put.strike - price):
+        atm_strike = short_call.strike
+    # Re-pick so both are at the same strike
+    short_put = chain.nearest_put(atm_strike)
+    short_call = chain.nearest_call(atm_strike)
+    if short_put is None or short_call is None:
+        return None
+
+    # Wing distance based on regime
+    wing_mult = 1.0 if regime_id == 2 else 1.2
+    wing_distance = atr * wing_mult
+
+    target_long_put = atm_strike - wing_distance
+    target_long_call = atm_strike + wing_distance
+
+    long_put = chain.nearest_put(target_long_put)
+    long_call = chain.nearest_call(target_long_call)
+    if long_put is None or long_call is None:
+        return None
+    # Long strikes must actually be beyond the short strike
+    if long_put.strike >= atm_strike or long_call.strike <= atm_strike:
+        return None
+
+    return {
+        "short_put": short_put,
+        "short_call": short_call,
+        "long_put": long_put,
+        "long_call": long_call,
+    }
+
+
+def pick_credit_spread_from_chain(
+    chain: ChainContext,
+    atr: float,
+    regime_id: int,
+    direction: str,
+) -> dict[str, AvailableStrike] | None:
+    """Pick credit spread strikes from broker chain.
+
+    direction: "put" for bull put spread, "call" for bear call spread.
+    Returns dict with keys short, long (each an AvailableStrike),
+    or None if not enough liquid strikes.
+    """
+    price = chain.underlying_price
+    mult = _atr_mult_for_regime(regime_id)
+
+    if direction == "put":
+        target_short = price - (mult * atr)
+        short = chain.nearest_put(target_short)
+        if short is None:
+            return None
+        longs = chain.put_below(short.strike, n=1)
+        if not longs:
+            return None
+        return {"short": short, "long": longs[0]}
+    else:
+        target_short = price + (mult * atr)
+        short = chain.nearest_call(target_short)
+        if short is None:
+            return None
+        longs = chain.call_above(short.strike, n=1)
+        if not longs:
+            return None
+        return {"short": short, "long": longs[0]}
+
+
+def build_trade_spec_from_chain(
+    chain: ChainContext,
+    structure_type: str,
+    strikes: dict[str, AvailableStrike],
+    regime_id: int,
+) -> TradeSpec:
+    """Build a TradeSpec using chain-validated strikes and broker metadata.
+
+    Uses chain.lot_size, chain.expiration, and real IV from each strike.
+    """
+    price = chain.underlying_price
+    expiration = chain.expiration
+    today = date.today()
+    dte = (expiration - today).days
+
+    # Market fields from registry (currency, settlement, exercise_style)
+    mkt = _populate_market_fields(chain.ticker)
+
+    # Override lot_size with broker's value
+    mkt["lot_size"] = chain.lot_size
+
+    # Determine order_side and build legs based on structure_type
+    if structure_type == StructureType.IRON_CONDOR:
+        sp = strikes["short_put"]
+        lp = strikes["long_put"]
+        sc = strikes["short_call"]
+        lc = strikes["long_call"]
+        wing_width = sp.strike - lp.strike
+
+        legs = [
+            LegSpec(
+                role="short_put", action=LegAction.SELL_TO_OPEN, option_type="put",
+                strike=sp.strike, strike_label=f"chain put @ {sp.strike}",
+                expiration=expiration, days_to_expiry=dte,
+                atm_iv_at_expiry=sp.iv or 0.0,
+            ),
+            LegSpec(
+                role="long_put", action=LegAction.BUY_TO_OPEN, option_type="put",
+                strike=lp.strike, strike_label=f"chain put wing @ {lp.strike}",
+                expiration=expiration, days_to_expiry=dte,
+                atm_iv_at_expiry=lp.iv or 0.0,
+            ),
+            LegSpec(
+                role="short_call", action=LegAction.SELL_TO_OPEN, option_type="call",
+                strike=sc.strike, strike_label=f"chain call @ {sc.strike}",
+                expiration=expiration, days_to_expiry=dte,
+                atm_iv_at_expiry=sc.iv or 0.0,
+            ),
+            LegSpec(
+                role="long_call", action=LegAction.BUY_TO_OPEN, option_type="call",
+                strike=lc.strike, strike_label=f"chain call wing @ {lc.strike}",
+                expiration=expiration, days_to_expiry=dte,
+                atm_iv_at_expiry=lc.iv or 0.0,
+            ),
+        ]
+        order_side = OrderSide.CREDIT
+
+    elif structure_type == StructureType.IRON_BUTTERFLY:
+        sp = strikes["short_put"]
+        sc = strikes["short_call"]
+        lp = strikes["long_put"]
+        lc = strikes["long_call"]
+        wing_width = sp.strike - lp.strike
+
+        legs = [
+            LegSpec(
+                role="short_put", action=LegAction.SELL_TO_OPEN, option_type="put",
+                strike=sp.strike, strike_label=f"chain ATM put @ {sp.strike}",
+                expiration=expiration, days_to_expiry=dte,
+                atm_iv_at_expiry=sp.iv or 0.0,
+            ),
+            LegSpec(
+                role="short_call", action=LegAction.SELL_TO_OPEN, option_type="call",
+                strike=sc.strike, strike_label=f"chain ATM call @ {sc.strike}",
+                expiration=expiration, days_to_expiry=dte,
+                atm_iv_at_expiry=sc.iv or 0.0,
+            ),
+            LegSpec(
+                role="long_put", action=LegAction.BUY_TO_OPEN, option_type="put",
+                strike=lp.strike, strike_label=f"chain put wing @ {lp.strike}",
+                expiration=expiration, days_to_expiry=dte,
+                atm_iv_at_expiry=lp.iv or 0.0,
+            ),
+            LegSpec(
+                role="long_call", action=LegAction.BUY_TO_OPEN, option_type="call",
+                strike=lc.strike, strike_label=f"chain call wing @ {lc.strike}",
+                expiration=expiration, days_to_expiry=dte,
+                atm_iv_at_expiry=lc.iv or 0.0,
+            ),
+        ]
+        order_side = OrderSide.CREDIT
+
+    elif structure_type == StructureType.CREDIT_SPREAD:
+        s = strikes["short"]
+        l = strikes["long"]
+        wing_width = abs(s.strike - l.strike)
+        opt_type = s.option_type
+
+        legs = [
+            LegSpec(
+                role=f"short_{opt_type}", action=LegAction.SELL_TO_OPEN,
+                option_type=opt_type, strike=s.strike,
+                strike_label=f"chain {opt_type} @ {s.strike}",
+                expiration=expiration, days_to_expiry=dte,
+                atm_iv_at_expiry=s.iv or 0.0,
+            ),
+            LegSpec(
+                role=f"long_{opt_type}", action=LegAction.BUY_TO_OPEN,
+                option_type=opt_type, strike=l.strike,
+                strike_label=f"chain {opt_type} wing @ {l.strike}",
+                expiration=expiration, days_to_expiry=dte,
+                atm_iv_at_expiry=l.iv or 0.0,
+            ),
+        ]
+        order_side = OrderSide.CREDIT
+
+    else:
+        raise ValueError(f"Unsupported structure_type for chain build: {structure_type}")
+
+    # Entry window from market
+    entry_start, entry_end, entry_tz = _entry_window_for_market(chain.ticker, "income")
+
+    return TradeSpec(
+        ticker=chain.ticker,
+        legs=legs,
+        underlying_price=price,
+        target_dte=dte,
+        target_expiration=expiration,
+        wing_width_points=wing_width,
+        spec_rationale=f"Strikes from broker chain ({chain.expiration}), regime R{regime_id}",
+        structure_type=structure_type,
+        order_side=order_side,
+        entry_window_start=entry_start,
+        entry_window_end=entry_end,
+        entry_window_timezone=entry_tz,
+        **mkt,
+    )

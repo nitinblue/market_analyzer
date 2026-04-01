@@ -29,6 +29,7 @@ from income_desk.models.regime import RegimeID
 from income_desk.models.transparency import DataGap
 
 if TYPE_CHECKING:
+    from income_desk.models.chain import ChainContext
     from income_desk.models.fundamentals import FundamentalsSnapshot
     from income_desk.models.regime import RegimeResult
     from income_desk.models.technicals import TechnicalSnapshot
@@ -81,6 +82,7 @@ def assess_iron_condor(
     fundamentals: FundamentalsSnapshot | None = None,
     as_of: date | None = None,
     iv_rank: float | None = None,
+    chain: ChainContext | None = None,
 ) -> IronCondorOpportunity:
     """Assess iron condor opportunity for a single instrument.
 
@@ -113,7 +115,7 @@ def assess_iron_condor(
     if hard_stops:
         # Still try to build trade_spec so rejected trades show strikes/expiry
         try:
-            _hs_spec = _compute_trade_spec(ticker, technicals, regime, vol_surface)
+            _hs_spec = _compute_trade_spec(ticker, technicals, regime, vol_surface, chain=chain)
         except Exception:
             _hs_spec = None
         return IronCondorOpportunity(
@@ -171,7 +173,7 @@ def assess_iron_condor(
     # --- Trade spec (actionable parameters) ---
     # Always build trade_spec so rejected trades show strikes/expiry
     try:
-        trade_spec = _compute_trade_spec(ticker, technicals, regime, vol_surface)
+        trade_spec = _compute_trade_spec(ticker, technicals, regime, vol_surface, chain=chain)
     except Exception:
         trade_spec = None
 
@@ -557,8 +559,18 @@ def _no_trade_rec() -> StrategyRecommendation:
     )
 
 
-def _compute_trade_spec(ticker, technicals, regime, vol_surface) -> TradeSpec | None:
+def _compute_trade_spec(ticker, technicals, regime, vol_surface, chain=None) -> TradeSpec | None:
     """Compute actionable trade parameters for iron condor."""
+    # Chain-first: use broker-validated strikes
+    if chain is not None:
+        from income_desk.opportunity.option_plays._trade_spec_helpers import (
+            pick_ic_strikes_from_chain, build_trade_spec_from_chain,
+        )
+        strikes = pick_ic_strikes_from_chain(chain, technicals.atr, int(regime.regime))
+        if strikes:
+            return build_trade_spec_from_chain(chain, "iron_condor", strikes, int(regime.regime))
+
+    # Fallback: ATR-based (for simulated/offline mode)
     from income_desk.opportunity.option_plays._trade_spec_helpers import build_single_expiry_trade_spec
 
     return build_single_expiry_trade_spec(

@@ -424,57 +424,76 @@ def step_rank_and_show(
                 if wing and wing > debit:
                     max_profit_val = (wing - debit) * lot_size_val
 
-        # Trade summary table — all computed from live data
-        summary_rows = []
-        if underlying_price:
-            summary_rows.append(["Underlying", f"{cur}{underlying_price:,.2f}"])
-        summary_rows.append(["Expiry", d['expiry'] or "-"])
-        if dte_val is not None:
-            summary_rows.append(["DTE", str(dte_val)])
-        summary_rows.append(["Lot Size", str(lot_size_val or "-")])
-        if wing_put is not None and wing_call is not None and wing_put != wing_call:
-            summary_rows.append(["Wing Width", f"Put: {wing_put:.0f} / Call: {wing_call:.0f}"])
-        elif wing_put or wing_call:
-            summary_rows.append(["Wing Width", f"{(wing_put or wing_call):.0f}"])
-        if credit_val is not None:
-            if credit_val >= 0:
-                summary_rows.append(["Net Credit (live)", f"{cur}{credit_val:.2f}"])
-            else:
-                summary_rows.append(["Net Debit (live)", f"{cur}{abs(credit_val):.2f}"])
-        if max_profit_val is not None:
-            summary_rows.append(["Max Profit/lot", f"{cur}{max_profit_val:,.2f}"])
-        if max_risk_val is not None:
-            summary_rows.append(["Max Risk/lot", f"{cur}{max_risk_val:,.2f}"])
-        if max_profit_val and max_risk_val and max_risk_val > 0:
-            rr = max_profit_val / max_risk_val
-            summary_rows.append(["Risk:Reward", f"1:{rr:.2f}"])
-        if be_low or be_high:
-            be_str = f"{be_low:.2f}" if be_low else "?"
-            be_str += f" — {be_high:.2f}" if be_high else ""
-            summary_rows.append(["Breakevens", be_str])
-        if d['pop']:
-            summary_rows.append(["POP", f"{d['pop'] * 100:.1f}%"])
         # Delta-derived POP cross-check
+        pop_delta_str = "-"
         if leg_quotes:
             sell_deltas = [abs(lq.delta) for lq in leg_quotes if lq.action == "sell" and lq.delta]
             if len(sell_deltas) >= 2:
-                pop_delta = 1.0
+                pop_d = 1.0
                 for sd in sell_deltas:
-                    pop_delta *= (1.0 - sd)
-                summary_rows.append(["POP (delta xcheck)", f"{pop_delta * 100:.1f}%"])
+                    pop_d *= (1.0 - sd)
+                pop_delta_str = f"{pop_d * 100:.0f}%"
             elif len(sell_deltas) == 1:
-                summary_rows.append(["POP (delta xcheck)", f"{(1.0 - sell_deltas[0]) * 100:.1f}%"])
+                pop_delta_str = f"{(1.0 - sell_deltas[0]) * 100:.0f}%"
+
+        # EV from live data
+        ev_str = "-"
         if max_profit_val and max_risk_val and d['pop']:
             ev = d['pop'] * max_profit_val - (1 - d['pop']) * max_risk_val
-            summary_rows.append(["EV (live)", f"{cur}{ev:,.0f}"])
-        if d['contracts']:
-            summary_rows.append(["Contracts", str(d['contracts'])])
-        if fill_quality:
-            summary_rows.append(["Fill Quality", fill_quality])
-        summary_rows.append(["Verdict", d['verdict']])
-        summary_rows.append(["Rationale", _trunc(d['rationale'] or "-", 60)])
+            ev_str = f"{cur}{ev:,.0f}"
 
-        print_table("Trade Summary", ["Field", "Value"], summary_rows)
+        # R:R
+        rr_str = "-"
+        if max_profit_val and max_risk_val and max_risk_val > 0:
+            rr_str = f"1:{max_profit_val / max_risk_val:.2f}"
+
+        # Breakevens
+        be_str = "-"
+        if be_low or be_high:
+            parts = []
+            if be_low:
+                parts.append(f"{be_low:.0f}")
+            if be_high:
+                parts.append(f"{be_high:.0f}")
+            be_str = " - ".join(parts)
+
+        # Wing
+        wing_str = "-"
+        if wing_put is not None and wing_call is not None and wing_put != wing_call:
+            wing_str = f"{wing_put:.0f}/{wing_call:.0f}"
+        elif wing_put or wing_call:
+            wing_str = f"{(wing_put or wing_call):.0f}"
+
+        # Credit/debit
+        cd_str = "-"
+        if credit_val is not None:
+            cd_str = f"{cur}{credit_val:.2f}" if credit_val >= 0 else f"-{cur}{abs(credit_val):.2f}"
+
+        # Horizontal trade summary (1 row of data)
+        summary_headers = ["Underlying", "Expiry", "DTE", "Lot", "Wing",
+                           "Credit", "MaxProfit", "MaxRisk", "R:R",
+                           "Breakevens", "POP", "POP(d)", "EV", "Verdict"]
+        summary_row = [[
+            f"{cur}{underlying_price:,.2f}" if underlying_price else "-",
+            d['expiry'] or "-",
+            str(dte_val) if dte_val is not None else "-",
+            str(lot_size_val or "-"),
+            wing_str,
+            cd_str,
+            f"{cur}{max_profit_val:,.0f}" if max_profit_val else "-",
+            f"{cur}{max_risk_val:,.0f}" if max_risk_val else "-",
+            rr_str,
+            be_str,
+            f"{d['pop'] * 100:.0f}%" if d['pop'] else "-",
+            pop_delta_str,
+            ev_str,
+            d['verdict'],
+        ]]
+        print_table("Trade Summary", summary_headers, summary_row)
+
+        # Rationale on its own line
+        if d['rationale']:
+            print(f"  Rationale: {_trunc(d['rationale'], 90)}")
 
 
 # ---------------------------------------------------------------------------

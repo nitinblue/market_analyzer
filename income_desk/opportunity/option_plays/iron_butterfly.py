@@ -25,6 +25,7 @@ from income_desk.models.regime import RegimeID
 from income_desk.models.transparency import DataGap
 
 if TYPE_CHECKING:
+    from income_desk.models.chain import ChainContext
     from income_desk.models.fundamentals import FundamentalsSnapshot
     from income_desk.models.regime import RegimeResult
     from income_desk.models.technicals import TechnicalSnapshot
@@ -74,6 +75,7 @@ def assess_iron_butterfly(
     fundamentals: FundamentalsSnapshot | None = None,
     as_of: date | None = None,
     iv_rank: float | None = None,
+    chain: ChainContext | None = None,
 ) -> IronButterflyOpportunity:
     """Assess iron butterfly opportunity for a single instrument.
 
@@ -102,7 +104,7 @@ def assess_iron_butterfly(
     if hard_stops:
         # Still try to build trade_spec so rejected trades show strikes/expiry
         try:
-            _hs_spec = _compute_trade_spec(ticker, technicals, regime, vol_surface)
+            _hs_spec = _compute_trade_spec(ticker, technicals, regime, vol_surface, chain=chain)
         except Exception:
             _hs_spec = None
         return IronButterflyOpportunity(
@@ -157,7 +159,7 @@ def assess_iron_butterfly(
     # --- Trade spec ---
     # Always build trade_spec so rejected trades show strikes/expiry
     try:
-        trade_spec = _compute_trade_spec(ticker, technicals, regime, vol_surface)
+        trade_spec = _compute_trade_spec(ticker, technicals, regime, vol_surface, chain=chain)
     except Exception:
         trade_spec = None
 
