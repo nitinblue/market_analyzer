@@ -246,10 +246,21 @@ def rank_opportunities(
         ev = None
         pop_result = None
         try:
+            # Extract per-leg IV from repriced leg_details (Source 1: most reliable)
+            _broker_leg_ivs = [ld.iv for ld in repriced.leg_details if ld.iv and ld.iv > 0]
+
+            # Get 30-day IV from market metrics (Source 2: underlying-level)
+            _iv_30_day = None
+            if request.iv_rank_map and ticker in request.iv_rank_map:
+                # iv_rank_map has IV rank; we need iv_30_day separately
+                pass  # TODO: thread iv_30_day from metrics through request
+
             pop_result = estimate_pop(
                 trade_spec=ts, entry_price=max(repriced.entry_credit, 0.01),
                 regime_id=repriced.regime_id, atr_pct=repriced.atr_pct,
                 current_price=repriced.current_price,
+                broker_leg_ivs=_broker_leg_ivs or None,
+                iv_30_day=_iv_30_day,
             )
             if pop_result:
                 pop_pct = pop_result.pop_pct

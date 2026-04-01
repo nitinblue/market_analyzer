@@ -688,11 +688,16 @@ def estimate_pop(
     current_price: float,
     contracts: int = 1,
     iv_rank: float | None = None,
+    broker_leg_ivs: list[float] | None = None,
+    iv_30_day: float | None = None,
 ) -> POPEstimate | None:
-    """Estimate probability of profit using regime-aware distance analysis.
+    """Estimate probability of profit using distance-to-breakeven analysis.
 
-    NOT Black-Scholes. Uses the regime's historical ATR behavior to estimate
-    the probability that price stays within the profit range.
+    Expected move source priority (most reliable first):
+      1. broker_leg_ivs — per-leg IV from DXLink Greeks (exact strike/expiry)
+      2. iv_30_day — 30-day annualized IV from TastyTrade market metrics
+      3. leg.atm_iv_at_expiry — IV from vol surface at assessor time
+      4. ATR-based — backward-looking, regime-adjusted (least reliable)
 
     Args:
         trade_spec: The trade structure.
@@ -701,8 +706,9 @@ def estimate_pop(
         atr_pct: Current ATR as % of price.
         current_price: Current underlying price.
         contracts: Number of contracts.
-        iv_rank: IV rank (0-100). When provided, adjusts expected move
-            based on IV environment. Higher IV rank widens expected moves.
+        iv_rank: IV rank (0-100). Adjusts ATR-based expected move.
+        broker_leg_ivs: Per-leg IV from DXLink Greeks (annualized, 0-1 scale).
+        iv_30_day: 30-day annualized IV from broker market metrics (0-1 scale).
 
     Returns:
         POPEstimate. None if structure not supported.
@@ -731,23 +737,52 @@ def estimate_pop(
 
     if st in ("iron_condor", "iron_butterfly", "credit_spread", "strangle", "straddle"):
         # Credit trade: profit if price stays between breakevens.
-        # Prefer broker IV from legs when available — it's the market's
-        # own estimate of future volatility and beats ATR-derived sigma.
-        leg_ivs = [l.atm_iv_at_expiry for l in trade_spec.legs if l.atm_iv_at_expiry and l.atm_iv_at_expiry > 0]
-        if leg_ivs:
-            # Use average leg IV (annualized) → expected move at expiry
+        # Expected move source priority:
+        #   1. broker_leg_ivs (DXLink Greeks — exact strike/expiry)
+        #   2. iv_30_day (TastyTrade market metrics — underlying level)
+        #   3. leg.atm_iv_at_expiry (vol surface at assessor time)
+        #   4. ATR-based (backward-looking, least reliable)
+        pop_method = "atr_regime"  # track which source was used
+        expected_move = 0.0
+
+        # Source 1: Broker per-leg IV from DXLink Greeks
+        if broker_leg_ivs and any(iv > 0 for iv in broker_leg_ivs):
+            valid_ivs = [iv for iv in broker_leg_ivs if iv > 0]
+            avg_iv = sum(valid_ivs) / len(valid_ivs)
+            expected_move = current_price * avg_iv * math.sqrt(dte / 365)
+            pop_method = "broker_leg_iv"
+
+        # Source 2: 30-day IV from market metrics
+        elif iv_30_day and iv_30_day > 0:
+            expected_move = current_price * iv_30_day * math.sqrt(dte / 365)
+            pop_method = "iv_30_day"
+
+        # Source 3: Leg IV from vol surface (set at assessor time)
+        elif any(l.atm_iv_at_expiry and l.atm_iv_at_expiry > 0 for l in trade_spec.legs):
+            leg_ivs = [l.atm_iv_at_expiry for l in trade_spec.legs if l.atm_iv_at_expiry and l.atm_iv_at_expiry > 0]
             avg_iv = sum(leg_ivs) / len(leg_ivs)
             expected_move = current_price * avg_iv * math.sqrt(dte / 365)
-        else:
-            # Fallback: ATR-based sigma with regime adjustment
+            pop_method = "vol_surface_iv"
+
+        # Source 4: ATR-based (last resort)
+        if expected_move <= 0:
             daily_sigma = (atr_pct / 100.0) / _atr_sigma_factor
             if iv_rank is not None:
                 iv_factor = 0.7 + (iv_rank / 100) * 0.6
                 daily_sigma = daily_sigma * iv_factor
             expected_move = daily_sigma * math.sqrt(dte) * current_price
-            # Regime adjustments only apply to ATR path (IV already incorporates regime)
             regime_factor = {1: 0.92, 2: 0.96, 3: 1.08, 4: 1.20}.get(regime_id, 1.0)
             expected_move = expected_move * regime_factor
+            pop_method = "atr_regime"
+
+        # Cross-validation: if we have two sources, compare them
+        # Flag if they diverge by more than 30% (means one source may be stale)
+        _cross_val_note = ""
+        if pop_method == "broker_leg_iv" and iv_30_day and iv_30_day > 0:
+            alt_move = current_price * iv_30_day * math.sqrt(dte / 365)
+            divergence = abs(expected_move - alt_move) / max(expected_move, 0.01)
+            if divergence > 0.30:
+                _cross_val_note = f"IV divergence: leg IV move=${expected_move:.1f} vs 30d IV move=${alt_move:.1f} ({divergence:.0%} gap)"
 
         adjusted_move = expected_move
 
