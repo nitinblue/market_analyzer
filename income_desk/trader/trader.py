@@ -384,9 +384,15 @@ def step_rank_and_show(
         if d['wing_width']:
             summary_rows.append(["Wing Width", str(d['wing_width'])])
         if net_credit_live is not None:
-            summary_rows.append(["Net Credit (live)", f"{cur}{net_credit_live:.2f}"])
+            if net_credit_live >= 0:
+                summary_rows.append(["Net Credit (live)", f"{cur}{net_credit_live:.2f}"])
+            else:
+                summary_rows.append(["Net Debit (live)", f"{cur}{abs(net_credit_live):.2f}"])
         elif credit_val:
-            summary_rows.append(["Net Credit", f"{cur}{credit_val:.2f}"])
+            if credit_val >= 0:
+                summary_rows.append(["Net Credit", f"{cur}{credit_val:.2f}"])
+            else:
+                summary_rows.append(["Net Debit", f"{cur}{abs(credit_val):.2f}"])
         if max_profit_val:
             summary_rows.append(["Max Profit/lot", f"{cur}{max_profit_val:,.2f}"])
         if max_risk_val:

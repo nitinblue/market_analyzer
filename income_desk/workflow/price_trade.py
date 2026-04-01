@@ -74,9 +74,9 @@ def price_trade(request: PriceRequest, ma: "object") -> PriceResponse:
                     leg_quotes.append(lq)
 
                     if action in ("STO", "sell"):
-                        net_credit += mid
+                        net_credit += bid  # sell at bid (what you actually receive)
                     else:
-                        net_debit += mid
+                        net_debit += ask  # buy at ask (what you actually pay)
 
                     if mid > 0:
                         spreads.append((ask - bid) / mid)
@@ -94,6 +94,6 @@ def price_trade(request: PriceRequest, ma: "object") -> PriceResponse:
     return PriceResponse(
         meta=WorkflowMeta(as_of=timestamp, market=request.market, data_source="broker", warnings=warnings),
         ticker=request.ticker, underlying_price=underlying_price,
-        leg_quotes=leg_quotes, net_credit=round(max(net, 0), 2), net_debit=round(max(-net, 0), 2),
+        leg_quotes=leg_quotes, net_credit=round(net, 2), net_debit=round(max(-net, 0), 2),
         max_entry_price=max_entry, avg_spread_pct=round(avg_spread, 4), fill_quality=fill_quality,
     )
