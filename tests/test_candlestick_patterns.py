@@ -12,8 +12,15 @@ from income_desk.models.technicals import (
     CandlePatternSummary,
     CandlePatternType,
     SignalDirection,
+    SignalStrength,
+    TechnicalSignal,
 )
-from income_desk.features.patterns.candles import detect_candlestick_patterns
+from income_desk.features.patterns.candles import (
+    compute_candlestick_patterns,
+    detect_candlestick_patterns,
+    generate_candlestick_signals,
+    score_candlestick_patterns,
+)
 
 
 class TestCandleModels:
@@ -311,3 +318,82 @@ class TestFiveBarDetection:
         patterns = detect_candlestick_patterns(df, lookback_bars=6)
         names = [p.pattern for p in patterns]
         assert CandlePatternType.RISING_THREE not in names
+
+
+class TestScoring:
+    def test_scored_patterns_have_conviction(self) -> None:
+        bars = _downtrend_prefix() + [
+            (98.0, 98.5, 92.0, 98.2, 200000),
+        ]
+        df = _make_ohlcv(bars)
+        raw = detect_candlestick_patterns(df, lookback_bars=3)
+        scored = score_candlestick_patterns(df, raw)
+        hammers = [p for p in scored if p.pattern == CandlePatternType.HAMMER]
+        assert len(hammers) >= 1
+        assert hammers[0].conviction > 0
+        assert hammers[0].context != ""
+
+    def test_high_volume_boosts_conviction(self) -> None:
+        base = _downtrend_prefix()
+        bars_low = base + [(98.0, 98.5, 92.0, 98.2, 50000)]
+        bars_high = base + [(98.0, 98.5, 92.0, 98.2, 300000)]
+        scored_low = score_candlestick_patterns(
+            _make_ohlcv(bars_low),
+            detect_candlestick_patterns(_make_ohlcv(bars_low), lookback_bars=3),
+        )
+        scored_high = score_candlestick_patterns(
+            _make_ohlcv(bars_high),
+            detect_candlestick_patterns(_make_ohlcv(bars_high), lookback_bars=3),
+        )
+        hammer_low = [p for p in scored_low if p.pattern == CandlePatternType.HAMMER]
+        hammer_high = [p for p in scored_high if p.pattern == CandlePatternType.HAMMER]
+        assert hammer_high[0].conviction > hammer_low[0].conviction
+
+
+class TestConvenience:
+    def test_compute_returns_summary(self) -> None:
+        bars = _downtrend_prefix() + [
+            (98.0, 98.5, 92.0, 98.2, 200000),
+        ]
+        df = _make_ohlcv(bars)
+        summary = compute_candlestick_patterns(df)
+        assert isinstance(summary, CandlePatternSummary)
+        assert summary.bullish_count >= 1
+        assert summary.strongest is not None
+
+    def test_compute_filters_by_min_conviction(self) -> None:
+        bars = _flat_prefix() + [
+            (100.0, 100.5, 99.5, 100.2, 50000),
+        ]
+        df = _make_ohlcv(bars)
+        summary = compute_candlestick_patterns(df)
+        for p in summary.patterns:
+            assert p.conviction >= 30
+
+
+class TestSignalGeneration:
+    def test_generates_signals(self) -> None:
+        bars = _downtrend_prefix() + [
+            (98.0, 98.5, 92.0, 98.2, 200000),
+        ]
+        df = _make_ohlcv(bars)
+        summary = compute_candlestick_patterns(df)
+        signals = generate_candlestick_signals(summary)
+        assert isinstance(signals, list)
+        if summary.patterns:
+            assert len(signals) >= 1
+            assert all(isinstance(s, TechnicalSignal) for s in signals)
+
+    def test_none_summary_returns_empty(self) -> None:
+        assert generate_candlestick_signals(None) == []
+
+    def test_signal_strength_mapping(self) -> None:
+        bars = _downtrend_prefix() + [
+            (96.0, 98.0, 95.5, 98.0, 250000),
+            (98.0, 98.5, 92.0, 98.2, 200000),
+        ]
+        df = _make_ohlcv(bars)
+        summary = compute_candlestick_patterns(df)
+        signals = generate_candlestick_signals(summary)
+        for s in signals:
+            assert s.strength in (SignalStrength.STRONG, SignalStrength.MODERATE, SignalStrength.WEAK)

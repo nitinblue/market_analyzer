@@ -426,3 +426,204 @@ def _detect_five(
             ))
 
     return results
+
+
+# ---------------------------------------------------------------------------
+# Layer 2: Context Scoring
+# ---------------------------------------------------------------------------
+
+def score_candlestick_patterns(
+    ohlcv: pd.DataFrame,
+    patterns: list[CandlePattern],
+    *,
+    settings: TechnicalsSettings | None = None,
+) -> list[CandlePattern]:
+    """Add conviction scores and context commentary to detected patterns."""
+    if settings is None:
+        settings = get_settings().technicals
+
+    vol_period = settings.candle_volume_avg_period
+    trend_lb = settings.candle_trend_lookback
+    scored: list[CandlePattern] = []
+
+    for p in patterns:
+        idx = p.bar_index
+        parts: list[str] = []
+
+        trend_start = max(0, idx - trend_lb)
+        trend = _detect_trend(ohlcv["Close"].iloc[trend_start:idx])
+        trend_score = _score_trend(p, trend)
+
+        row = ohlcv.iloc[idx]
+        body_score = _score_body(p, row, ohlcv, idx)
+
+        vol_score, vol_ratio = _score_volume(ohlcv, idx, vol_period)
+        if vol_ratio > 1.0:
+            parts.append(f"volume {vol_ratio:.1f}x avg")
+
+        sr_score = _score_sr_proximity(ohlcv, idx)
+
+        complexity_map = {1: 3, 2: 5, 3: 8, 5: 10}
+        complexity_score = complexity_map.get(p.bars_involved, 3)
+
+        conviction = min(100, trend_score + body_score + vol_score + sr_score + complexity_score)
+
+        if trend != SignalDirection.NEUTRAL:
+            parts.insert(0, f"after {trend.value} trend")
+        if sr_score >= 15:
+            parts.append("near key level")
+        context = f"{p.pattern.value}: {', '.join(parts)}" if parts else p.pattern.value
+
+        scored.append(p.model_copy(update={"conviction": conviction, "context": context}))
+
+    return scored
+
+
+def _score_trend(p: CandlePattern, trend: SignalDirection) -> int:
+    reversal_patterns = {
+        CandlePatternType.HAMMER, CandlePatternType.INVERTED_HAMMER,
+        CandlePatternType.BULLISH_ENGULFING, CandlePatternType.TWEEZER_BOTTOM,
+        CandlePatternType.MORNING_STAR, CandlePatternType.MORNING_DOJI_STAR,
+        CandlePatternType.HANGING_MAN, CandlePatternType.SHOOTING_STAR,
+        CandlePatternType.BEARISH_ENGULFING, CandlePatternType.TWEEZER_TOP,
+        CandlePatternType.EVENING_STAR, CandlePatternType.EVENING_DOJI_STAR,
+    }
+    continuation_patterns = {
+        CandlePatternType.THREE_WHITE_SOLDIERS, CandlePatternType.THREE_BLACK_CROWS,
+        CandlePatternType.RISING_THREE, CandlePatternType.FALLING_THREE,
+    }
+    if p.pattern in reversal_patterns:
+        if (p.direction == SignalDirection.BULLISH and trend == SignalDirection.BEARISH) or \
+           (p.direction == SignalDirection.BEARISH and trend == SignalDirection.BULLISH):
+            return 30
+        elif trend == SignalDirection.NEUTRAL:
+            return 10
+        return 5
+    elif p.pattern in continuation_patterns:
+        if (p.direction == SignalDirection.BULLISH and trend == SignalDirection.BULLISH) or \
+           (p.direction == SignalDirection.BEARISH and trend == SignalDirection.BEARISH):
+            return 28
+        elif trend == SignalDirection.NEUTRAL:
+            return 15
+        return 5
+    return 10
+
+
+def _score_body(p: CandlePattern, row: pd.Series, ohlcv: pd.DataFrame, idx: int) -> int:
+    o, h, l, c = float(row["Open"]), float(row["High"]), float(row["Low"]), float(row["Close"])
+    r = _range(h, l)
+    if r == 0:
+        return 5
+    bd = _body(o, c)
+    lw = _lower_wick(o, l, c)
+    uw = _upper_wick(o, h, c)
+    bd_safe = max(bd, 1e-10)
+    if p.pattern in (CandlePatternType.HAMMER, CandlePatternType.HANGING_MAN):
+        return min(20, int(lw / bd_safe * 4))
+    if p.pattern in (CandlePatternType.SHOOTING_STAR, CandlePatternType.INVERTED_HAMMER):
+        return min(20, int(uw / bd_safe * 4))
+    if p.pattern in (CandlePatternType.BULLISH_ENGULFING, CandlePatternType.BEARISH_ENGULFING):
+        if idx >= 1:
+            prev = ohlcv.iloc[idx - 1]
+            prev_body = _body(float(prev["Open"]), float(prev["Close"]))
+            if prev_body > 0:
+                return min(20, int(bd / prev_body * 7))
+        return 10
+    return min(20, int(bd / r * 20))
+
+
+def _score_volume(ohlcv: pd.DataFrame, idx: int, period: int) -> tuple[int, float]:
+    if "Volume" not in ohlcv.columns:
+        return 5, 1.0
+    vol = float(ohlcv["Volume"].iloc[idx])
+    start = max(0, idx - period)
+    avg_vol = ohlcv["Volume"].iloc[start:idx].mean()
+    if avg_vol == 0 or pd.isna(avg_vol):
+        return 5, 1.0
+    ratio = vol / avg_vol
+    if ratio >= 2.0:
+        return 20, ratio
+    if ratio >= 1.5:
+        return 15, ratio
+    if ratio >= 1.0:
+        return 10, ratio
+    return 5, ratio
+
+
+def _score_sr_proximity(ohlcv: pd.DataFrame, idx: int) -> int:
+    lookback = min(20, idx)
+    if lookback < 3:
+        return 5
+    recent = ohlcv.iloc[idx - lookback:idx]
+    high_20 = recent["High"].max()
+    low_20 = recent["Low"].min()
+    price = float(ohlcv["Close"].iloc[idx])
+    rng = high_20 - low_20
+    if rng == 0:
+        return 5
+    dist_to_high = abs(price - high_20) / rng
+    dist_to_low = abs(price - low_20) / rng
+    min_dist = min(dist_to_high, dist_to_low)
+    if min_dist <= 0.05:
+        return 20
+    if min_dist <= 0.15:
+        return 15
+    if min_dist <= 0.30:
+        return 10
+    return 5
+
+
+# ---------------------------------------------------------------------------
+# Convenience: compute (detect + score + summarize)
+# ---------------------------------------------------------------------------
+
+def compute_candlestick_patterns(
+    ohlcv: pd.DataFrame,
+    settings: TechnicalsSettings | None = None,
+) -> CandlePatternSummary:
+    """Detect + score + summarize."""
+    if settings is None:
+        settings = get_settings().technicals
+    if not settings.candle_enabled or len(ohlcv) < 2:
+        return CandlePatternSummary(timeframe=settings.candle_timeframe)
+    raw = detect_candlestick_patterns(ohlcv, lookback_bars=settings.candle_lookback_bars, settings=settings)
+    scored = score_candlestick_patterns(ohlcv, raw, settings=settings)
+    filtered = [p for p in scored if p.conviction >= settings.candle_min_conviction]
+    bullish = [p for p in filtered if p.direction == SignalDirection.BULLISH]
+    bearish = [p for p in filtered if p.direction == SignalDirection.BEARISH]
+    strongest = max(filtered, key=lambda p: p.conviction) if filtered else None
+    return CandlePatternSummary(
+        patterns=filtered,
+        bullish_count=len(bullish),
+        bearish_count=len(bearish),
+        strongest=strongest,
+        timeframe=settings.candle_timeframe,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Signal bridge: for TechnicalSnapshot.signals
+# ---------------------------------------------------------------------------
+
+def generate_candlestick_signals(
+    summary: CandlePatternSummary | None,
+) -> list[TechnicalSignal]:
+    """Convert top candlestick patterns into TechnicalSignal entries."""
+    if summary is None or not summary.patterns:
+        return []
+    top = sorted(summary.patterns, key=lambda p: p.conviction, reverse=True)[:3]
+    signals: list[TechnicalSignal] = []
+    for p in top:
+        if p.conviction >= 70:
+            strength = SignalStrength.STRONG
+        elif p.conviction >= 50:
+            strength = SignalStrength.MODERATE
+        else:
+            strength = SignalStrength.WEAK
+        signals.append(TechnicalSignal(
+            name=f"Candle: {p.pattern.value.replace('_', ' ').title()}",
+            direction=p.direction,
+            strength=strength,
+            description=p.context or p.pattern.value,
+        ))
+    return signals
