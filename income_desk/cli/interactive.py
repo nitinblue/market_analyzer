@@ -920,6 +920,78 @@ Requires --broker connection."""
         except Exception as exc:
             print(f"{_styled('ERROR:', 'red')} {exc}")
 
+    def do_candles(self, arg: str) -> None:
+        """Show candlestick patterns.\nUsage: candles SPY [--lookback N] [--raw]"""
+        parts = arg.split()
+        if not parts:
+            print("Usage: candles TICKER [--lookback N] [--raw]")
+            return
+
+        ticker = parts[0].upper()
+        lookback = 10
+        raw = False
+
+        i = 1
+        while i < len(parts):
+            if parts[i] == "--lookback" and i + 1 < len(parts):
+                lookback = int(parts[i + 1])
+                i += 2
+            elif parts[i] == "--raw":
+                raw = True
+                i += 1
+            else:
+                i += 1
+
+        try:
+            ma = self._get_ma()
+            ds = ma.data_service
+            ohlcv = ds.get_daily(ticker)
+
+            from income_desk.config import get_settings
+            settings = get_settings().technicals
+
+            if raw:
+                from income_desk.features.patterns.candles import detect_candlestick_patterns
+                patterns = detect_candlestick_patterns(
+                    ohlcv, lookback_bars=lookback, settings=settings,
+                )
+                _print_header(f"{ticker} — Raw Candlestick Patterns (last {lookback} bars)")
+                if not patterns:
+                    print("  No patterns detected.")
+                for p in patterns:
+                    print(f"  {p.bar_date}  {p.pattern.value:<25} {p.direction.value}")
+            else:
+                from income_desk.features.patterns.candles import compute_candlestick_patterns
+                settings_copy = settings.model_copy(update={"candle_lookback_bars": lookback})
+                summary = compute_candlestick_patterns(ohlcv, settings=settings_copy)
+
+                _print_header(
+                    f"{ticker} — Candlestick Patterns "
+                    f"({summary.timeframe}, last {lookback} bars)"
+                )
+                if not summary.patterns:
+                    print("  No patterns above conviction threshold.")
+                for p in summary.patterns:
+                    print(
+                        f"  {p.bar_date}  {p.pattern.value:<25} "
+                        f"{p.direction.value:<8} conviction: {p.conviction}"
+                    )
+                    if p.context:
+                        print(f"{'':30}{p.context}")
+
+                if summary.strongest:
+                    print(
+                        f"\n  Strongest: {summary.strongest.pattern.value} "
+                        f"({summary.strongest.conviction}) — {summary.strongest.direction.value}"
+                    )
+                print(
+                    f"  Summary: {summary.bullish_count} bullish, "
+                    f"{summary.bearish_count} bearish"
+                )
+
+        except Exception as exc:
+            print(f"{_styled('ERROR:', 'red')} {exc}")
+
     def do_levels(self, arg: str) -> None:
         """Show support/resistance levels.\nUsage: levels SPY"""
         tickers = self._parse_tickers(arg)
