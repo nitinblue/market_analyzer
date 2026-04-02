@@ -136,7 +136,14 @@ def reprice_trade(
                         "No chain data or no legs")
 
     # Build chain lookup — only quotes with valid bid/ask
-    chain_lookup: dict[tuple[float, str], OptionQuote] = {
+    # Key includes expiration for multi-expiry structures (calendar, diagonal)
+    chain_lookup: dict[tuple[float, str, date | None], OptionQuote] = {
+        (q.strike, q.option_type, q.expiration): q
+        for q in chain
+        if q.bid > 0 and q.ask > 0
+    }
+    # Also build expiry-agnostic lookup for single-expiry structures
+    chain_lookup_no_exp: dict[tuple[float, str], OptionQuote] = {
         (q.strike, q.option_type): q
         for q in chain
         if q.bid > 0 and q.ask > 0
@@ -149,16 +156,21 @@ def reprice_trade(
     leg_details: list[LegDetail] = []
 
     for leg in trade_spec.legs:
-        key = (leg.strike, leg.option_type)
-        quote = chain_lookup.get(key)
+        # Try expiry-aware match first (for calendars/diagonals)
+        key_with_exp = (leg.strike, leg.option_type, leg.expiration)
+        quote = chain_lookup.get(key_with_exp)
+
+        # Fall back to expiry-agnostic match
+        if quote is None:
+            key_no_exp = (leg.strike, leg.option_type)
+            quote = chain_lookup_no_exp.get(key_no_exp)
 
         # If exact strike not in chain, snap to nearest available strike
         if quote is None:
-            same_type = [(s, ot) for (s, ot) in chain_lookup if ot == leg.option_type]
+            same_type = [(s, ot, exp) for (s, ot, exp) in chain_lookup if ot == leg.option_type]
             if same_type:
                 nearest_key = min(same_type, key=lambda k: abs(k[0] - leg.strike))
                 quote = chain_lookup[nearest_key]
-                # Update leg strike to what actually exists
                 leg.strike = nearest_key[0]
 
         if quote is None:
