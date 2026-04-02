@@ -809,7 +809,75 @@ def estimate_pop(
 
         pop = max(0.0, min(1.0, pop))
 
-        # Expected value
+        regime_names = {1: "R1 Low-Vol MR", 2: "R2 High-Vol MR", 3: "R3 Low-Vol Trend", 4: "R4 High-Vol Trend"}
+        iv_note = f", IV rank {iv_rank:.0f}" if iv_rank is not None else ""
+        lot_size = trade_spec.lot_size
+
+        # ── Unlimited-risk structures (strangle, straddle) ──────────────
+        # No wing width → max_loss is theoretically unlimited.
+        # For EV: use expected_move as the realistic 1-sigma adverse scenario.
+        # This matches how real traders evaluate naked/unlimited-risk trades.
+        _unlimited_risk = st in ("strangle", "straddle")
+        if _unlimited_risk:
+            max_profit = entry_price * lot_size * contracts
+            # Realistic adverse scenario: 1-sigma move beyond the closer breakeven
+            if be_low and be_high:
+                closer_be_dist = min(current_price - be_low, be_high - current_price)
+            elif be_low:
+                closer_be_dist = current_price - be_low
+            elif be_high:
+                closer_be_dist = be_high - current_price
+            else:
+                closer_be_dist = adjusted_move
+            # Loss at 1-sigma beyond breakeven: the overshoot portion
+            adverse_overshoot = max(adjusted_move - closer_be_dist, 0)
+            max_loss_proxy = adverse_overshoot * lot_size * contracts
+            # Floor: at least 2x the credit (can't have risk < reward for naked)
+            max_loss_proxy = max(max_loss_proxy, max_profit * 2.0)
+
+            ev = pop * max_profit - (1 - pop) * max_loss_proxy
+
+            vol_source = pop_method.replace("_", " ")
+            notes = (
+                f"Regime {regime_names.get(regime_id, f'R{regime_id}')}: "
+                f"expected {dte}d move ±{adjusted_move:.1f} "
+                f"({vol_source}{iv_note}) — "
+                f"max_loss UNLIMITED (EV uses 1-sigma adverse scenario: ${max_loss_proxy:.0f})"
+            )
+
+            gaps: list[DataGap] = []
+            gaps.append(DataGap(
+                field="max_loss",
+                reason="Unlimited risk — max_loss is a 1-sigma adverse proxy, not a cap",
+                impact="medium",
+                affects="EV and R:R are approximate; actual loss is uncapped",
+            ))
+            if iv_rank is None:
+                gaps.append(DataGap(
+                    field="pop",
+                    reason="no IV rank — using ATR-only expected move",
+                    impact="medium",
+                    affects="POP estimate may be 10-15% off without IV calibration",
+                ))
+
+            rr = round(max_loss_proxy / max_profit, 2) if max_profit > 0 else 99.0
+            quality, qscore = _trade_quality(pop, ev, rr, max_profit)
+
+            return POPEstimate(
+                pop_pct=round(pop, 4),
+                expected_value=round(ev, 2),
+                max_profit=round(max_profit, 2),
+                max_loss=round(max_loss_proxy, 2),
+                risk_reward_ratio=rr,
+                trade_quality=quality,
+                trade_quality_score=round(qscore, 3),
+                method="regime_historical",
+                regime_id=regime_id,
+                notes=notes,
+                data_gaps=gaps,
+            )
+
+        # ── Defined-risk structures (iron_condor, iron_butterfly, credit_spread) ──
         wing = trade_spec.wing_width_points
         if not wing or wing <= 0:
             # Derive wing width from leg strikes (short - long on same side)
@@ -824,7 +892,7 @@ def estimate_pop(
             if short_calls and long_calls:
                 widths.append(max(long_calls) - min(short_calls))
             wing = min(widths) if widths else 0.0
-        lot_size = trade_spec.lot_size
+
         if trade_spec.order_side == "credit":
             max_profit = entry_price * lot_size * contracts
             max_loss = (wing - entry_price) * lot_size * contracts
@@ -852,9 +920,7 @@ def estimate_pop(
                     impact="medium",
                     affects="POP estimate may be 10-15% off without IV calibration",
                 ))
-            regime_names = {1: "R1 Low-Vol MR", 2: "R2 High-Vol MR", 3: "R3 Low-Vol Trend", 4: "R4 High-Vol Trend"}
-            iv_note = f", IV rank {iv_rank:.0f}" if iv_rank is not None else ""
-            _vol_src = f"leg IV avg {sum(leg_ivs)/len(leg_ivs):.1%}" if leg_ivs else f"ATR {atr_pct:.1f}%"
+            vol_source = pop_method.replace("_", " ")
             return POPEstimate(
                 pop_pct=round(pop, 4),
                 expected_value=0.0,
@@ -868,7 +934,7 @@ def estimate_pop(
                 notes=(
                     f"Regime {regime_names.get(regime_id, f'R{regime_id}')}: "
                     f"expected {dte}d move ±{adjusted_move:.1f} "
-                    f"({_vol_src}{iv_note}) — "
+                    f"({vol_source}{iv_note}) — "
                     "EV unavailable: credit estimate exceeds wing width"
                 ),
                 data_gaps=gaps,
@@ -876,10 +942,14 @@ def estimate_pop(
 
         ev = pop * max_profit - (1 - pop) * max_loss
 
-        regime_names = {1: "R1 Low-Vol MR", 2: "R2 High-Vol MR", 3: "R3 Low-Vol Trend", 4: "R4 High-Vol Trend"}
-        iv_note = f", IV rank {iv_rank:.0f}" if iv_rank is not None else ""
-        if leg_ivs:
-            vol_source = f"leg IV avg {sum(leg_ivs)/len(leg_ivs):.1%}"
+        if pop_method == "broker_leg_iv":
+            valid_ivs = [iv for iv in broker_leg_ivs if iv > 0]
+            vol_source = f"leg IV avg {sum(valid_ivs)/len(valid_ivs):.1%}"
+        elif pop_method == "vol_surface_iv":
+            leg_ivs_valid = [l.atm_iv_at_expiry for l in trade_spec.legs if l.atm_iv_at_expiry and l.atm_iv_at_expiry > 0]
+            vol_source = f"vol surface IV avg {sum(leg_ivs_valid)/len(leg_ivs_valid):.1%}"
+        elif pop_method == "iv_30_day":
+            vol_source = f"30d IV {iv_30_day:.1%}"
         else:
             vol_source = f"ATR {atr_pct:.1f}%"
         notes = (
