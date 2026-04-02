@@ -203,6 +203,26 @@ def _compute_breakevens(
                 return round(puts[0].strike - entry_price, 2), round(calls[0].strike + entry_price, 2)
         return None, None
 
+    if st == "ratio_spread":
+        # Ratio spread (1 long ATM + 2 short OTM): unlimited risk on the short side
+        # Breakeven on the short side: short_strike + net_credit (for call ratio)
+        # or short_strike - net_credit (for put ratio)
+        short_legs = [l for l in legs if l.action == LegAction.SELL_TO_OPEN]
+        long_legs = [l for l in legs if l.action == LegAction.BUY_TO_OPEN]
+        if short_legs and long_legs:
+            short_strike = short_legs[0].strike
+            long_strike = long_legs[0].strike
+            spread_width = abs(short_strike - long_strike)
+            if short_legs[0].option_type == "call":
+                # Bull call ratio: breakeven = short_strike + spread_width + credit
+                be_high = round(short_strike + spread_width + entry_price, 2)
+                return None, be_high
+            else:
+                # Bear put ratio: breakeven = short_strike - spread_width - credit
+                be_low = round(short_strike - spread_width - entry_price, 2)
+                return be_low, None
+        return None, None
+
     # Equity trades: use stop/target from the trade spec's exit_notes or
     # ATR-based approximation from underlying_price ± wing_width_points
     if st in ("equity_long", "equity_short"):
@@ -735,7 +755,7 @@ def estimate_pop(
     _ATR_SIGMA_FACTORS = {1: 1.15, 2: 1.25, 3: 1.30, 4: 1.40}
     _atr_sigma_factor = _ATR_SIGMA_FACTORS.get(regime_id, 1.25)
 
-    if st in ("iron_condor", "iron_butterfly", "credit_spread", "strangle", "straddle"):
+    if st in ("iron_condor", "iron_butterfly", "credit_spread", "strangle", "straddle", "ratio_spread"):
         # Credit trade: profit if price stays between breakevens.
         # Expected move source priority:
         #   1. broker_leg_ivs (DXLink Greeks — exact strike/expiry)
@@ -817,7 +837,7 @@ def estimate_pop(
         # No wing width → max_loss is theoretically unlimited.
         # For EV: use expected_move as the realistic 1-sigma adverse scenario.
         # This matches how real traders evaluate naked/unlimited-risk trades.
-        _unlimited_risk = st in ("strangle", "straddle")
+        _unlimited_risk = st in ("strangle", "straddle", "ratio_spread")
         if _unlimited_risk:
             max_profit = entry_price * lot_size * contracts
             # Realistic adverse scenario: 1-sigma move beyond the closer breakeven
@@ -1046,7 +1066,7 @@ def estimate_pop(
             data_gaps=gaps,
         )
 
-    if st in ("debit_spread", "long_option"):
+    if st in ("debit_spread", "long_option", "calendar", "diagonal", "double_calendar"):
         # Debit trade: need price to move in the right direction
         from income_desk.models.opportunity import LegAction
         long_legs = [l for l in trade_spec.legs if l.action == LegAction.BUY_TO_OPEN]
