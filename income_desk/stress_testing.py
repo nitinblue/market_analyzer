@@ -281,11 +281,19 @@ def _compute_position_impact(
         new_status = "safe"
         action = "hold"
 
-    impact_pct = stressed_impact / pos.max_loss * 100 if pos.max_loss > 0 else 0
+    # Impact as % of risk capital (max_loss for defined-risk, notional for directional)
+    risk_base = pos.max_loss if pos.max_loss > 0 else (pos.notional_value if pos.notional_value > 0 else 1)
+    # For defined-risk: cap at 100% (can't lose more than max_loss)
+    if structure in ("iron_condor", "iron_butterfly", "credit_spread", "debit_spread") and pos.max_loss > 0:
+        impact_pct = min(100.0, max(-100.0, stressed_impact / pos.max_loss * 100))
+    else:
+        # Directional / undefined risk: use notional as base
+        notional_base = pos.notional_value if pos.notional_value > 0 else risk_base
+        impact_pct = stressed_impact / notional_base * 100 if notional_base > 0 else 0
 
     commentary = (
         f"{pos.ticker} {structure}: "
-        f"{stressed_impact:+,.0f} ({impact_pct:+.0f}% of max loss)"
+        f"{stressed_impact:+,.0f} ({impact_pct:+.0f}%)"
     )
     if new_status in ("max_loss", "breached"):
         commentary += f" — {action.upper()}"
