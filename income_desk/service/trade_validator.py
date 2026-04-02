@@ -207,12 +207,10 @@ class TradeValidator:
             max_profit = self._eval_profit_formula(
                 rule.max_profit_formula, entry_credit, wing_width, lot_size,
             )
-        elif rule.max_profit == "unbounded":
-            # Calendar/diagonal — profit is theoretically unbounded;
-            # approximate as a multiple of debit paid
-            max_profit = abs(entry_credit) * lot_size * 2.0
-        elif rule.max_profit == "varies":
-            max_profit = abs(entry_credit) * lot_size
+        elif rule.max_profit == "not_computable":
+            # Calendar/diagonal: profit depends on IV term structure.
+            # Brokers don't publish this. Use debit as proxy for sizing only.
+            max_profit = abs(entry_credit) * lot_size if entry_credit else 0.0
 
         if rule.max_loss == "computed" and rule.max_loss_formula:
             max_loss = self._eval_loss_formula(
@@ -240,8 +238,9 @@ class TradeValidator:
                 return ValidationResult(
                     status="rejected", rejections=rejections, flags=flags,
                 )
-        elif rule.max_loss == "approximate":
-            max_loss = abs(entry_credit) * lot_size
+        elif rule.max_loss == "not_computable":
+            # Calendar/diagonal: max loss ~ debit paid (approximate, for sizing only)
+            max_loss = abs(entry_credit) * lot_size if entry_credit else None
         elif rule.max_loss == "unlimited":
             max_loss = None
 

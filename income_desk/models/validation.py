@@ -78,8 +78,8 @@ class StructureRule(BaseModel):
     required_legs: int
     leg_roles: set[str] | None = None  # None = any combination accepted
     wing_width: Literal["required", "not_applicable"]
-    max_loss: Literal["computed", "approximate", "unlimited"]
-    max_profit: Literal["computed", "unbounded", "varies"]
+    max_loss: Literal["computed", "approximate", "unlimited", "not_computable"]
+    max_profit: Literal["computed", "unbounded", "varies", "not_computable"]
     entry_type: Literal["credit", "debit"]
     max_loss_formula: str | None = None
     max_profit_formula: str | None = None
@@ -129,18 +129,18 @@ STRUCTURE_RULES: dict[str, StructureRule] = {
     "calendar": StructureRule(
         required_legs=2,
         wing_width="not_applicable",
-        max_loss="approximate",
-        max_profit="unbounded",
+        max_loss="not_computable",
+        max_profit="not_computable",
         entry_type="debit",
-        notes="Same strike, different expiry. Max loss ~ debit paid.",
+        notes="Same strike, different expiry. Max loss/profit depend on IV term structure — not computable without broker model.",
     ),
     "diagonal": StructureRule(
         required_legs=2,
         wing_width="not_applicable",
-        max_loss="approximate",
-        max_profit="varies",
+        max_loss="not_computable",
+        max_profit="not_computable",
         entry_type="debit",
-        notes="Different strike, different expiry.",
+        notes="Different strike, different expiry. Max loss/profit depend on IV term structure — not computable without broker model.",
     ),
     "strangle": StructureRule(
         required_legs=2,
@@ -171,10 +171,10 @@ STRUCTURE_RULES: dict[str, StructureRule] = {
     "double_calendar": StructureRule(
         required_legs=4,
         wing_width="not_applicable",
-        max_loss="approximate",
-        max_profit="unbounded",
+        max_loss="not_computable",
+        max_profit="not_computable",
         entry_type="debit",
-        notes="Two calendars at different strikes. Max loss ~ debit paid.",
+        notes="Two calendars at different strikes. Max loss/profit depend on IV term structure — not computable without broker model.",
     ),
 }
 
