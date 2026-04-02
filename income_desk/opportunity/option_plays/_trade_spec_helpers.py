@@ -402,7 +402,10 @@ def build_iron_butterfly_legs(
     atm = compute_atm_strike(price)
     wing_mult = 1.0 if regime_id == 2 else 1.2
 
-    wing_width = max(atr * wing_mult, _min_wing_width(price))
+    # Iron butterfly ATM: wings need to be wide enough to exceed collected premium.
+    # Use at least 2x strike interval (ATM premium often exceeds 1 interval).
+    min_wing = _min_wing_width(price) * 2
+    wing_width = max(atr * wing_mult, min_wing)
     long_put = snap_strike(atm - wing_width, price)
     long_call = snap_strike(atm + wing_width, price)
 
