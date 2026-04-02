@@ -602,9 +602,15 @@ def build_ratio_spread_legs(
                 expiration=expiration, days_to_expiry=dte, atm_iv_at_expiry=atm_iv,
             ),
             LegSpec(
-                role="short_call", action=LegAction.SELL_TO_OPEN, quantity=2,
+                role="short_call", action=LegAction.SELL_TO_OPEN,
                 option_type="call", strike=otm_strike,
-                strike_label="sell 2x 1.0 ATR OTM call",
+                strike_label="sell 1.0 ATR OTM call (1 of 2)",
+                expiration=expiration, days_to_expiry=dte, atm_iv_at_expiry=atm_iv,
+            ),
+            LegSpec(
+                role="short_call", action=LegAction.SELL_TO_OPEN,
+                option_type="call", strike=otm_strike,
+                strike_label="sell 1.0 ATR OTM call (2 of 2)",
                 expiration=expiration, days_to_expiry=dte, atm_iv_at_expiry=atm_iv,
             ),
         ]
@@ -620,9 +626,15 @@ def build_ratio_spread_legs(
                 expiration=expiration, days_to_expiry=dte, atm_iv_at_expiry=atm_iv,
             ),
             LegSpec(
-                role="short_put", action=LegAction.SELL_TO_OPEN, quantity=2,
+                role="short_put", action=LegAction.SELL_TO_OPEN,
                 option_type="put", strike=otm_strike,
-                strike_label="sell 2x 1.0 ATR OTM put",
+                strike_label="sell 1.0 ATR OTM put (1 of 2)",
+                expiration=expiration, days_to_expiry=dte, atm_iv_at_expiry=atm_iv,
+            ),
+            LegSpec(
+                role="short_put", action=LegAction.SELL_TO_OPEN,
+                option_type="put", strike=otm_strike,
+                strike_label="sell 1.0 ATR OTM put (2 of 2)",
                 expiration=expiration, days_to_expiry=dte, atm_iv_at_expiry=atm_iv,
             ),
         ]
