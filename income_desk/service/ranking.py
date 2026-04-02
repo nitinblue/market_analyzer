@@ -326,6 +326,14 @@ class TradeRankingService:
                 except Exception:
                     pass
 
+            # Sync price: when broker/simulated provides a price, override technicals
+            # so assessors use the same price as the chain. Prevents mismatch when
+            # simulated prices differ from yfinance historical close.
+            if self.market_data is not None and technicals is not None:
+                broker_price = self.market_data.get_underlying_price(ticker)
+                if broker_price and broker_price > 0:
+                    technicals.current_price = broker_price
+
             for strategy in strategies:
                 total_assessed += 1
                 method_name = _ASSESS_METHODS.get(strategy)
