@@ -66,6 +66,17 @@ def print_banner(meta: BannerMeta) -> None:
     for line in lines:
         print(f"| {line:<{width - 4}} |")
     print(border)
+
+    # Data trust banner — impossible to miss
+    is_live = meta.broker_name and "simulated" not in (meta.data_source or "").lower()
+    if is_live:
+        trust_label = f"DATA: LIVE ({meta.broker_name})"
+    else:
+        trust_label = "DATA: SIMULATED — NOT for trading decisions"
+    trust_border = "*" * (len(trust_label) + 6)
+    print(f"\n  {trust_border}")
+    print(f"  ** {trust_label} **")
+    print(f"  {trust_border}")
     print()
 
 
