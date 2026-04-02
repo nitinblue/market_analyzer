@@ -1504,8 +1504,9 @@ def build_equity_trade_spec(
         loss_desc = f"Stop {stop_price:.2f} (+{1.5 * atr:.2f})"
 
     mkt = _populate_market_fields(ticker)
-    # Caller-provided lot_size/currency override registry defaults
-    mkt["lot_size"] = lot_size
+    # Equity trades: lot_size is always 1 (shares, not contracts)
+    # Registry lot_size=100 is for options — using it here causes 100x P&L errors
+    mkt["lot_size"] = 1
     mkt["currency"] = currency
 
     return TradeSpec(
