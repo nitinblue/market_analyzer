@@ -1,6 +1,6 @@
 # Business Objectives
 
-> Type: INFO | Last updated: 2026-03-29
+> Type: INFO | Last updated: 2026-04-01
 
 ## Objectives
 
@@ -14,65 +14,39 @@
 
 ## Go-Live Checklist (OBJ-1 and OBJ-2)
 
-| # | Check | US Status | India 2026-03-29 | India 2026-03-30 (final) |
-|---|-------|-----------|-------------------|-------------------|
-| 1 | Broker connected (not simulated) | UNTESTED | PASS | PASS — Dhan connected, 0 HTTP errors |
-| 2 | All 16 workflows execute without error | PASS (simulated) | PASS (garbage output) | PASS — 16/16 OK, real data flowing |
-| 3 | Data trust > 90% on all outputs | UNTESTED | FAIL — POP 1%, credits 0.15 | PARTIAL — RELIANCE IC credit=14.67 (real), POP still needs DTE fix |
-| 4 | No $0.00 prices in price_trade | UNTESTED | FAIL — current_price=0 | PASS — current_price=1349.90 from Dhan, gates reject price=0 |
-| 5 | IV rank populated from broker (not None) | UNTESTED | PASS — IVR 21-62 | PASS — IVR from Dhan live, IV display fixed (60% not 0.6%) |
-| 6 | Ranked trades have real strikes from chain | UNTESTED | FAIL — estimation | PASS — chain repricing gives real credits, blocked trades have rationale |
-| 7 | Stress test uses live portfolio positions | UNTESTED | FAIL — DEMO | FAIL — still DEMO (no Dhan positions open) |
-| 8 | No simulated data flagged anywhere in output | UNTESTED | FAIL — FRED, demo | PARTIAL — FRED suppressed, phases 1-3 use real data, phases 4-7 still demo |
-| 9 | Gate scorecard passes with real data | UNTESTED | FAIL — rubber-stamp | PASS — gates with detail text, price=0 correctly FAILS |
-| 10 | Position sizing uses real account NLV/BP | PASS (TT connected) | FAIL — NLV=0 | NEEDS RETEST — BUG-011 fix delivered but banner still shows 0 |
+| # | Check | US Status | India Status | Notes (2026-04-01) |
+|---|-------|-----------|--------------|---------------------|
+| 1 | Broker connected (not simulated) | UNTESTED | PASS | Dhan connected, 0 HTTP errors |
+| 2 | All 16 workflows execute without error | PASS (simulated) | PASS | 16/16 OK, real data flowing |
+| 3 | Data trust > 90% on all outputs | UNTESTED | PASS | POP fixed (was 0%, now 53-70%), iv_30_day wired, chain-first credits |
+| 4 | No $0.00 prices in price_trade | UNTESTED | PASS | current_price from Dhan, gates reject price=0 |
+| 5 | IV rank populated from broker (not None) | UNTESTED | PASS | IVR from Dhan live, iv_30_day flows to POP |
+| 6 | Ranked trades have real strikes from chain | UNTESTED | PASS | ChainBundle architecture, degenerate guards |
+| 7 | Stress test uses live portfolio positions | UNTESTED | FAIL | No Dhan positions open — needs real trades first |
+| 8 | No simulated data flagged anywhere in output | UNTESTED | PARTIAL | Phases 1-3 real, phases 4-7 still demo |
+| 9 | Gate scorecard passes with real data | UNTESTED | PASS | TradeValidator with structure-aware rules |
+| 10 | Position sizing uses real account NLV/BP | UNTESTED | PARTIAL | Capital warning added, Dhan NLV fix delivered, needs live retest |
 
-### India Go-Live Confidence Score: 45% (was 20% on 2026-03-29, 35% earlier today)
+### Go-Live Confidence: India 60% (was 45%), US needs live test
 
-**Today's progression: 20% → 35% → 45%**
-- Checks 1,2,4,5,6,9 now PASS (was 1,2,5 yesterday)
-- Check 3 partial (credit real, POP needs DTE fix — agent in progress)
-- Check 10 fix delivered, needs live verification
-- Checks 7,8 blocked by no real positions
+**April 1 fixes:** POP 0%→53-70% (d18a63b), iv_30_day wired (7295609), ratio 3 legs (10b44f9), degenerate guards (cba7788), capital warning (91fcf2d), eTrading exports (adc12af)
 
-**What improved (20% → 35%):**
-- Broker connection clean, zero HTTP errors (was 22+ per run)
-- yfinance .NS suffix fixed — India stock data now flows
-- FRED noise eliminated for India market
-- Phase ordering correct (context → snapshot → health → plan)
-- Scan → rank pipeline wired correctly
-- Pricing regression: 25/25 valid trades from real chain data
-- Dhan NLV calculation fixed (needs live verification)
-- Labels de-jargoned
-
-**What blocks 35% → 70%:**
-- BUG-003/004: POP and credits need retest with BUG-002 fix (likely fixed, needs confirmation)
-- BUG-005: Gates must reject bad data (fix in progress)
-- BUG-007: Harness still uses $5 wing width for India (pricing regression uses chain-based)
-- Phases 4-7 use demo positions (no real positions to test with)
-- Account NLV fix needs live verification
-
-**What blocks 70% → 100%:**
-- Real trades executed and monitored through full lifecycle
-- POP calibration against actual outcomes
-- Overnight risk tested with real overnight positions
-- Stress test with realistic PnL% (BUG-010 fix in progress)
-- 7 consecutive clean daily test runs
+**Blocks to 100%:** Live broker verification (both markets), real trades for phases 4-7, POP calibration
 
 ## Blockers to Objectives
 
 | Blocker | Blocks | Intake Key | Status |
 |---------|--------|-----------|--------|
-| Broker not connected during testing | OBJ-1, OBJ-2 | FB-001 | OPEN |
+| Broker not connected during testing | OBJ-1, OBJ-2 | FB-001 | OPEN — top priority for April 2 |
 | Data trust not displayed | OBJ-1, OBJ-2 | FB-002 | OPEN |
 | Dhan rate limiting | OBJ-2 | GAP-001 | OPEN |
-| Dhan token expiry | OBJ-2 | GAP-002 | OPEN |
+| Dhan token expiry | OBJ-2 | GAP-002 | OPEN (Nitin) |
 | No go-live checklist enforcement | OBJ-1, OBJ-2 | FB-003 | OPEN |
-| trader_md not tested end-to-end with LIVE broker | OBJ-1, OBJ-2, OBJ-3 | PLAT-007 | OPEN |
-| trader/ not tested end-to-end with LIVE broker | OBJ-1, OBJ-2 | PLAT-008 | OPEN |
-| Full pytest suite not verified for v2.0 | OBJ-3 | PLAT-009 | OPEN |
-| Claude Skill not built | OBJ-4 | FEAT-001 | OPEN |
-| MCP server not built | OBJ-5 | FEAT-002 | OPEN |
+| trader/ not tested end-to-end with LIVE broker | OBJ-1, OBJ-2 | PLAT-008 | OPEN — April 2 live test |
+| POP broken for strangles | OBJ-1, OBJ-2 | BUG-003 | CLOSED (d18a63b) |
+| Credits nonsensical | OBJ-1, OBJ-2 | BUG-004 | CLOSED (chain-first) |
+| Gates rubber-stamp bad input | OBJ-1, OBJ-2 | BUG-005 | CLOSED (TradeValidator) |
+| Ranking uses estimated strikes | OBJ-1, OBJ-2 | FB-013 | CLOSED (ChainBundle) |
 
 ## v2.0 Release Checklist (must ALL pass before PyPI publish)
 
