@@ -650,27 +650,28 @@ def create_ideal_income() -> SimulatedMarketData:
     """R1/R2 regime, elevated IV — ideal income trading scenario.
 
     Comprehensive US universe for weekend testing.
+    Prices updated 2026-04-01 to match current market.
     """
     return SimulatedMarketData({
         # Major indices/ETFs
-        "SPY":  {"price": 565.0, "iv": 0.26, "iv_rank": 55, "atr_pct": 1.1},
-        "QQQ":  {"price": 480.0, "iv": 0.30, "iv_rank": 60, "atr_pct": 1.3},
-        "IWM":  {"price": 210.0, "iv": 0.28, "iv_rank": 52, "atr_pct": 1.5},
-        "GLD":  {"price": 295.0, "iv": 0.22, "iv_rank": 48, "atr_pct": 1.0},
+        "SPY":  {"price": 655.0, "iv": 0.26, "iv_rank": 55, "atr_pct": 1.1},
+        "QQQ":  {"price": 585.0, "iv": 0.30, "iv_rank": 60, "atr_pct": 1.3},
+        "IWM":  {"price": 250.0, "iv": 0.28, "iv_rank": 52, "atr_pct": 1.5},
+        "GLD":  {"price": 435.0, "iv": 0.22, "iv_rank": 48, "atr_pct": 1.0},
         "TLT":  {"price": 86.0,  "iv": 0.18, "iv_rank": 45, "atr_pct": 0.8},
-        "DIA":  {"price": 420.0, "iv": 0.20, "iv_rank": 42, "atr_pct": 1.0},
+        "DIA":  {"price": 468.0, "iv": 0.20, "iv_rank": 42, "atr_pct": 1.0},
         # Mega-cap tech
-        "AAPL": {"price": 230.0, "iv": 0.28, "iv_rank": 50, "atr_pct": 1.4},
-        "MSFT": {"price": 420.0, "iv": 0.25, "iv_rank": 45, "atr_pct": 1.2},
-        "AMZN": {"price": 200.0, "iv": 0.32, "iv_rank": 58, "atr_pct": 1.6},
-        "NVDA": {"price": 130.0, "iv": 0.45, "iv_rank": 65, "atr_pct": 2.5},
-        "TSLA": {"price": 275.0, "iv": 0.55, "iv_rank": 70, "atr_pct": 3.0},
-        "META": {"price": 600.0, "iv": 0.35, "iv_rank": 55, "atr_pct": 1.8},
-        "GOOGL":{"price": 170.0, "iv": 0.28, "iv_rank": 48, "atr_pct": 1.4},
+        "AAPL": {"price": 255.0, "iv": 0.28, "iv_rank": 50, "atr_pct": 1.4},
+        "MSFT": {"price": 372.0, "iv": 0.25, "iv_rank": 45, "atr_pct": 1.2},
+        "AMZN": {"price": 212.0, "iv": 0.32, "iv_rank": 58, "atr_pct": 1.6},
+        "NVDA": {"price": 177.0, "iv": 0.45, "iv_rank": 65, "atr_pct": 2.5},
+        "TSLA": {"price": 382.0, "iv": 0.55, "iv_rank": 70, "atr_pct": 3.0},
+        "META": {"price": 582.0, "iv": 0.35, "iv_rank": 55, "atr_pct": 1.8},
+        "GOOGL":{"price": 297.0, "iv": 0.28, "iv_rank": 48, "atr_pct": 1.4},
         # Sector ETFs
-        "XLF":  {"price": 48.0,  "iv": 0.22, "iv_rank": 40, "atr_pct": 1.2},
-        "XLE":  {"price": 85.0,  "iv": 0.28, "iv_rank": 52, "atr_pct": 1.8},
-        "XLK":  {"price": 220.0, "iv": 0.26, "iv_rank": 50, "atr_pct": 1.3},
+        "XLF":  {"price": 50.0,  "iv": 0.22, "iv_rank": 40, "atr_pct": 1.2},
+        "XLE":  {"price": 59.0,  "iv": 0.28, "iv_rank": 52, "atr_pct": 1.8},
+        "XLK":  {"price": 136.0, "iv": 0.26, "iv_rank": 50, "atr_pct": 1.3},
     })
 
 
