@@ -28,6 +28,24 @@ def _get_strike_interval(ticker: str) -> float | None:
     return None
 
 
+def _min_wing_width(price: float, ticker: str = "") -> float:
+    """Return the minimum wing width (1 strike interval) for a price level.
+
+    Uses registry strike_interval if available, else US OCC tick sizes.
+    This ensures wings are always at least 1 strike apart, preventing
+    degenerate same-strike spreads when ATR < strike interval.
+    """
+    interval = _get_strike_interval(ticker) if ticker else None
+    if interval:
+        return interval
+    # US OCC tick sizes (same logic as snap_strike)
+    if price < 50:
+        return 0.50
+    if price < 200:
+        return 1.00
+    return 5.00
+
+
 def _assignment_exit_note(ticker: str) -> str:
     """Generate market-aware assignment risk exit note for dual-expiry structures."""
     inst = _get_instrument_info(ticker)
@@ -256,10 +274,9 @@ def build_iron_condor_legs(
     """Build iron condor legs. Returns (legs, wing_width_points)."""
     # Short strike distance from price (in ATR multiples)
     short_mult = 1.0 if regime_id == 1 else 1.5
-    # Wing width beyond short strike
+    # Wing width beyond short strike — floor at 1 strike interval
     wing_mult = 0.5 if regime_id == 1 else 0.7
-
-    wing_width = atr * wing_mult
+    wing_width = max(atr * wing_mult, _min_wing_width(price))
 
     short_put = compute_otm_strike(price, atr, short_mult, "put", price)
     short_call = compute_otm_strike(price, atr, short_mult, "call", price)
@@ -338,7 +355,7 @@ def build_inverse_iron_condor_legs(
 
     # Outer (short) strikes — wings, further OTM
     wing_mult = 0.5 if regime_id in (1, 2) else 0.4
-    wing_width = atr * wing_mult
+    wing_width = max(atr * wing_mult, _min_wing_width(price))
     short_put = snap_strike(long_put - wing_width, price)
     short_call = snap_strike(long_call + wing_width, price)
 
@@ -385,7 +402,7 @@ def build_iron_butterfly_legs(
     atm = compute_atm_strike(price)
     wing_mult = 1.0 if regime_id == 2 else 1.2
 
-    wing_width = atr * wing_mult
+    wing_width = max(atr * wing_mult, _min_wing_width(price))
     long_put = snap_strike(atm - wing_width, price)
     long_call = snap_strike(atm + wing_width, price)
 
@@ -958,7 +975,7 @@ def build_credit_spread_legs(
     """
     if direction == "bullish":
         short_strike = compute_otm_strike(price, atr, short_multiplier, "put", price)
-        wing_width = atr * wing_multiplier
+        wing_width = max(atr * wing_multiplier, _min_wing_width(price))
         long_strike = snap_strike(short_strike - wing_width, price)
         # Degenerate spread guard: wing width < strike interval
         if short_strike == long_strike:
@@ -980,7 +997,7 @@ def build_credit_spread_legs(
         ], wing_pts
     else:
         short_strike = compute_otm_strike(price, atr, short_multiplier, "call", price)
-        wing_width = atr * wing_multiplier
+        wing_width = max(atr * wing_multiplier, _min_wing_width(price))
         long_strike = snap_strike(short_strike + wing_width, price)
         # Degenerate spread guard: wing width < strike interval
         if short_strike == long_strike:

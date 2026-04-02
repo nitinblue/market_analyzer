@@ -168,6 +168,14 @@ STRUCTURE_RULES: dict[str, StructureRule] = {
         entry_type="credit",
         notes="Undefined risk on naked side.",
     ),
+    "double_calendar": StructureRule(
+        required_legs=4,
+        wing_width="not_applicable",
+        max_loss="approximate",
+        max_profit="unbounded",
+        entry_type="debit",
+        notes="Two calendars at different strikes. Max loss ~ debit paid.",
+    ),
 }
 
 
