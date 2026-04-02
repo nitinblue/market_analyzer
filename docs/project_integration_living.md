@@ -50,6 +50,77 @@ ma.plan.generate()                # Daily plan
 
 ---
 
+## 1b. New Capabilities (April 2026)
+
+Three new major capabilities now exported from `income_desk`:
+
+### ChainBundle + ChainFetcher
+
+Single-fetch, pass-everywhere option chain architecture. Eliminates redundant chain fetches.
+
+```python
+from income_desk import ChainBundle, ChainFetcher
+
+fetcher = ChainFetcher(market_data=md)
+bundles = fetcher.fetch_batch(["SPY", "QQQ", "GLD"])  # One fetch per ticker
+
+for b in bundles:
+    print(f"{b.ticker}: usable={b.is_usable}, quality={b.quality_pct}%")
+    # ChainBundle contains: raw_chain, chain_df, vol_surface, chain_context, fetch_meta
+```
+
+### InstrumentSnapshot + SnapshotService
+
+Pre-market snapshot for zero-network-call trading. Captures full chain topology with OI.
+
+```python
+from income_desk import SnapshotService, MarketSnapshot
+
+# Build (during market hours)
+snap = SnapshotService.build(market_data=md, tickers=["SPY", "QQQ"])
+SnapshotService.save(snap, market="US")
+
+# Load (any time — zero network)
+snap = SnapshotService.load(market="US")
+inst = snap.instruments["SPY"]
+exp = inst.nearest_expiry("weekly")  # → ExpiryInfo with tradeable strikes
+```
+
+### TradeValidator
+
+Structure-aware configurable validation engine. Validates trades after generation.
+
+```python
+from income_desk import TradeValidator, ValidationConfig, STRUCTURE_RULES
+
+validator = TradeValidator()  # Uses default config
+result = validator.validate(trade_spec)  # → ValidationResult
+
+# result.status: "valid", "flagged", or "rejected"
+# result.economics: ValidatedEconomics (non-null for valid/flagged only)
+# result.rejections: list[ValidationRejection] with root_cause + suggestion
+```
+
+**POP now uses 4 IV sources** (priority order):
+1. `broker_leg_ivs` — per-leg IV from DXLink Greeks
+2. `iv_30_day` — 30-day annualized IV from market metrics
+3. `leg.atm_iv_at_expiry` — IV from vol surface
+4. ATR-based (backward-looking, least reliable)
+
+### SimulatedMarketData
+
+For testing without broker connection:
+
+```python
+from income_desk import SimulatedMarketData, SimulatedMetrics, SimulatedAccount, MarketAnalyzer, DataService
+
+sim = SimulatedMarketData({"SPY": {"price": 580.0, "iv": 0.18, "iv_rank": 43}})
+ma = MarketAnalyzer(data_service=DataService(), market_data=sim, market_metrics=SimulatedMetrics(sim))
+# Full pipeline works — all 16 workflows
+```
+
+---
+
 ## 2. Broker Integrations
 
 ### Supported Brokers

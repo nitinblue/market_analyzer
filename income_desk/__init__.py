@@ -824,6 +824,28 @@ from income_desk.regression.pipeline_validation import (
     validate_full_pipeline,
 )
 
+# Chain architecture (new — April 2026)
+from income_desk.models.chain import ChainBundle, ChainContext, AvailableStrike, FetchMetadata
+from income_desk.service.chain_fetcher import ChainFetcher
+
+# Instrument snapshot (new — April 2026)
+from income_desk.models.instrument_snapshot import (
+    InstrumentSnapshot, MarketSnapshot, ExpiryInfo, StrikeInfo, BucketName,
+)
+from income_desk.service.snapshot import SnapshotService
+
+# Trade validator (new — April 2026)
+from income_desk.models.validation import (
+    ValidationConfig, ValidationResult, ValidationRejection,
+    ValidationFlag, ValidatedEconomics, StructureRule, STRUCTURE_RULES,
+)
+from income_desk.service.trade_validator import TradeValidator
+
+# Simulated data (for testing/development)
+from income_desk.adapters.simulated import (
+    SimulatedMarketData, SimulatedMetrics, SimulatedAccount,
+)
+
 __all__ = [
     # Config
     "Settings",
@@ -1386,4 +1408,30 @@ __all__ = [
     "validate_trade_data_sanity",
     "validate_pipeline_health",
     "validate_full_pipeline",
+    # Chain architecture (new — April 2026)
+    "ChainBundle",
+    "ChainContext",
+    "AvailableStrike",
+    "FetchMetadata",
+    "ChainFetcher",
+    # Instrument snapshot (new — April 2026)
+    "InstrumentSnapshot",
+    "MarketSnapshot",
+    "ExpiryInfo",
+    "StrikeInfo",
+    "BucketName",
+    "SnapshotService",
+    # Trade validator (new — April 2026)
+    "ValidationConfig",
+    "ValidationResult",
+    "ValidationRejection",
+    "ValidationFlag",
+    "ValidatedEconomics",
+    "StructureRule",
+    "STRUCTURE_RULES",
+    "TradeValidator",
+    # Simulated data
+    "SimulatedMarketData",
+    "SimulatedMetrics",
+    "SimulatedAccount",
 ]
