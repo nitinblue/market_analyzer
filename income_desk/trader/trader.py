@@ -159,7 +159,12 @@ def step_rank_and_show(
     from income_desk.trader.support import print_table
 
     cur = _cur(meta.market)
-    capital = meta.account_nlv or (500_000.0 if meta.market == "India" else 50_000.0)
+    if meta.account_nlv:
+        capital = meta.account_nlv
+    else:
+        capital = 500_000.0 if meta.market == "India" else 50_000.0
+        print(f"\n  [WARN] No account NLV from broker — using default {cur} {capital:,.0f}")
+        print(f"         Set via --capital flag or connect broker for accurate sizing.")
 
     print(f"\n{'=' * 70}")
     print("  STEP 3: RANK OPPORTUNITIES")
