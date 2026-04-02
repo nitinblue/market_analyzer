@@ -282,6 +282,26 @@ class TradeValidator:
                     ),
                 ))
 
+        # Guard: negative max_profit means trade costs more than max payout
+        if max_profit < 0:
+            rejections.append(ValidationRejection(
+                field="max_profit",
+                value=max_profit,
+                rule="max_profit_positive",
+                root_cause=(
+                    f"Computed max_profit={max_profit:.2f} is negative — "
+                    f"entry cost exceeds maximum payout"
+                ),
+                suggestion="Widen the spread or find a cheaper entry.",
+            ))
+            logger.warning(
+                "Rejected %s %s: max_profit=%.2f <= 0",
+                trade_spec.ticker, structure_type, max_profit,
+            )
+            return ValidationResult(
+                status="rejected", rejections=rejections, flags=flags,
+            )
+
         # ── Step 5: DTE validation ────────────────────────────────────
         if trade_spec.legs:
             actual_dte = trade_spec.legs[0].days_to_expiry
