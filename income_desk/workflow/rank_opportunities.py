@@ -67,6 +67,7 @@ class RankRequest(BaseModel):
     market: str = "India"
     risk_tolerance: str = "moderate"
     iv_rank_map: dict[str, float] | None = None
+    iv_30_day_map: dict[str, float] | None = None
     skip_intraday: bool = True
     max_trades: int = 10
     min_pop: float = 0.40
@@ -251,9 +252,8 @@ def rank_opportunities(
 
             # Get 30-day IV from market metrics (Source 2: underlying-level)
             _iv_30_day = None
-            if request.iv_rank_map and ticker in request.iv_rank_map:
-                # iv_rank_map has IV rank; we need iv_30_day separately
-                pass  # TODO: thread iv_30_day from metrics through request
+            if request.iv_30_day_map and ticker in request.iv_30_day_map:
+                _iv_30_day = request.iv_30_day_map[ticker]
 
             pop_result = estimate_pop(
                 trade_spec=ts, entry_price=max(repriced.entry_credit, 0.01),

@@ -32,6 +32,7 @@ class DailyPlanRequest(BaseModel):
     total_risk_deployed: float = 0.0  # existing risk in portfolio
     max_new_trades: int = 5
     iv_rank_map: dict[str, float] | None = None
+    iv_30_day_map: dict[str, float] | None = None
 
 
 class DailyPlanResponse(BaseModel):
@@ -104,6 +105,7 @@ def generate_daily_plan(
             market=request.market,
             risk_tolerance=request.risk_tolerance,
             iv_rank_map=request.iv_rank_map,
+            iv_30_day_map=request.iv_30_day_map,
             skip_intraday=True,
             max_trades=request.max_new_trades,
         ),

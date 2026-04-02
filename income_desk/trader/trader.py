@@ -28,18 +28,22 @@ def _trunc(text: Any, width: int = 60) -> str:
     return s if len(s) <= width else s[: width - 3] + "..."
 
 
-def _fetch_iv_rank_map(ma: Any, tickers: list[str]) -> dict[str, float]:
-    iv_map: dict[str, float] = {}
+def _fetch_iv_maps(ma: Any, tickers: list[str]) -> tuple[dict[str, float], dict[str, float]]:
+    """Fetch IV rank and IV 30-day maps from market metrics in one call."""
+    iv_rank_map: dict[str, float] = {}
+    iv_30_day_map: dict[str, float] = {}
     if not hasattr(ma, "market_metrics") or ma.market_metrics is None:
-        return iv_map
+        return iv_rank_map, iv_30_day_map
     try:
         metrics = ma.market_metrics.get_metrics(tickers)
         for ticker, m in metrics.items():
             if hasattr(m, "iv_rank") and m.iv_rank is not None:
-                iv_map[ticker] = m.iv_rank
+                iv_rank_map[ticker] = m.iv_rank
+            if hasattr(m, "iv_30_day") and m.iv_30_day is not None:
+                iv_30_day_map[ticker] = m.iv_30_day
     except Exception:
         pass
-    return iv_map
+    return iv_rank_map, iv_30_day_map
 
 
 # ---------------------------------------------------------------------------
@@ -166,12 +170,13 @@ def step_rank_and_show(
         from income_desk.workflow import rank_opportunities
         from income_desk.workflow.rank_opportunities import RankRequest
 
-        iv_map = _fetch_iv_rank_map(ma, tickers)
+        iv_rank_map, iv_30_day_map = _fetch_iv_maps(ma, tickers)
         req = RankRequest(
             tickers=tickers,
             capital=capital,
             market=meta.market,
-            iv_rank_map=iv_map or None,
+            iv_rank_map=iv_rank_map or None,
+            iv_30_day_map=iv_30_day_map or None,
             snapshot=snapshot,
         )
         resp = rank_opportunities(req, ma)
