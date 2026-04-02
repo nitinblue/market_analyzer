@@ -275,6 +275,11 @@ def build_iron_condor_legs(
             short_call = call_optimal.optimal_strike
     long_put = snap_strike(short_put - wing_width, price)
     long_call = snap_strike(short_call + wing_width, price)
+
+    # Degenerate spread guard: wing width < strike interval → both legs same strike
+    if short_put == long_put or short_call == long_call:
+        return [], 0.0
+
     wing_width_points = short_put - long_put
 
     legs = [
@@ -336,6 +341,11 @@ def build_inverse_iron_condor_legs(
     wing_width = atr * wing_mult
     short_put = snap_strike(long_put - wing_width, price)
     short_call = snap_strike(long_call + wing_width, price)
+
+    # Degenerate spread guard: wing width < strike interval → both legs same strike
+    if long_put == short_put or long_call == short_call:
+        return [], 0.0
+
     wing_width_points = long_put - short_put
 
     legs = [
@@ -378,6 +388,11 @@ def build_iron_butterfly_legs(
     wing_width = atr * wing_mult
     long_put = snap_strike(atm - wing_width, price)
     long_call = snap_strike(atm + wing_width, price)
+
+    # Degenerate spread guard: wings must differ from center strike
+    if long_put == atm or long_call == atm:
+        return [], 0.0
+
     wing_width_points = atm - long_put
 
     legs = [
@@ -577,6 +592,9 @@ def build_ratio_spread_legs(
 
     if direction == "bullish":
         otm_strike = compute_otm_strike(price, atr, 1.0, "call", price)
+        # Degenerate spread guard: ATM and OTM at same strike
+        if atm == otm_strike:
+            return []
         legs = [
             LegSpec(
                 role="long_call", action=LegAction.BUY_TO_OPEN, option_type="call", strike=atm,
@@ -592,6 +610,9 @@ def build_ratio_spread_legs(
         ]
     else:
         otm_strike = compute_otm_strike(price, atr, 1.0, "put", price)
+        # Degenerate spread guard: ATM and OTM at same strike
+        if atm == otm_strike:
+            return []
         legs = [
             LegSpec(
                 role="long_put", action=LegAction.BUY_TO_OPEN, option_type="put", strike=atm,
@@ -630,6 +651,8 @@ def build_single_expiry_trade_spec(
         legs, wing_width = build_iron_condor_legs(
             price, atr, regime_id, exp_pt.expiration, exp_pt.days_to_expiry, exp_pt.atm_iv,
         )
+        if not legs:
+            return None  # Degenerate — wing width < strike interval
         rationale = f"Target {target_dte_min}-{target_dte_max} DTE, matched {exp_pt.expiration} ({exp_pt.days_to_expiry}d). " \
                      f"Short strikes at {'1.0' if regime_id == 1 else '1.5'} ATR OTM, " \
                      f"wings {'0.5' if regime_id == 1 else '0.7'} ATR wide."
@@ -658,6 +681,8 @@ def build_single_expiry_trade_spec(
         legs, wing_width = build_iron_butterfly_legs(
             price, atr, regime_id, exp_pt.expiration, exp_pt.days_to_expiry, exp_pt.atm_iv,
         )
+        if not legs:
+            return None  # Degenerate — wing width < strike interval
         rationale = f"Target {target_dte_min}-{target_dte_max} DTE, matched {exp_pt.expiration} ({exp_pt.days_to_expiry}d). " \
                      f"Short straddle at ATM, wings {'1.0' if regime_id == 2 else '1.2'} ATR."
         return TradeSpec(
@@ -686,6 +711,8 @@ def build_single_expiry_trade_spec(
         legs = build_ratio_spread_legs(
             price, atr, dir_, exp_pt.expiration, exp_pt.days_to_expiry, exp_pt.atm_iv,
         )
+        if not legs:
+            return None  # Degenerate — ATR too small for strike interval
         rationale = f"Target {target_dte_min}-{target_dte_max} DTE, matched {exp_pt.expiration} ({exp_pt.days_to_expiry}d). " \
                      f"Buy 1 ATM, sell 2 OTM at 1.0 ATR. {dir_.title()} direction."
         return TradeSpec(
@@ -865,6 +892,9 @@ def build_debit_spread_legs(
     if direction == "bullish":
         long_strike = compute_atm_strike(price)
         short_strike = compute_otm_strike(price, atr, width_multiplier, "call", price)
+        # Degenerate spread guard: both legs at same strike
+        if long_strike == short_strike:
+            return []
         return [
             LegSpec(
                 role="long_call", action=LegAction.BUY_TO_OPEN,
@@ -881,6 +911,9 @@ def build_debit_spread_legs(
     else:
         long_strike = compute_atm_strike(price)
         short_strike = compute_otm_strike(price, atr, width_multiplier, "put", price)
+        # Degenerate spread guard: both legs at same strike
+        if long_strike == short_strike:
+            return []
         return [
             LegSpec(
                 role="long_put", action=LegAction.BUY_TO_OPEN,
@@ -915,6 +948,9 @@ def build_credit_spread_legs(
         short_strike = compute_otm_strike(price, atr, short_multiplier, "put", price)
         wing_width = atr * wing_multiplier
         long_strike = snap_strike(short_strike - wing_width, price)
+        # Degenerate spread guard: wing width < strike interval
+        if short_strike == long_strike:
+            return [], 0.0
         wing_pts = short_strike - long_strike
         return [
             LegSpec(
@@ -934,6 +970,9 @@ def build_credit_spread_legs(
         short_strike = compute_otm_strike(price, atr, short_multiplier, "call", price)
         wing_width = atr * wing_multiplier
         long_strike = snap_strike(short_strike + wing_width, price)
+        # Degenerate spread guard: wing width < strike interval
+        if short_strike == long_strike:
+            return [], 0.0
         wing_pts = long_strike - short_strike
         return [
             LegSpec(
@@ -1596,6 +1635,10 @@ def pick_ic_strikes_from_chain(
     if not long_puts or not long_calls:
         return None
 
+    # Degenerate spread guard: wing width < strike interval
+    if long_puts[0].strike == short_put.strike or long_calls[0].strike == short_call.strike:
+        return None
+
     return {
         "short_put": short_put,
         "long_put": long_puts[0],
@@ -1644,7 +1687,7 @@ def pick_ifly_strikes_from_chain(
     long_call = chain.nearest_call(target_long_call)
     if long_put is None or long_call is None:
         return None
-    # Long strikes must actually be beyond the short strike
+    # Wings must be strictly beyond center (catches degenerate same-strike)
     if long_put.strike >= atm_strike or long_call.strike <= atm_strike:
         return None
 
@@ -1679,6 +1722,9 @@ def pick_credit_spread_from_chain(
         longs = chain.put_below(short.strike, n=1)
         if not longs:
             return None
+        # Degenerate spread guard
+        if short.strike == longs[0].strike:
+            return None
         return {"short": short, "long": longs[0]}
     else:
         target_short = price + (mult * atr)
@@ -1687,6 +1733,9 @@ def pick_credit_spread_from_chain(
             return None
         longs = chain.call_above(short.strike, n=1)
         if not longs:
+            return None
+        # Degenerate spread guard
+        if short.strike == longs[0].strike:
             return None
         return {"short": short, "long": longs[0]}
 
