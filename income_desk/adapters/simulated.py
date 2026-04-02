@@ -718,7 +718,7 @@ def create_india_trading() -> SimulatedMarketData:
             "BANKNIFTY": {"price": 52_500.0, "iv": 0.22, "iv_rank": 55, "atr_pct": 2.7},
             "FINNIFTY":  {"price": 24_600.0, "iv": 0.20, "iv_rank": 50, "atr_pct": 2.0},
             "SENSEX":    {"price": 74_500.0, "iv": 0.16, "iv_rank": 40, "atr_pct": 1.8},
-            "MIDCPNIFTY":{"price": 12_600.0, "iv": 0.24, "iv_rank": 48, "atr_pct": 2.2},
+            # MIDCPNIFTY removed — not available on yfinance
             # Top F&O stocks
             "RELIANCE":  {"price":  1_375.0, "iv": 0.28, "iv_rank": 48, "atr_pct": 2.2},
             "TCS":       {"price":  2_410.0, "iv": 0.22, "iv_rank": 35, "atr_pct": 2.5},
