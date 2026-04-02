@@ -18,7 +18,7 @@
 | BUG-010 | Stress test PnL% values absurd: -1260% for Black Monday on demo positions. Breach column shows "no" for -1260% loss which is clearly a breach | 2026-03-29 | 2026-04-01 | CLOSED | Claude | Fixed: defined-risk structures cap impact_pct at +/-100% (can't lose more than max_loss). Directional uses notional as base (was dividing by premium). Commentary no longer says "% of max loss" | — | stress_testing.py |
 | BUG-011 | Account NLV shows INR 0, BP N/A in harness banner — Dhan get_balance returning zero/null | 2026-03-29 | 2026-03-30 | DELIVERED | Claude | Fixed 3 bugs: 0.0 falsy in or-chain, NLV missing collateral/sodLimit, SDK failure not detected. 4 new tests. | — | dhan/account.py |
 
-| BUG-012 | TastyTrade get_option_chain subscribes to EVERY strike via DXLink WebSocket — 1000+ subscriptions for QQQ. Takes 3+ minutes per ticker, harness times out. Dhan returns full chain in 1 API call (~1s) | 2026-03-30 | 2026-03-30 | OPEN | Claude | Use TastyTrade REST API for bulk chain data (not DXLink streaming), or limit to ATM +/- N strikes | — | — |
+| BUG-012 | TastyTrade get_option_chain subscribes to EVERY strike via DXLink WebSocket — 1000+ subscriptions for QQQ. Takes 3+ minutes per ticker, harness times out. Dhan returns full chain in 1 API call (~1s) | 2026-03-30 | 2026-04-01 | CLOSED | Claude | Already fixed: get_option_chain uses strikes_each_side=15, num_expiries=6 — limits to ~180 DXLink subscriptions per ticker (was 1000+). REST API used for chain structure, DXLink only for near-ATM quotes/Greeks | — | tastytrade/market_data.py |
 
 ## Archive
 
