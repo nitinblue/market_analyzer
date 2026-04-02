@@ -389,27 +389,29 @@ def _score_signals(regime, technicals, vol_surface, days_to_earnings, cfg) -> li
         ))
 
     # 3. ATM IV level (0.15)
+    # Calendars benefit from RISING IV — enter when IV is LOW.
+    # High IV = expensive entry, less room for expansion = unfavorable.
     avg_iv = (vol_surface.front_iv + vol_surface.back_iv) / 2
-    if avg_iv >= cfg.atm_iv_high:
+    if avg_iv < cfg.atm_iv_moderate:
         signals.append(OpportunitySignal(
-            name="High ATM IV",
+            name="Low ATM IV",
             favorable=True,
             weight=0.15,
-            description=f"ATM IV {avg_iv:.1%} — good premium collection",
+            description=f"ATM IV {avg_iv:.1%} — cheap entry, benefits from IV expansion",
         ))
-    elif avg_iv >= cfg.atm_iv_moderate:
+    elif avg_iv < cfg.atm_iv_high:
         signals.append(OpportunitySignal(
             name="Moderate ATM IV",
             favorable=True,
             weight=0.08,
-            description=f"ATM IV {avg_iv:.1%} — adequate premium",
+            description=f"ATM IV {avg_iv:.1%} — moderate entry cost, some expansion room",
         ))
     else:
         signals.append(OpportunitySignal(
-            name="Low ATM IV",
+            name="High ATM IV",
             favorable=False,
             weight=0.15,
-            description=f"ATM IV {avg_iv:.1%} — thin premium",
+            description=f"ATM IV {avg_iv:.1%} — expensive entry, IV likely to contract (unfavorable for calendars)",
         ))
 
     # 4. Mean-reversion indicators (0.10)

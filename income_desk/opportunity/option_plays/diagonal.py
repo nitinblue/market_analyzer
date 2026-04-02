@@ -438,20 +438,28 @@ def _score_signals(regime, technicals, vol_surface, phase, days_to_earnings, tre
             ))
 
     # 6. ATM IV level (0.10)
+    # Diagonals benefit from RISING IV — enter when IV is LOW.
     avg_iv = (vol_surface.front_iv + vol_surface.back_iv) / 2
-    if avg_iv >= 0.25:
+    if avg_iv < 0.15:
         signals.append(OpportunitySignal(
-            name="Good IV level",
+            name="Low IV — ideal diagonal entry",
             favorable=True,
             weight=0.10,
-            description=f"Avg IV {avg_iv:.1%} — good premium environment",
+            description=f"Avg IV {avg_iv:.1%} — cheap entry, benefits from IV expansion",
         ))
-    elif avg_iv >= 0.15:
+    elif avg_iv < 0.25:
         signals.append(OpportunitySignal(
             name="Moderate IV",
             favorable=True,
             weight=0.05,
-            description=f"Avg IV {avg_iv:.1%} — acceptable",
+            description=f"Avg IV {avg_iv:.1%} — acceptable entry for diagonal",
+        ))
+    else:
+        signals.append(OpportunitySignal(
+            name="High IV — unfavorable for diagonal",
+            favorable=False,
+            weight=0.10,
+            description=f"Avg IV {avg_iv:.1%} — expensive entry, IV contraction risk",
         ))
 
     # 7. No earnings between legs (0.10)
