@@ -217,6 +217,9 @@ class DhanMarketData(MarketDataProvider):
         # Chain cache — avoid re-fetching within 30 seconds (Dhan rate limit: 1/3s)
         self._chain_cache: dict[str, tuple[list, float]] = {}  # ticker -> (quotes, timestamp)
         self._CHAIN_CACHE_TTL = 30.0
+        # Throttle between consecutive option_chain API calls (Dhan: 1 req/3s)
+        self._last_chain_api_call: float = 0.0
+        self._CHAIN_THROTTLE_SECONDS = 3.0
 
     @property
     def provider_name(self) -> str:
@@ -349,6 +352,15 @@ class DhanMarketData(MarketDataProvider):
             return []
 
         expiration = _parse_expiry(target_expiry_str) or expiration
+
+        # Throttle: Dhan allows 1 option_chain request per 3 seconds
+        now = _time.monotonic()
+        elapsed = now - self._last_chain_api_call
+        if elapsed < self._CHAIN_THROTTLE_SECONDS:
+            wait = self._CHAIN_THROTTLE_SECONDS - elapsed
+            logger.debug("Dhan throttle: waiting %.1fs before option_chain(%s)", wait, ticker)
+            _time.sleep(wait)
+        self._last_chain_api_call = _time.monotonic()
 
         try:
             response = self._client.option_chain(
