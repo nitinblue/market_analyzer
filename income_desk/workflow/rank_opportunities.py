@@ -299,8 +299,9 @@ def rank_opportunities(
         max_loss_total = (econ.max_loss or 0.0) * econ.contracts
         contracts = max(1, int(econ.contracts)) if econ.contracts >= 1 else econ.contracts
 
-        # EV gate
-        if ev is not None and ev < 0:
+        # EV gate — skip for calendar/diagonal/double_calendar (EV not computable)
+        _ev_exempt = st in ("calendar", "diagonal", "double_calendar")
+        if ev is not None and ev < 0 and not _ev_exempt:
             blocked.append(BlockedTrade(
                 ticker=ticker, structure=st,
                 reason=f"Negative EV: {ev:.0f} (POP {pop_pct:.0%})",
