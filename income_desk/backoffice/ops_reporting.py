@@ -28,7 +28,7 @@ class ShadowRecord(BaseModel):
     """Trade that scored well but got blocked by a gate."""
     ticker: str
     structure: str
-    score: float
+    score: float | None = None
     blocked_by: str
 
 
@@ -36,7 +36,7 @@ class BookedRecord(BaseModel):
     """Trade that made it through all gates and was booked."""
     ticker: str
     strategy: str
-    score: float
+    score: float | None = None
     entry_price: float
     trade_type: str
 
@@ -67,7 +67,7 @@ class ClosedTradeRecord(BaseModel):
     trade_id: str
     ticker: str
     strategy: str
-    total_pnl: float
+    total_pnl: float | None = None
     closed_at: str
     entry_date: str
 

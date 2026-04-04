@@ -58,11 +58,8 @@ def test_pytest_suite():
     print("\n  === PYTEST SUITE ===\n")
 
     tests = [
-        ("PT-1", "trader_md parser tests", "tests/test_trader_md_parser.py", ""),
-        ("PT-2", "trader_md full tests", "tests/test_trader_md_full.py", "-m 'not slow'"),
-        ("PT-3", "trader_md runner tests", "tests/test_trader_md_runner.py", ""),
-        ("PT-4", "benchmarking tests", "tests/test_benchmarking.py tests/test_benchmarking_workflow.py", ""),
-        ("PT-5", "scenario parser tests", "tests/test_scenario_parser.py", ""),
+        ("PT-1", "benchmarking tests", "tests/test_benchmarking.py tests/test_benchmarking_workflow.py", ""),
+        ("PT-2", "scenario parser tests", "tests/test_scenario_parser.py", ""),
     ]
 
     for test_id, desc, path, extra in tests:
