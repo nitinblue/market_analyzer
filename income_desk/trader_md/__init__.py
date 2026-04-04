@@ -1,14 +1,11 @@
-from income_desk.trader_md.models import *  # noqa: F401,F403
-from income_desk.trader_md.parser import (  # noqa: F401
-    parse_workflow,
-    parse_broker,
-    parse_universe,
-    parse_risk,
-    resolve_references,
-)
-from income_desk.trader_md.runner import (  # noqa: F401
-    TradingRunner,
-    ExecutionContext,
-    ExecutionReport,
-    StepResult,
-)
+"""
+trader_md — Markdown-driven trading workflows.
+
+The trader_md orchestration engine (parser, runner, gates, bindings) has moved
+to CoTrader (eTrading). income-desk remains the stateless function library.
+
+For the MD workflow engine, see: https://github.com/nitinblue/eTrading
+
+The spec files in specs/ remain here as reference documentation for the
+.workflow.md, .broker.md, .risk.md, .universe.md, and .scenario.md formats.
+"""

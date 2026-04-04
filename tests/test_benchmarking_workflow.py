@@ -210,18 +210,3 @@ def test_run_benchmark_no_data():
 # Workflow MD validation
 # ---------------------------------------------------------------------------
 
-
-def test_benchmark_workflow_validates():
-    """The benchmarking.workflow.md parses without errors."""
-    from pathlib import Path
-
-    from income_desk.trader_md.parser import parse_workflow
-
-    md_path = Path(__file__).parent.parent / "income_desk" / "trader_md" / "workflows" / "benchmarking.workflow.md"
-    if not md_path.exists():
-        pytest.skip("benchmarking.workflow.md not found")
-
-    plan = parse_workflow(md_path)
-    assert plan.name == "benchmarking_report"
-    assert len(plan.phases) >= 1
-    assert plan.phases[0].steps[0].workflow == "run_benchmark"
